@@ -1,0 +1,7 @@
+include: package:flutter_lints/flutter.yaml
+
+linter:
+  rules:
+    # Kept permissive - this is a business app, not a published package.
+    prefer_const_constructors: false
+    prefer_const_literals_to_create_immutables: false

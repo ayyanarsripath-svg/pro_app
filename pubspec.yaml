@@ -1,0 +1,67 @@
+name: professional_mobiles
+description: "Professional Mobiles & Laptop Service - Offline Business Management App (Service, Sales, 2nd Hand Mobile, Inventory, Profit & Loss)"
+publish_to: 'none'
+version: 1.0.0+1
+
+environment:
+  sdk: '>=3.3.0 <4.0.0'
+
+dependencies:
+  flutter:
+    sdk: flutter
+
+  cupertino_icons: ^1.0.6
+
+  # Local offline database
+  sqflite: ^2.3.3+1
+  path: ^1.9.0
+  path_provider: ^2.1.3
+
+  # State management (simple, no server dependency)
+  provider: ^6.1.2
+
+  # IDs / formatting
+  uuid: ^4.4.0
+  intl: ^0.19.0
+
+  # PDF generation + printing (A5 bills)
+  pdf: ^3.11.1
+  printing: ^5.13.1
+
+  # Photos (service photos, 2nd hand phone photos)
+  image_picker: ^1.1.2
+
+  # Charts (simple P&L charts)
+  fl_chart: ^0.68.0
+
+  # WhatsApp / SMS share (opens native share sheet or wa.me / sms: links)
+  url_launcher: ^6.3.0
+
+  # Optional Google Drive backup (requires the shop owner's own Google Cloud
+  # OAuth client id - see README "Google Drive Backup Setup")
+  google_sign_in: ^6.2.1
+  googleapis: ^13.2.0
+  googleapis_auth: ^1.6.0
+  http: ^1.2.1
+
+  # Admin PIN hashing
+  crypto: ^3.0.3
+
+dev_dependencies:
+  flutter_test:
+    sdk: flutter
+  flutter_lints: ^4.0.0
+  flutter_launcher_icons: ^0.13.1
+
+flutter:
+  uses-material-design: true
+  assets:
+    - assets/images/logo_color.png
+    - assets/images/logo_bw.png
+    - assets/images/logo_bw_1bit.png
+
+flutter_launcher_icons:
+  android: true
+  ios: false
+  image_path: "assets/images/app_icon.png"
+  min_sdk_android: 21
