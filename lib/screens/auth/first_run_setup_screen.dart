@@ -3,7 +3,7 @@ import 'package:provider/provider.dart';
 
 import '../../core/theme/app_theme.dart';
 import '../../core/services/auth_service.dart';
-
+import '../../app.dart';
 /// Shown exactly once, the very first time the app is opened on a device -
 /// creates the Admin account that owns the Admin PIN gate (spec section 28).
 class FirstRunSetupScreen extends StatefulWidget {
@@ -100,13 +100,17 @@ class _FirstRunSetupScreenState extends State<FirstRunSetupScreen> {
   }
 
   Future<void> _submit() async {
-    if (!_formKey.currentState!.validate()) return;
-    setState(() => _saving = true);
-    await context.read<AuthService>().setupFirstAdmin(
-          name: _nameCtrl.text.trim(),
-          pin: _pinCtrl.text.trim(),
-          phone: _phoneCtrl.text.trim().isEmpty ? null : _phoneCtrl.text.trim(),
-        );
-    if (mounted) setState(() => _saving = false);
-  }
-}
+     if (!_formKey.currentState!.validate()) return;
+     setState(() => _saving = true);
+     await context.read<AuthService>().setupFirstAdmin(
+           name: _nameCtrl.text.trim(),
+           pin: _pinCtrl.text.trim(),
+           phone: _phoneCtrl.text.trim().isEmpty ? null : _phoneCtrl.text.trim(),
+         );
+     if (mounted) {
+       Navigator.of(context).pushAndRemoveUntil(
+         MaterialPageRoute(builder: (_) => const ProfessionalMobilesApp()),
+         (route) => false,
+       );
+     }
+   }
