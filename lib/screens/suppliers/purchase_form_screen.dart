@@ -145,7 +145,7 @@ class _PurchaseFormScreenState extends State<PurchaseFormScreen> {
                     value: selected,
                     isExpanded: true,
                     items: list
-                        .map<DropdownMenuItem>((item) => DropdownMenuItem(value: item, child: Text(item.name as String)))
+                        .map<DropdownMenuItem>((item) => DropdownMenuItem(value: item, child: Text((item as dynamic).name as String)))
                         .toList(),
                     onChanged: (v) => setLocalState(() => selected = v),
                   ),
