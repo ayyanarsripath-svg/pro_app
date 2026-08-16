@@ -114,3 +114,4 @@ class _FirstRunSetupScreenState extends State<FirstRunSetupScreen> {
        );
      }
    }
+}
