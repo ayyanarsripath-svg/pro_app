@@ -19,7 +19,7 @@ jobs:
       - name: Add missing android platform files if needed
         run: |
           if [ ! -d "android" ]; then
-            flutter create --platforms=android .
+            flutter create --platforms=android --project-name=pro_app .
           fi
 
       - run: flutter pub get
