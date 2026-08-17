@@ -9,6 +9,7 @@ import 'package:provider/provider.dart';
 
 import '../../core/repositories/customer_repository.dart';
 import '../../core/repositories/service_repository.dart';
+import 'package:pdf/pdf.dart';
 import '../../core/repositories/spare_part_repository.dart';
 import '../../core/repositories/warranty_repository.dart';
 import '../../core/services/auth_service.dart';
