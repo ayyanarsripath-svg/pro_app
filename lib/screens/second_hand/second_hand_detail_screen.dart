@@ -321,7 +321,7 @@ class _SecondHandDetailScreenState extends State<SecondHandDetailScreen> {
     }
     final customer = sale.customerId != null ? await _customerRepo.byId(sale.customerId!) : null;
     final bytes = await _pdfService.buildSecondHandSalesBill(phone: phone, sale: sale, customer: customer);
-    await Printing.layoutPdf(onLayout: (format) async => bytes);
+    await Printing.layoutPdf(format: PdfPageFormat.a5, onLayout: (format) async => bytes);
   }
 
   Future<void> _customerReturn() async {
