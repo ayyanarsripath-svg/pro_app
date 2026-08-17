@@ -77,6 +77,6 @@ class _SalesListScreenState extends State<SalesListScreen> {
     final items = await _repo.itemsFor(bill.id);
     final customer = bill.customerId != null ? await _customerRepo.byId(bill.customerId!) : null;
     final bytes = await _pdfService.buildSalesBill(bill: bill, items: items, customer: customer);
-    await Printing.layoutPdf(onLayout: (format) async => bytes);
+    await Printing.layoutPdf(format: PdfPageFormat.a5, onLayout: (format) async => bytes);
   }
 }
