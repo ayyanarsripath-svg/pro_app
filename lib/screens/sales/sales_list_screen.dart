@@ -1,5 +1,6 @@
 import 'package:flutter/material.dart';
 import 'package:printing/printing.dart';
+import 'package:pdf/pdf.dart';
 
 import '../../core/repositories/customer_repository.dart';
 import '../../core/repositories/sales_repository.dart';
