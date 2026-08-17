@@ -49,11 +49,12 @@ class _PinLoginScreenState extends State<PinLoginScreen> {
                         hintText: '••••',
                       ),
                       onSubmitted: (_) => _submit(),
+                      onChanged: (v) => _submit(auto: true),
                     ),
                     const SizedBox(height: 12),
                     SizedBox(
                       width: double.infinity,
-                      child: ElevatedButton(
+                                                  child: ElevatedButton(
                         onPressed: _checking ? null : _submit,
                         child: _checking
                             ? const SizedBox(height: 18, width: 18, child: CircularProgressIndicator(strokeWidth: 2, color: Colors.white))
@@ -70,19 +71,23 @@ class _PinLoginScreenState extends State<PinLoginScreen> {
     );
   }
 
-  Future<void> _submit() async {
-    setState(() {
-      _checking = true;
-      _error = null;
-    });
-    final ok = await context.read<AuthService>().loginWithPin(_pinCtrl.text.trim());
-    if (!mounted) return;
-    setState(() {
-      _checking = false;
-      if (!ok) {
-        _error = 'Incorrect PIN';
-        _pinCtrl.clear();
-      }
-    });
-  }
+Future<void> _submit({bool auto = false}) async {
+      final value = _pinCtrl.text.trim();
+      if (auto && value.length < 4) return;
+      if (_checking) return;
+      setState(() {
+              _checking = true;
+              _error = null;
+      });
+      final ok = await context.read<AuthService>().loginWithPin(value);
+      if (!mounted) return;
+      setState(() {
+              _checking = false;
+              if (!ok) {
+                        if (!auto || value.length >= 6) {
+                                    _error = 'Incorrect PIN';
+                                    _pinCtrl.clear();
+                        }
+              }
+      });
 }
