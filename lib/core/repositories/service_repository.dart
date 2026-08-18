@@ -61,7 +61,7 @@ class ServiceRepository {
       accMemoryCard: accMemoryCard,
       accOther: accOther,
       technician: technician,
-      status: ServiceStatus.received,
+      status: ServiceStatus.checking,
       labourCost: labourCost,
       warranty: warranty,
       warrantyPeriod: warrantyPeriod,
@@ -80,7 +80,7 @@ class ServiceRepository {
     await db.insert('service_status_history', ServiceStatusHistory(
       id: newId(),
       serviceId: service.id,
-      status: ServiceStatus.received,
+      status: ServiceStatus.checking,
       changedAt: now,
     ).toMap());
 
