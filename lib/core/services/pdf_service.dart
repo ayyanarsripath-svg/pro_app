@@ -260,6 +260,14 @@ class PdfService {
                       pw.Text(formatCurrency(amount), style: pw.TextStyle(fontSize: 12, fontWeight: pw.FontWeight.bold)),
                     ]);
 
+        /// The amount to print as TOTAL AMOUNT on the service bill. The shop
+        /// only fills in the real Final Amount later (via Edit Service), so a
+        /// freshly created job has finalAmount == 0 - printing that as the
+        /// total would show "TOTAL AMOUNT ₹0" and a negative balance. Fall
+        /// back to the Estimated Amount quoted at intake until a real Final
+        /// Amount is set.
+        double _billTotal(ServiceJob service) => service.finalAmount > 0 ? service.finalAmount : service.estimatedAmount;
+
         /// Service Job Card payment summary: TOTAL AMOUNT minus ADVANCE AMOUNT
         /// equals BALANCE AMOUNT, laid out as a centered subtraction so the
         /// customer can see exactly how the balance was worked out at a glance
@@ -400,11 +408,16 @@ class PdfService {
                                                                             ]),
                                                   pw.SizedBox(height: 3),
                                                   // TOTAL AMOUNT - ADVANCE AMOUNT = BALANCE AMOUNT, centered so the
-                                                  // customer can see the working at a glance.
+                                                  // customer can see the working at a glance. Before the shop has
+                                                  // set a Final Amount (fresh intake, still Checking/Repairing),
+                                                  // finalAmount is 0 - fall back to the Estimated Amount so the
+                                                  // bill never shows a ₹0 total / negative balance right after
+                                                  // intake, and always recompute the balance here rather than
+                                                  // trusting the possibly-stale stored value.
                                                   _serviceAmountSummary(
-                                                        totalAmount: service.finalAmount,
+                                                        totalAmount: _billTotal(service),
                                                         advanceAmount: service.paid,
-                                                        balanceAmount: service.balance,
+                                                        balanceAmount: _billTotal(service) - service.paid,
                                                         ),
                                                   pw.SizedBox(height: 3),
                                                   _box('DELIVERY', [
@@ -412,7 +425,11 @@ class PdfService {
                                                               'Expected Delivery',
                                                               service.expectedDate != null ? formatDate(service.expectedDate!) : '-',
                                                               'Status',
-                                                              service.deliveryStatus,
+                                                              // Print-friendly label: a job still awaiting delivery reads
+                                                              // as "On Working" on the bill (rather than the internal
+                                                              // "Pending" default) since the customer sees this while the
+                                                              // repair is actively in progress, not just sitting idle.
+                                                              service.deliveryStatus == 'Pending' ? 'On Working' : service.deliveryStatus,
                                                               labelWidth: 78,
                                                               ),
                                                         ]),
