@@ -105,22 +105,45 @@ class PdfService {
                             );
         }
 
+        /// A shaded header strip above the body gives each section a crisp,
+        /// form-like edge (still pure greyscale so it stays clean on a plain
+        /// B/W printer) instead of the previous plain inline title line.
         pw.Widget _box(String title, List<pw.Widget> children) {
                   return pw.Container(
                               width: double.infinity,
-                              margin: const pw.EdgeInsets.only(bottom: 4),
-                              padding: const pw.EdgeInsets.all(4),
+                              margin: const pw.EdgeInsets.only(bottom: 5),
                               decoration: pw.BoxDecoration(
-                                            border: pw.Border.all(color: PdfColors.grey600, width: 0.7),
+                                            border: pw.Border.all(color: PdfColors.grey700, width: 0.7),
                                             borderRadius: const pw.BorderRadius.all(pw.Radius.circular(3)),
                                           ),
                               child: pw.Column(
                                             crossAxisAlignment: pw.CrossAxisAlignment.start,
                                             children: [
-                                                            pw.Text(title,
-                                                                                  style: pw.TextStyle(fontSize: 8.5, fontWeight: pw.FontWeight.bold, color: PdfColors.grey800)),
-                                                            pw.SizedBox(height: 2),
-                                                            ...children,
+                                                            pw.Container(
+                                                                              width: double.infinity,
+                                                                              padding: const pw.EdgeInsets.symmetric(horizontal: 5, vertical: 2.2),
+                                                                              decoration: const pw.BoxDecoration(
+                                                                                                color: PdfColors.grey300,
+                                                                                                borderRadius: pw.BorderRadius.only(
+                                                                                                                  topLeft: pw.Radius.circular(2.3),
+                                                                                                                  topRight: pw.Radius.circular(2.3),
+                                                                                                                ),
+                                                                                              ),
+                                                                              child: pw.Text(title,
+                                                                                                style: pw.TextStyle(
+                                                                                                                  fontSize: 8.3,
+                                                                                                                  fontWeight: pw.FontWeight.bold,
+                                                                                                                  color: PdfColors.grey900,
+                                                                                                                  letterSpacing: 0.3,
+                                                                                                                )),
+                                                                            ),
+                                                            pw.Padding(
+                                                                              padding: const pw.EdgeInsets.fromLTRB(5, 3, 5, 4),
+                                                                              child: pw.Column(
+                                                                                                crossAxisAlignment: pw.CrossAxisAlignment.start,
+                                                                                                children: children,
+                                                                                              ),
+                                                                            ),
                                                           ],
                                           ),
                             );
@@ -142,35 +165,49 @@ class PdfService {
                             );
         }
 
-        pw.Widget _kv(String k, String? v) => pw.Padding(
-                      padding: const pw.EdgeInsets.only(bottom: 1.5),
-                      child: _kvText(k, v),
+        pw.Widget _kv(String k, String? v, {double labelWidth = 46}) => pw.Padding(
+                      padding: const pw.EdgeInsets.only(bottom: 2),
+                      child: _kvText(k, v, labelWidth),
                     );
 
-        /// Two key/value fields sharing a single row - keeps the right half of
-        /// the A5 sheet from sitting empty when both fields are short, and cuts
-        /// the number of printed lines (and therefore the page count) roughly
-        /// in half versus stacking every field on its own line.
-        pw.Widget _kv2(String k1, String? v1, String k2, String? v2) => pw.Padding(
-                      padding: const pw.EdgeInsets.only(bottom: 1.5),
+        /// Two key/value fields sharing a single row, split by a thin vertical
+        /// rule - keeps the right half of the A5 sheet from sitting empty when
+        /// both fields are short, cuts the number of printed lines (and
+        /// therefore the page count) roughly in half versus stacking every
+        /// field on its own line, and makes it visually obvious where one
+        /// field ends and the next begins.
+        pw.Widget _kv2(String k1, String? v1, String k2, String? v2, {double labelWidth = 46}) => pw.Padding(
+                      padding: const pw.EdgeInsets.only(bottom: 2),
                       child: pw.Row(
                                       crossAxisAlignment: pw.CrossAxisAlignment.start,
                                       children: [
-                                                        pw.Expanded(child: _kvText(k1, v1)),
-                                                        pw.SizedBox(width: 6),
-                                                        pw.Expanded(child: _kvText(k2, v2)),
+                                                        pw.Expanded(child: _kvText(k1, v1, labelWidth)),
+                                                        pw.Container(
+                                                                          width: 0.7,
+                                                                          height: 11,
+                                                                          margin: const pw.EdgeInsets.symmetric(horizontal: 6),
+                                                                          color: PdfColors.grey500,
+                                                                        ),
+                                                        pw.Expanded(child: _kvText(k2, v2, labelWidth)),
                                                       ],
                                     ),
                     );
 
-        pw.Widget _kvText(String k, String? v) => pw.RichText(
-                      text: pw.TextSpan(
-                                      style: const pw.TextStyle(fontSize: 9, color: PdfColors.black),
-                                      children: [
-                                                        pw.TextSpan(text: '$k: ', style: pw.TextStyle(fontWeight: pw.FontWeight.bold)),
-                                                        pw.TextSpan(text: v?.isNotEmpty == true ? v : '-'),
-                                                      ],
-                                    ),
+        /// Fixed-width label column so the ":" lines up neatly from row to row
+        /// within a section, instead of the colon landing wherever the label
+        /// text happens to end.
+        pw.Widget _kvText(String k, String? v, [double labelWidth = 46]) => pw.Row(
+                      crossAxisAlignment: pw.CrossAxisAlignment.start,
+                      children: [
+                                        pw.SizedBox(
+                                                          width: labelWidth,
+                                                          child: pw.Text(k, style: pw.TextStyle(fontSize: 9, fontWeight: pw.FontWeight.bold)),
+                                                        ),
+                                        const pw.Text(':  ', style: pw.TextStyle(fontSize: 9, fontWeight: pw.FontWeight.bold)),
+                                        pw.Expanded(
+                                                          child: pw.Text(v?.isNotEmpty == true ? v! : '-', style: const pw.TextStyle(fontSize: 9)),
+                                                        ),
+                                      ],
                     );
 
         pw.Widget _signatures() {
@@ -234,8 +271,8 @@ class PdfService {
         }) {
                   return pw.Center(
                               child: pw.Container(
-                                            width: 230,
-                                            padding: const pw.EdgeInsets.symmetric(horizontal: 10, vertical: 6),
+                                            width: 270,
+                                            padding: const pw.EdgeInsets.symmetric(horizontal: 12, vertical: 6),
                                             decoration: pw.BoxDecoration(
                                                           color: PdfColors.grey200,
                                                           border: pw.Border.all(color: PdfColors.grey700, width: 0.7),
@@ -274,8 +311,35 @@ class PdfService {
                                     ),
                     );
 
+        /// Turns a free-text warranty period like "1 month", "6 Months" or
+        /// "30 days" into the actual covered date range, counted from
+        /// [start] - e.g. "1 month" starting 01/01/2026 prints as
+        /// "01/01/2026 to 31/01/2026" instead of the vague raw text, so there's
+        /// no ambiguity about when the warranty actually ends. Falls back to
+        /// the raw text unchanged if it doesn't match a recognisable pattern.
+        String _warrantyRangeText(String? period, DateTime start) {
+                  final raw = period?.trim() ?? '';
+                  if (raw.isEmpty) return '-';
+                  final match = RegExp(r'^(\d+)\s*(day|days|week|weeks|month|months|mon|year|years|yr|yrs)$', caseSensitive: false)
+                                    .firstMatch(raw);
+                  if (match == null) return raw;
+                  final n = int.parse(match.group(1)!);
+                  final unit = match.group(2)!.toLowerCase();
+                  DateTime end;
+                  if (unit.startsWith('day')) {
+                              end = start.add(Duration(days: n - 1));
+                  } else if (unit.startsWith('week')) {
+                              end = start.add(Duration(days: n * 7 - 1));
+                  } else if (unit.startsWith('year') || unit.startsWith('yr')) {
+                              end = DateTime(start.year + n, start.month, start.day).subtract(const Duration(days: 1));
+                  } else {
+                              end = DateTime(start.year, start.month + n, start.day).subtract(const Duration(days: 1));
+                  }
+                  return '${formatDate(start)} to ${formatDate(end)}';
+        }
+
         // -----------------------------------------------------------------
-        // SERVICE JOB CARD (spec sections 19-25)
+        // SERVICE JOB CARD / BILL RECEIPT (spec sections 19-25)
         // -----------------------------------------------------------------
         Future<Uint8List> buildServiceBill({
                   required ServiceJob service,
@@ -285,13 +349,17 @@ class PdfService {
                   final logo = await _logo();
                   final termsWidget = await _termsBox();
                   final doc = pw.Document(theme: await _theme());
+                  // Warranty counts from the actual/expected delivery date when
+                  // known (that's when the customer takes the device back), and
+                  // falls back to the bill date otherwise.
+                  final warrantyStart = service.actualDate ?? service.expectedDate ?? service.createdAt;
 
                   doc.addPage(
                               pw.MultiPage(
                                             pageFormat: PdfPageFormat.a5,
                                             margin: const pw.EdgeInsets.all(14),
                                             build: (context) => [
-                                                            _header(shop, logo, 'SERVICE JOB CARD'),
+                                                            _header(shop, logo, 'BILL RECEIPT'),
                                                             pw.SizedBox(height: 3),
                                                             pw.Row(
                                                                               mainAxisAlignment: pw.MainAxisAlignment.spaceBetween,
@@ -311,8 +379,8 @@ class PdfService {
                                                                               _kv('IMEI', service.imei),
                                                                             ]),
                                                             _box('ISSUE DETAILS', [
-                                                                              _kv('Fault / Complaint', service.complaint),
-                                                                              _kv2('Condition', service.deviceCondition, 'Existing Damage', service.existingDamage),
+                                                                              _kv('Fault / Complaint', service.complaint, labelWidth: 78),
+                                                                              _kv2('Condition', service.deviceCondition, 'Existing Damage', service.existingDamage, labelWidth: 78),
                                                                             ]),
                                                             _box('ACCESSORIES & WARRANTY', [
                                                                               pw.Wrap(spacing: 10, children: [
@@ -323,9 +391,12 @@ class PdfService {
                                                                                                   if ((service.accOther ?? '').isNotEmpty) pw.Text('Other: ${service.accOther}', style: const pw.TextStyle(fontSize: 9)),
                                                                                                 ]),
                                                                               pw.SizedBox(height: 1),
-                                                                              service.warranty
-                                                                                                  ? _kv2('Warranty', 'Yes', 'Period', service.warrantyPeriod)
-                                                                                                  : _kv('Warranty', 'No'),
+                                                                              // Period gets its own full-width line (not paired with
+                                                                              // Warranty) since the computed date range ("01/01/2026 to
+                                                                              // 31/01/2026") needs more room than a half column gives.
+                                                                              _kv('Warranty', service.warranty ? 'Yes' : 'No'),
+                                                                              if (service.warranty)
+                                                                                                  _kv('Period', _warrantyRangeText(service.warrantyPeriod, warrantyStart)),
                                                                             ]),
                                                   pw.SizedBox(height: 3),
                                                   // TOTAL AMOUNT - ADVANCE AMOUNT = BALANCE AMOUNT, centered so the
@@ -342,6 +413,7 @@ class PdfService {
                                                               service.expectedDate != null ? formatDate(service.expectedDate!) : '-',
                                                               'Status',
                                                               service.deliveryStatus,
+                                                              labelWidth: 78,
                                                               ),
                                                         ]),
                                                   pw.SizedBox(height: 2),
@@ -480,20 +552,20 @@ class PdfService {
                                                 ),
                                           pw.SizedBox(height: 6),
                                           _box('CUSTOMER', [
-                                                _kv('Name', customer?.name ?? 'Walk-in Customer'),
-                                                _kv('Phone', customer?.phone),
+                                                _kv('Name', customer?.name ?? 'Walk-in Customer', labelWidth: 75),
+                                                _kv('Phone', customer?.phone, labelWidth: 75),
                                                 ]),
                                           _box('DEVICE', [
-                                                _kv('Brand', phone.brand),
-                                                _kv('Model', phone.model),
-                                                _kv('IMEI', phone.imei1),
-                                                _kv('RAM / Storage', '${phone.ram ?? '-'} / ${phone.storage ?? '-'}'),
-                                                _kv('Condition', phone.conditionGrade),
-                                                _kv('Battery Health', phone.batteryHealth),
+                                                _kv('Brand', phone.brand, labelWidth: 75),
+                                                _kv('Model', phone.model, labelWidth: 75),
+                                                _kv('IMEI', phone.imei1, labelWidth: 75),
+                                                _kv('RAM / Storage', '${phone.ram ?? '-'} / ${phone.storage ?? '-'}', labelWidth: 75),
+                                                _kv('Condition', phone.conditionGrade, labelWidth: 75),
+                                                _kv('Battery Health', phone.batteryHealth, labelWidth: 75),
                                                 ]),
                                           _box('WARRANTY', [
-                                                _kv('Warranty', sale.warranty ? 'Yes' : 'No'),
-                                                if (sale.warranty) _kv('Period', sale.warrantyPeriod),
+                                                _kv('Warranty', sale.warranty ? 'Yes' : 'No', labelWidth: 75),
+                                                if (sale.warranty) _kv('Period', sale.warrantyPeriod, labelWidth: 75),
                                                 ]),
                                           pw.SizedBox(height: 4),
                                           _paymentSummary(finalAmount: sale.salePrice, paid: sale.paid, balance: sale.balance),
