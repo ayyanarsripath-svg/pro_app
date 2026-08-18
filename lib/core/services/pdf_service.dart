@@ -203,7 +203,7 @@ class PdfService {
                                                           width: labelWidth,
                                                           child: pw.Text(k, style: pw.TextStyle(fontSize: 9, fontWeight: pw.FontWeight.bold)),
                                                         ),
-                                        const pw.Text(':  ', style: pw.TextStyle(fontSize: 9, fontWeight: pw.FontWeight.bold)),
+                                        pw.Text(':  ', style: pw.TextStyle(fontSize: 9, fontWeight: pw.FontWeight.bold)),
                                         pw.Expanded(
                                                           child: pw.Text(v?.isNotEmpty == true ? v! : '-', style: const pw.TextStyle(fontSize: 9)),
                                                         ),
