@@ -138,26 +138,44 @@ class PdfService {
                                             border: pw.Border.all(color: PdfColors.grey600, width: 0.7),
                                             borderRadius: const pw.BorderRadius.all(pw.Radius.circular(3)),
                                           ),
-                              child: pw.Image(pw.MemoryImage(bytes), width: 377, height: 117.6, fit: pw.BoxFit.fitWidth),
+                              child: pw.Image(pw.MemoryImage(bytes), width: 344, height: 107.3, fit: pw.BoxFit.fitWidth),
                             );
         }
 
         pw.Widget _kv(String k, String? v) => pw.Padding(
                       padding: const pw.EdgeInsets.only(bottom: 1.5),
-                      child: pw.RichText(
-                                      text: pw.TextSpan(
-                                                        style: const pw.TextStyle(fontSize: 9, color: PdfColors.black),
-                                                        children: [
-                                                                            pw.TextSpan(text: '$k: ', style: pw.TextStyle(fontWeight: pw.FontWeight.bold)),
-                                                                            pw.TextSpan(text: v?.isNotEmpty == true ? v : '-'),
-                                                                          ],
-                                                      ),
+                      child: _kvText(k, v),
+                    );
+
+        /// Two key/value fields sharing a single row - keeps the right half of
+        /// the A5 sheet from sitting empty when both fields are short, and cuts
+        /// the number of printed lines (and therefore the page count) roughly
+        /// in half versus stacking every field on its own line.
+        pw.Widget _kv2(String k1, String? v1, String k2, String? v2) => pw.Padding(
+                      padding: const pw.EdgeInsets.only(bottom: 1.5),
+                      child: pw.Row(
+                                      crossAxisAlignment: pw.CrossAxisAlignment.start,
+                                      children: [
+                                                        pw.Expanded(child: _kvText(k1, v1)),
+                                                        pw.SizedBox(width: 6),
+                                                        pw.Expanded(child: _kvText(k2, v2)),
+                                                      ],
+                                    ),
+                    );
+
+        pw.Widget _kvText(String k, String? v) => pw.RichText(
+                      text: pw.TextSpan(
+                                      style: const pw.TextStyle(fontSize: 9, color: PdfColors.black),
+                                      children: [
+                                                        pw.TextSpan(text: '$k: ', style: pw.TextStyle(fontWeight: pw.FontWeight.bold)),
+                                                        pw.TextSpan(text: v?.isNotEmpty == true ? v : '-'),
+                                                      ],
                                     ),
                     );
 
         pw.Widget _signatures() {
                   return pw.Padding(
-                              padding: const pw.EdgeInsets.only(top: 10),
+                              padding: const pw.EdgeInsets.only(top: 6),
                               child: pw.Row(
                                             mainAxisAlignment: pw.MainAxisAlignment.spaceBetween,
                                             children: [
@@ -191,7 +209,7 @@ class PdfService {
                               child: pw.Row(
                                             mainAxisAlignment: pw.MainAxisAlignment.spaceBetween,
                                             children: [
-                                                            _amountBlock('FINAL AMOUNT', finalAmount),
+                                                            _amountBlock('TOTAL AMOUNT', finalAmount),
                                                             _amountBlock('PAID', paid),
                                                             _amountBlock(balance > 0 ? 'BALANCE (PENDING)' : 'BALANCE', balance),
                                                           ],
@@ -204,6 +222,57 @@ class PdfService {
                       pw.SizedBox(height: 2),
                       pw.Text(formatCurrency(amount), style: pw.TextStyle(fontSize: 12, fontWeight: pw.FontWeight.bold)),
                     ]);
+
+        /// Service Job Card payment summary: TOTAL AMOUNT minus ADVANCE AMOUNT
+        /// equals BALANCE AMOUNT, laid out as a centered subtraction so the
+        /// customer can see exactly how the balance was worked out at a glance
+        /// (e.g. Total 1200 - Advance 500 = Balance 700).
+        pw.Widget _serviceAmountSummary({
+                  required double totalAmount,
+                  required double advanceAmount,
+                  required double balanceAmount,
+        }) {
+                  return pw.Center(
+                              child: pw.Container(
+                                            width: 230,
+                                            padding: const pw.EdgeInsets.symmetric(horizontal: 10, vertical: 6),
+                                            decoration: pw.BoxDecoration(
+                                                          color: PdfColors.grey200,
+                                                          border: pw.Border.all(color: PdfColors.grey700, width: 0.7),
+                                                          borderRadius: const pw.BorderRadius.all(pw.Radius.circular(3)),
+                                                        ),
+                                            child: pw.Column(
+                                                          children: [
+                                                                        _amountLine('TOTAL AMOUNT', totalAmount),
+                                                                        _amountLine('- ADVANCE AMOUNT', advanceAmount),
+                                                                        pw.Container(
+                                                                                      margin: const pw.EdgeInsets.symmetric(vertical: 2.5),
+                                                                                      height: 0.7,
+                                                                                      color: PdfColors.grey700,
+                                                                                    ),
+                                                                        _amountLine(
+                                                                                      balanceAmount > 0 ? 'BALANCE AMOUNT (PENDING)' : 'BALANCE AMOUNT',
+                                                                                      balanceAmount,
+                                                                                      emphasize: true,
+                                                                                    ),
+                                                                      ],
+                                                        ),
+                                          ),
+                            );
+        }
+
+        pw.Widget _amountLine(String label, double amount, {bool emphasize = false}) => pw.Padding(
+                      padding: const pw.EdgeInsets.symmetric(vertical: 1),
+                      child: pw.Row(
+                                      mainAxisAlignment: pw.MainAxisAlignment.spaceBetween,
+                                      children: [
+                                                        pw.Text(label,
+                                                                          style: pw.TextStyle(fontSize: emphasize ? 9 : 8, fontWeight: pw.FontWeight.bold)),
+                                                        pw.Text(formatCurrency(amount),
+                                                                          style: pw.TextStyle(fontSize: emphasize ? 11 : 9, fontWeight: pw.FontWeight.bold)),
+                                                      ],
+                                    ),
+                    );
 
         // -----------------------------------------------------------------
         // SERVICE JOB CARD (spec sections 19-25)
@@ -232,19 +301,18 @@ class PdfService {
                                                                                                 ],
                                                                             ),
                                                             pw.SizedBox(height: 4),
-                                                            _box('CUSTOMER DETAILS', [
-                                                                              _kv('Name', customer.name),
-                                                                              _kv('Phone', customer.phone),
-                                                                            ]),
-                                                            _box('DEVICE DETAILS', [
-                                                                              _kv('Mobile', service.mobileName),
-                                                                              _kv('Model', service.model),
+                                                            // Customer + device details share one box, two fields per row -
+                                                            // this alone removes an entire box's border/title/padding
+                                                            // overhead and uses the empty right half of the sheet, which
+                                                            // is most of what was pushing the card onto a second page.
+                                                            _box('CUSTOMER & DEVICE DETAILS', [
+                                                                              _kv2('Name', customer.name, 'Phone', customer.phone),
+                                                                              _kv2('Mobile', service.mobileName, 'Model', service.model),
                                                                               _kv('IMEI', service.imei),
                                                                             ]),
                                                             _box('ISSUE DETAILS', [
                                                                               _kv('Fault / Complaint', service.complaint),
-                                                                              _kv('Condition', service.deviceCondition),
-                                                                              _kv('Existing Damage', service.existingDamage),
+                                                                              _kv2('Condition', service.deviceCondition, 'Existing Damage', service.existingDamage),
                                                                             ]),
                                                             _box('ACCESSORIES & WARRANTY', [
                                                                               pw.Wrap(spacing: 10, children: [
@@ -255,15 +323,26 @@ class PdfService {
                                                                                                   if ((service.accOther ?? '').isNotEmpty) pw.Text('Other: ${service.accOther}', style: const pw.TextStyle(fontSize: 9)),
                                                                                                 ]),
                                                                               pw.SizedBox(height: 1),
-                                                                              _kv('Warranty', service.warranty ? 'Yes' : 'No'),
-                                                                              if (service.warranty) _kv('Period', service.warrantyPeriod),
+                                                                              service.warranty
+                                                                                                  ? _kv2('Warranty', 'Yes', 'Period', service.warrantyPeriod)
+                                                                                                  : _kv('Warranty', 'No'),
                                                                             ]),
-                                                  pw.SizedBox(height: 2),
-                                                  _paymentSummary(finalAmount: service.finalAmount, paid: service.paid, balance: service.balance),
-                                                  pw.SizedBox(height: 2),
+                                                  pw.SizedBox(height: 3),
+                                                  // TOTAL AMOUNT - ADVANCE AMOUNT = BALANCE AMOUNT, centered so the
+                                                  // customer can see the working at a glance.
+                                                  _serviceAmountSummary(
+                                                        totalAmount: service.finalAmount,
+                                                        advanceAmount: service.paid,
+                                                        balanceAmount: service.balance,
+                                                        ),
+                                                  pw.SizedBox(height: 3),
                                                   _box('DELIVERY', [
-                                                        _kv('Expected Delivery', service.expectedDate != null ? formatDate(service.expectedDate!) : '-'),
-                                                        _kv('Status', service.deliveryStatus),
+                                                        _kv2(
+                                                              'Expected Delivery',
+                                                              service.expectedDate != null ? formatDate(service.expectedDate!) : '-',
+                                                              'Status',
+                                                              service.deliveryStatus,
+                                                              ),
                                                         ]),
                                                   pw.SizedBox(height: 2),
                                                   termsWidget,
