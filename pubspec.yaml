@@ -59,6 +59,10 @@ flutter:
     - assets/images/logo_color.png
     - assets/images/logo_bw.png
     - assets/images/logo_bw_1bit.png
+  fonts:
+    - family: NotoSansTamil
+      fonts:
+        - asset: assets/fonts/NotoSansTamil-Regular.ttf
 
 flutter_launcher_icons:
   android: true
