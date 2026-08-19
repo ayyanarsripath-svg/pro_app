@@ -319,7 +319,7 @@ class PdfService {
                                     ),
                     );
 
-        /// Turns a free-text warranty period like "1 month", "6 Months" or
+        String? _faultBreakdownText(String? raw) { if (raw == null || raw.trim().isEmpty) return null; final parts = raw.split('|').where((p) => p.trim().isNotEmpty).toList(); if (parts.length < 2) return null; final pieces = <String>[]; for (final p in parts) { final idx = p.indexOf(':'); if (idx < 0) continue; final name = p.substring(0, idx).trim(); final amt = double.tryParse(p.substring(idx + 1).trim()) ?? 0; pieces.add('$name ${amt.toStringAsFixed(amt == amt.roundToDouble() ? 0 : 2)}'); } if (pieces.length < 2) return null; return pieces.join(' + '); } /// Turns a free-text warranty period like "1 month", "6 Months" or
         /// "30 days" into the actual covered date range, counted from
         /// [start] - e.g. "1 month" starting 01/01/2026 prints as
         /// "01/01/2026 to 31/01/2026" instead of the vague raw text, so there's
