@@ -82,6 +82,20 @@ class WhatsAppSmsService {
       '⚠️ Note: Service முடிந்ததும் உங்களுக்கு WhatsApp மூலம் தகவல் தெரிவிக்கப்படும்.\n'
       '🙏 Thank you for choosing Professional Mobiles.\n'
       '📱 PROFESSIONAL MOBILES\n'
-      'Trusted Mobile Service Center';
+      'Trusted Mobile Service Center'; } String warrantyClaimMessage({required String customerName, required String referenceLabel, required String description}) { return '''
+      📱 PROFESSIONAL MOBILES
+      🛡️ Warranty Claim Confirmation
+      வணக்கம் 🙏 Dear Customer,
+      Your warranty claim has been recorded.
+      ━━━━━━━━━━━━━━
+      👤 Customer Name: $customerName
+      🧾 Reference: $referenceLabel
+      📝 Issue: $description
+      ━━━━━━━━━━━━━━
+      ✅ Status: WARRANTY CLAIMED
+      Our team will get in touch with you shortly regarding this claim.
+      🙏 Thank you for choosing Professional Mobiles.
+      📱 PROFESSIONAL MOBILES
+      Trusted Mobile Service Center''';
   }
 }
