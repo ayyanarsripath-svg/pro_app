@@ -325,7 +325,7 @@ class PdfService {
         /// "01/01/2026 to 31/01/2026" instead of the vague raw text, so there's
         /// no ambiguity about when the warranty actually ends. Falls back to
         /// the raw text unchanged if it doesn't match a recognisable pattern.
-        String _warrantyRangeText(String? period, DateTime start) {
+        pw.Widget _warrantyClaimedStamp() => pw.Container(width: double.infinity, margin: const pw.EdgeInsets.only(bottom: 5), padding: const pw.EdgeInsets.symmetric(vertical: 6), decoration: pw.BoxDecoration(border: pw.Border.all(color: PdfColors.red900, width: 1.6), borderRadius: const pw.BorderRadius.all(pw.Radius.circular(4))), child: pw.Center(child: pw.Text('WARRANTY CLAIMED', style: pw.TextStyle(fontSize: 18, fontWeight: pw.FontWeight.bold, color: PdfColors.red900, letterSpacing: 2)))); String _warrantyRangeText(String? period, DateTime start) {
                   final raw = period?.trim() ?? '';
                   if (raw.isEmpty) return '-';
                   final match = RegExp(r'^(\d+)\s*(day|days|week|weeks|month|months|mon|year|years|yr|yrs)$', caseSensitive: false)
@@ -352,7 +352,7 @@ class PdfService {
         Future<Uint8List> buildServiceBill({
                   required ServiceJob service,
                   required Customer customer,
-        List<ServiceSparePartUsage> partsUsed = const [],
+        List<ServiceSparePartUsage> partsUsed = const [], bool warrantyClaimed = false,
         }) async {
                   final shop = await _shopInfo();
                   final logo = await _logo();
@@ -368,7 +368,7 @@ class PdfService {
                                             pageFormat: PdfPageFormat.a5,
                                             margin: const pw.EdgeInsets.all(14),
                                             build: (context) => [
-                                                            _header(shop, logo, 'BILL RECEIPT'),
+                                                            _header(shop, logo, 'BILL RECEIPT'), if (warrantyClaimed) _warrantyClaimedStamp(),
                                                             pw.SizedBox(height: 3),
                                                             pw.Row(
                                                                               mainAxisAlignment: pw.MainAxisAlignment.spaceBetween,
@@ -460,7 +460,7 @@ class PdfService {
       // -----------------------------------------------------------------
       Future<Uint8List> buildSalesBill({
             required SalesBill bill,
-            required List<SalesBillItem> items,
+            required List<SalesBillItem> items, bool warrantyClaimed = false,
             Customer? customer,
       }) async {
             final shop = await _shopInfo();
@@ -475,7 +475,7 @@ class PdfService {
                               return pw.Column(
                                     crossAxisAlignment: pw.CrossAxisAlignment.start,
                                     children: [
-                                          _header(shop, logo, 'SALES BILL'),
+                                          _header(shop, logo, 'SALES BILL'), if (warrantyClaimed) _warrantyClaimedStamp(),
                                           pw.SizedBox(height: 4),
                                           pw.Row(
                                                 mainAxisAlignment: pw.MainAxisAlignment.spaceBetween,
@@ -550,7 +550,7 @@ class PdfService {
       // -----------------------------------------------------------------
       Future<Uint8List> buildSecondHandSalesBill({
             required SecondHandPhone phone,
-            required SecondHandSale sale,
+            required SecondHandSale sale, bool warrantyClaimed = false,
             Customer? customer,
       }) async {
             final shop = await _shopInfo();
@@ -565,7 +565,7 @@ class PdfService {
                               return pw.Column(
                                     crossAxisAlignment: pw.CrossAxisAlignment.start,
                                     children: [
-                                          _header(shop, logo, '2ND HAND MOBILE - SALES BILL'),
+                                          _header(shop, logo, '2ND HAND MOBILE - SALES BILL'), if (warrantyClaimed) _warrantyClaimedStamp(),
                                           pw.SizedBox(height: 4),
                                           pw.Row(
                                                 mainAxisAlignment: pw.MainAxisAlignment.spaceBetween,
