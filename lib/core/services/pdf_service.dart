@@ -390,7 +390,7 @@ class PdfService {
                                                                               _kv('Fault / Complaint', service.complaint, labelWidth: 78),
                                                                               _kv2('Condition', service.deviceCondition, 'Existing Damage', service.existingDamage, labelWidth: 78),
                                                                             ]),
-                                                            _box('ACCESSORIES & WARRANTY', [
+                                                            _box('ACCESSORIES RECEIVED & WARRANTY', [
                                                                               pw.Wrap(spacing: 10, children: [
                                                                                                   _checkText('Charger', service.accCharger),
                                                                                                   _checkText('Cable', service.accCable),
