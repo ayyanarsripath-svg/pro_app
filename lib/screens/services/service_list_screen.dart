@@ -1,7 +1,9 @@
 import 'package:flutter/material.dart';
 
+import '../../core/repositories/customer_repository.dart';
 import '../../core/repositories/service_repository.dart';
 import '../../core/utils/formatters.dart';
+import '../../models/customer.dart';
 import '../../models/service.dart';
 import '../../widgets/section_card.dart';
 import '../../widgets/status_badge.dart';
@@ -17,9 +19,14 @@ class ServiceListScreen extends StatefulWidget {
 
 class _ServiceListScreenState extends State<ServiceListScreen> {
   final _repo = ServiceRepository();
+  final _customerRepo = CustomerRepository();
   List<ServiceJob> _services = [];
+  Map<String, Customer> _customersById = {};
   bool _loading = true;
   String? _filter;
+  bool _searching = false;
+  String _query = '';
+  final _searchCtrl = TextEditingController();
 
   final _tabs = ['All', ...ServiceStatus.all];
 
@@ -32,17 +39,71 @@ class _ServiceListScreenState extends State<ServiceListScreen> {
   Future<void> _load() async {
     setState(() => _loading = true);
     final list = await _repo.all(statusFilter: _filter);
+    final customers = await _customerRepo.all();
     setState(() {
       _services = list;
+      _customersById = {for (final c in customers) c.id: c};
       _loading = false;
     });
   }
 
+  List<ServiceJob> get _filteredServices {
+    final q = _query.trim().toLowerCase();
+    if (q.isEmpty) return _services;
+    return _services.where((s) {
+      final customer = _customersById[s.customerId];
+      final name = customer?.name.toLowerCase() ?? '';
+      final phone = customer?.phone?.toLowerCase() ?? '';
+      final model = (s.model ?? '').toLowerCase();
+      final mobileName = (s.mobileName ?? '').toLowerCase();
+      final billNo = s.billNo.toLowerCase();
+      return name.contains(q) || phone.contains(q) || model.contains(q) || mobileName.contains(q) || billNo.contains(q);
+    }).toList();
+  }
+
   @override
   Widget build(BuildContext context) {
+    final filtered = _filteredServices;
     return Scaffold(
       body: Column(
         children: [
+          Padding(
+            padding: const EdgeInsets.fromLTRB(10, 8, 10, 0),
+            child: Row(
+              children: [
+                if (_searching)
+                Expanded(
+                  child: TextField(
+                    controller: _searchCtrl,
+                    autofocus: true,
+                    decoration: InputDecoration(
+                      isDense: true,
+                      hintText: 'Search by name, phone or model',
+                      prefixIcon: const Icon(Icons.search_rounded, size: 20),
+                      border: OutlineInputBorder(borderRadius: BorderRadius.circular(10)),
+                      ),
+                    onChanged: (v) => setState(() => _query = v),
+                    ),
+                  )
+                else
+                const Spacer(),
+                IconButton(
+                  icon: Icon(_searching ? Icons.close_rounded : Icons.search_rounded),
+                  onPressed: () {
+                    setState(() {
+                      if (_searching) {
+                        _searching = false;
+                        _query = '';
+                        _searchCtrl.clear();
+                      } else {
+                        _searching = true;
+                      }
+                    });
+                  },
+                  ),
+                ],
+              ),
+            ),
           SizedBox(
             height: 48,
             child: ListView.builder(
@@ -61,43 +122,44 @@ class _ServiceListScreenState extends State<ServiceListScreen> {
                       setState(() => _filter = tab == 'All' ? null : tab);
                       _load();
                     },
-                  ),
-                );
+                    ),
+                  );
               },
+              ),
             ),
-          ),
           Expanded(
             child: _loading
-                ? const Center(child: CircularProgressIndicator())
-                : _services.isEmpty
-                    ? const EmptyState(icon: Icons.build_rounded, message: 'No service jobs')
-                    : RefreshIndicator(
-                        onRefresh: _load,
-                        child: ListView.builder(
-                          padding: const EdgeInsets.all(12),
-                          itemCount: _services.length,
-                          itemBuilder: (context, i) {
-                            final s = _services[i];
-                            return Card(
-                              child: ListTile(
-                                title: Text('${s.billNo}  •  ${s.mobileName ?? 'Device'}',
-                                    style: const TextStyle(fontWeight: FontWeight.w700)),
-                                subtitle: Text(
-                                  '${s.complaint ?? '-'}\n${formatCurrency(s.billTotal)} • Balance: ${formatCurrency(s.displayBalance)}'),
-                                isThreeLine: true,
-                                trailing: StatusBadge(s.status, fontSize: 10),
-                                onTap: () async {
-                                  await Navigator.push(context, MaterialPageRoute(builder: (_) => ServiceDetailScreen(serviceId: s.id)));
-                                  _load();
-                                },
-                              ),
-                            );
-                          },
-                        ),
+            ? const Center(child: CircularProgressIndicator())
+            : filtered.isEmpty
+            ? const EmptyState(icon: Icons.build_rounded, message: 'No service jobs')
+            : RefreshIndicator(
+              onRefresh: _load,
+              child: ListView.builder(
+                padding: const EdgeInsets.all(12),
+                itemCount: filtered.length,
+                itemBuilder: (context, i) {
+                  final s = filtered[i];
+                  final customer = _customersById[s.customerId];
+                  return Card(
+                    child: ListTile(
+                      title: Text('${s.billNo} • ${s.mobileName ?? 'Device'}',
+                                  style: const TextStyle(fontWeight: FontWeight.w700)),
+                      subtitle: Text(
+                        '${customer?.name ?? '-'} • ${customer?.phone ?? '-'}\n${s.complaint ?? '-'}\n${formatCurrency(s.billTotal)} • Balance: ${formatCurrency(s.displayBalance)}'),
+                      isThreeLine: true,
+                      trailing: StatusBadge(s.status, fontSize: 10),
+                      onTap: () async {
+                        await Navigator.push(context, MaterialPageRoute(builder: (_) => ServiceDetailScreen(serviceId: s.id)));
+                        _load();
+                      },
                       ),
-          ),
-        ],
-      ),
+                    );
+                },
+                ),
+              ),
+            ),
+          ],
+        ),
       floatingActionButton: FloatingActionButton.extended(
         onPressed: () async {
           final created = await Navigator.push<bool>(context, MaterialPageRoute(builder: (_) => const ServiceFormScreen()));
@@ -105,7 +167,7 @@ class _ServiceListScreenState extends State<ServiceListScreen> {
         },
         icon: const Icon(Icons.add_rounded),
         label: const Text('New Service'),
-      ),
-    );
+        ),
+      );
   }
 }
