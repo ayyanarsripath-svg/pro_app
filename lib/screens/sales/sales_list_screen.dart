@@ -4,7 +4,9 @@ import 'package:pdf/pdf.dart';
 
 import '../../core/repositories/customer_repository.dart';
 import '../../core/repositories/sales_repository.dart';
+import '../../core/repositories/warranty_repository.dart';
 import '../../core/services/pdf_service.dart';
+import '../../core/services/whatsapp_sms_service.dart';
 import '../../core/utils/formatters.dart';
 import '../../models/sales_bill.dart';
 import '../../widgets/section_card.dart';
@@ -21,7 +23,10 @@ class _SalesListScreenState extends State<SalesListScreen> {
   final _repo = SalesRepository();
   final _customerRepo = CustomerRepository();
   final _pdfService = PdfService();
+  final _warrantyRepo = WarrantyRepository();
+  final _waService = WhatsAppSmsService();
   List<SalesBill> _bills = [];
+  Set<String> _claimedBillIds = {};
   bool _loading = true;
 
   @override
@@ -33,8 +38,10 @@ class _SalesListScreenState extends State<SalesListScreen> {
   Future<void> _load() async {
     setState(() => _loading = true);
     final bills = await _repo.all();
+    final claims = await _warrantyRepo.all();
     setState(() {
       _bills = bills;
+      _claimedBillIds = claims.where((c) => c.claimType == 'accessory').map((c) => c.referenceId).toSet();
       _loading = false;
     });
   }
@@ -43,26 +50,34 @@ class _SalesListScreenState extends State<SalesListScreen> {
   Widget build(BuildContext context) {
     return Scaffold(
       body: _loading
-          ? const Center(child: CircularProgressIndicator())
-          : _bills.isEmpty
-              ? const EmptyState(icon: Icons.receipt_long_rounded, message: 'No sales bills yet')
-              : RefreshIndicator(
-                  onRefresh: _load,
-                  child: ListView.builder(
-                    padding: const EdgeInsets.all(14),
-                    itemCount: _bills.length,
-                    itemBuilder: (context, i) {
-                      final b = _bills[i];
-                      return Card(
-                        child: ListTile(
-                          title: Text('${b.billNo}  •  ${formatCurrency(b.total)}'),
-                          subtitle: Text('${formatDate(b.saleDate)}  •  ${b.paymentMethod ?? '-'}${b.balance > 0 ? '  •  Balance: ${formatCurrency(b.balance)}' : ''}'),
-                          trailing: IconButton(icon: const Icon(Icons.print_rounded), onPressed: () => _print(b)),
-                        ),
-                      );
-                    },
+      ? const Center(child: CircularProgressIndicator())
+      : _bills.isEmpty
+      ? const EmptyState(icon: Icons.receipt_long_rounded, message: 'No sales bills yet')
+      : RefreshIndicator(
+        onRefresh: _load,
+        child: ListView.builder(
+          padding: const EdgeInsets.all(14),
+          itemCount: _bills.length,
+          itemBuilder: (context, i) {
+            final b = _bills[i];
+            final claimed = _claimedBillIds.contains(b.id);
+            return Card(
+              child: ListTile(
+                title: Text('${b.billNo} • ${formatCurrency(b.total)}'),
+                subtitle: Text('${formatDate(b.saleDate)} • ${b.paymentMethod ?? '-'}${b.balance > 0 ? ' • Balance: ${formatCurrency(b.balance)}' : ''}'),
+                trailing: Row(
+                  mainAxisSize: MainAxisSize.min,
+                  children: [
+                    if (!claimed)
+                    IconButton(icon: const Icon(Icons.verified_user_rounded), tooltip: 'Warranty Claim', onPressed: () => _fileWarrantyClaim(b)),
+                    IconButton(icon: const Icon(Icons.print_rounded), onPressed: () => _print(b)),
+                    ],
                   ),
                 ),
+              );
+          },
+          ),
+        ),
       floatingActionButton: FloatingActionButton.extended(
         onPressed: () async {
           final created = await Navigator.push<bool>(context, MaterialPageRoute(builder: (_) => const SalesBillFormScreen()));
@@ -70,14 +85,42 @@ class _SalesListScreenState extends State<SalesListScreen> {
         },
         icon: const Icon(Icons.add_rounded),
         label: const Text('New Sale'),
-      ),
-    );
+        ),
+      );
   }
 
   Future<void> _print(SalesBill bill) async {
     final items = await _repo.itemsFor(bill.id);
     final customer = bill.customerId != null ? await _customerRepo.byId(bill.customerId!) : null;
-    final bytes = await _pdfService.buildSalesBill(bill: bill, items: items, customer: customer);
+    final bytes = await _pdfService.buildSalesBill(bill: bill, items: items, customer: customer, warrantyClaimed: _claimedBillIds.contains(bill.id));
     await Printing.layoutPdf(format: PdfPageFormat.a5, name: 'Sales_${bill.billNo}', onLayout: (format) async => bytes);
+  }
+
+  Future<void> _fileWarrantyClaim(SalesBill bill) async {
+    final descCtrl = TextEditingController();
+    final ok = await showDialog<bool>(
+      context: context,
+      builder: (context) => AlertDialog(
+        title: const Text('File Warranty Claim'),
+        content: TextField(controller: descCtrl, maxLines: 3, decoration: const InputDecoration(labelText: 'Describe the issue')),
+        actions: [
+          TextButton(onPressed: () => Navigator.pop(context, false), child: const Text('Cancel')),
+          ElevatedButton(onPressed: () => Navigator.pop(context, true), child: const Text('File Claim')),
+          ],
+        ),
+      );
+    if (ok == true && descCtrl.text.trim().isNotEmpty) {
+      await _warrantyRepo.fileClaim(claimType: 'accessory', referenceId: bill.id, description: descCtrl.text.trim());
+      final customer = bill.customerId != null ? await _customerRepo.byId(bill.customerId!) : null;
+      if (customer?.phone != null && customer!.phone!.trim().isNotEmpty) {
+        final waMsg = _waService.warrantyClaimMessage(customerName: customer.name, referenceLabel: 'Sales ${bill.billNo}', description: descCtrl.text.trim());
+        try { await _waService.sendWhatsApp(phone: customer.phone!, message: waMsg); } catch (_) {}
+        try { await _waService.sendSms(phone: customer.phone!, message: waMsg); } catch (_) {}
+      }
+      if (mounted) {
+        ScaffoldMessenger.of(context).showSnackBar(const SnackBar(content: Text('Warranty claim filed')));
+      }
+      _load();
+    }
   }
 }
