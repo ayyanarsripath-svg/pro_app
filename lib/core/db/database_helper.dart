@@ -13,7 +13,7 @@ class DatabaseHelper {
   static final DatabaseHelper instance = DatabaseHelper._internal();
 
   static Database? _db;
-  static const int dbVersion = 1;
+  static const int dbVersion = 2;
   static const String dbFileName = 'professional_mobiles.db';
 
   Future<Database> get database async {
@@ -38,7 +38,7 @@ class DatabaseHelper {
   }
 
   Future<void> _onUpgrade(Database db, int oldVersion, int newVersion) async {
-    // Future schema migrations go here, keyed by version number.
+    if (oldVersion < 2) { await db.execute('ALTER TABLE services ADD COLUMN fault_amounts TEXT'); }
   }
 
   Future<void> _onCreate(Database db, int version) async {
@@ -240,7 +240,7 @@ class DatabaseHelper {
         mobile_name TEXT,
         model TEXT,
         imei TEXT,
-        complaint TEXT,
+        complaint TEXT, fault_amounts TEXT,
         device_condition TEXT,
         existing_damage TEXT,
         acc_charger INTEGER NOT NULL DEFAULT 0,
