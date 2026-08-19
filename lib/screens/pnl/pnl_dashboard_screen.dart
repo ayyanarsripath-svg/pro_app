@@ -442,6 +442,6 @@ class _PnlDashboardScreenState extends State<PnlDashboardScreen> {
 
   Future<void> _printReport() async {
     final bytes = await _pdfService.buildPnlReport(periodLabel: _periodLabel, totals: _totals!);
-    await Printing.layoutPdf(onLayout: (format) async => bytes);
+    await Printing.layoutPdf(name: "PnL_${_periodLabel.replaceAll('/', '-')}", onLayout: (format) async => bytes);
   }
 }
