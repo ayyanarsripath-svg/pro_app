@@ -2,6 +2,7 @@ import 'package:flutter/material.dart';
 
 import '../../core/repositories/customer_repository.dart';
 import '../../core/repositories/service_repository.dart';
+import '../../core/services/whatsapp_sms_service.dart';
 import '../../core/utils/formatters.dart';
 import '../../models/customer.dart';
 import '../../widgets/section_card.dart';
@@ -19,6 +20,7 @@ class _ServiceFormScreenState extends State<ServiceFormScreen> {
   final _formKey = GlobalKey<FormState>();
   final _customerRepo = CustomerRepository();
   final _serviceRepo = ServiceRepository();
+  final _waService = WhatsAppSmsService();
 
   final _customerNameCtrl = TextEditingController();
   final _customerPhoneCtrl = TextEditingController();
@@ -66,35 +68,35 @@ class _ServiceFormScreenState extends State<ServiceFormScreen> {
                     }
                   }
                 },
-              ),
+                ),
               const SizedBox(height: 10),
               TextFormField(
                 controller: _customerNameCtrl,
                 decoration: const InputDecoration(labelText: 'Customer Name'),
                 validator: (v) => (v == null || v.trim().isEmpty) ? 'Required' : null,
-              ),
-              if (_existingCustomer != null)
-                const Padding(
-                  padding: EdgeInsets.only(top: 6),
-                  child: Text('Existing customer found - will link to their history.',
-                      style: TextStyle(fontSize: 11.5, color: Colors.green)),
                 ),
-            ]),
+              if (_existingCustomer != null)
+              const Padding(
+                padding: EdgeInsets.only(top: 6),
+                child: Text('Existing customer found - will link to their history.',
+                            style: TextStyle(fontSize: 11.5, color: Colors.green)),
+                ),
+              ]),
             SectionCard(title: 'Device', icon: Icons.smartphone_rounded, children: [
               TextFormField(controller: _mobileNameCtrl, decoration: const InputDecoration(labelText: 'Mobile Name (e.g. Samsung A15)')),
               const SizedBox(height: 10),
               TextFormField(controller: _modelCtrl, decoration: const InputDecoration(labelText: 'Model')),
               const SizedBox(height: 10),
               TextFormField(controller: _imeiCtrl, decoration: const InputDecoration(labelText: 'IMEI')),
-            ]),
+              ]),
             SectionCard(title: 'Complaint', icon: Icons.report_problem_rounded, children: [
               TextFormField(controller: _complaintCtrl, maxLines: 2, decoration: const InputDecoration(labelText: 'Fault / Complaint')),
-            ]),
+              ]),
             SectionCard(title: 'Condition', icon: Icons.fact_check_rounded, children: [
               TextFormField(controller: _conditionCtrl, decoration: const InputDecoration(labelText: 'Device Condition')),
               const SizedBox(height: 10),
               TextFormField(controller: _damageCtrl, decoration: const InputDecoration(labelText: 'Existing Damage')),
-            ]),
+              ]),
             SectionCard(title: 'Accessories Received', icon: Icons.cable_rounded, children: [
               Wrap(
                 spacing: 4,
@@ -103,37 +105,37 @@ class _ServiceFormScreenState extends State<ServiceFormScreen> {
                   FilterChip(label: const Text('Cable'), selected: _cable, onSelected: (v) => setState(() => _cable = v)),
                   FilterChip(label: const Text('SIM'), selected: _sim, onSelected: (v) => setState(() => _sim = v)),
                   FilterChip(label: const Text('Memory Card'), selected: _memoryCard, onSelected: (v) => setState(() => _memoryCard = v)),
-                ],
-              ),
+                  ],
+                ),
               const SizedBox(height: 10),
               TextFormField(controller: _accOtherCtrl, decoration: const InputDecoration(labelText: 'Other')),
-            ]),
+              ]),
             SectionCard(title: 'Repair', icon: Icons.handyman_rounded, children: [
               TextFormField(controller: _technicianCtrl, decoration: const InputDecoration(labelText: 'Technician')),
-            ]),
+              ]),
             SectionCard(title: 'Warranty', icon: Icons.verified_user_rounded, children: [
               SwitchListTile(
                 contentPadding: EdgeInsets.zero,
                 title: const Text('Warranty'),
                 value: _warranty,
                 onChanged: (v) => setState(() => _warranty = v),
-              ),
+                ),
               if (_warranty)
-                TextFormField(controller: _warrantyPeriodCtrl, decoration: const InputDecoration(labelText: 'Warranty Period (e.g. 30 days)')),
-            ]),
+              TextFormField(controller: _warrantyPeriodCtrl, decoration: const InputDecoration(labelText: 'Warranty Period (e.g. 30 days)')),
+              ]),
             SectionCard(title: 'Payment', icon: Icons.payments_rounded, children: [
               TextFormField(
                 controller: _estimatedCtrl,
                 keyboardType: TextInputType.number,
                 decoration: const InputDecoration(labelText: 'Estimated Amount (₹)'),
-              ),
+                ),
               const SizedBox(height: 10),
               TextFormField(
                 controller: _advanceCtrl,
                 keyboardType: TextInputType.number,
                 decoration: const InputDecoration(labelText: 'Advance Paid (₹)'),
-              ),
-            ]),
+                ),
+              ]),
             SectionCard(title: 'Delivery', icon: Icons.local_shipping_rounded, children: [
               ListTile(
                 contentPadding: EdgeInsets.zero,
@@ -145,23 +147,23 @@ class _ServiceFormScreenState extends State<ServiceFormScreen> {
                     initialDate: DateTime.now().add(const Duration(days: 2)),
                     firstDate: DateTime.now(),
                     lastDate: DateTime.now().add(const Duration(days: 365)),
-                  );
+                    );
                   if (picked != null) setState(() => _expectedDate = picked);
                 },
-              ),
-            ]),
+                ),
+              ]),
             const SizedBox(height: 10),
             ElevatedButton(
               onPressed: _saving ? null : _submit,
               child: _saving
-                  ? const SizedBox(height: 18, width: 18, child: CircularProgressIndicator(strokeWidth: 2, color: Colors.white))
-                  : const Text('Create Service Job Card'),
-            ),
+              ? const SizedBox(height: 18, width: 18, child: CircularProgressIndicator(strokeWidth: 2, color: Colors.white))
+              : const Text('Create Service Job Card'),
+              ),
             const SizedBox(height: 30),
-          ],
+            ],
+          ),
         ),
-      ),
-    );
+      );
   }
 
   Future<void> _submit() async {
@@ -171,9 +173,9 @@ class _ServiceFormScreenState extends State<ServiceFormScreen> {
     final customer = await _customerRepo.findOrCreateByPhone(
       name: _customerNameCtrl.text.trim(),
       phone: _customerPhoneCtrl.text.trim(),
-    );
+      );
 
-    await _serviceRepo.create(
+    final service = await _serviceRepo.create(
       customerId: customer.id,
       mobileName: _mobileNameCtrl.text.trim(),
       model: _modelCtrl.text.trim(),
@@ -192,7 +194,29 @@ class _ServiceFormScreenState extends State<ServiceFormScreen> {
       estimatedAmount: double.tryParse(_estimatedCtrl.text.trim()) ?? 0,
       advance: double.tryParse(_advanceCtrl.text.trim()) ?? 0,
       expectedDate: _expectedDate,
-    );
+      );
+
+    // Auto-send the WhatsApp job-card intimation the moment the job is
+    // created (free wa.me link - no API key). Opens WhatsApp with the
+    // message ready; failures here should never block saving the job card.
+    if (customer.phone != null && customer.phone!.trim().isNotEmpty) {
+      try {
+        final message = _waService.serviceIntimationMessage(
+          customerName: customer.name,
+          customerPhone: customer.phone!,
+          mobileModel: _modelCtrl.text.trim().isNotEmpty ? _modelCtrl.text.trim() : _mobileNameCtrl.text.trim(),
+          imei: _imeiCtrl.text.trim(),
+          complaint: _complaintCtrl.text.trim(),
+          serviceCharge: double.tryParse(_estimatedCtrl.text.trim()) ?? 0,
+          status: service.status,
+          receivedDate: service.createdAt,
+          expectedDelivery: _expectedDate,
+          );
+        await _waService.sendWhatsApp(phone: customer.phone!, message: message);
+      } catch (_) {
+        // Ignore - WhatsApp app may be unavailable; the job card is still saved.
+      }
+    }
 
     if (mounted) Navigator.pop(context, true);
   }
