@@ -28,7 +28,7 @@ class ServiceJob {
   final String? mobileName;
   final String? model;
   final String? imei;
-  final String? complaint;
+  final String? complaint; final String? faultAmounts;
   final String? deviceCondition;
   final String? existingDamage;
   final bool accCharger;
@@ -61,7 +61,7 @@ class ServiceJob {
     this.mobileName,
     this.model,
     this.imei,
-    this.complaint,
+    this.complaint, this.faultAmounts,
     this.deviceCondition,
     this.existingDamage,
     this.accCharger = false,
@@ -109,7 +109,7 @@ bool get isPaymentPending => displayBalance > 0;
         mobileName: m['mobile_name'] as String?,
         model: m['model'] as String?,
         imei: m['imei'] as String?,
-        complaint: m['complaint'] as String?,
+        complaint: m['complaint'] as String?, faultAmounts: m['fault_amounts'] as String?,
         deviceCondition: m['device_condition'] as String?,
         existingDamage: m['existing_damage'] as String?,
         accCharger: (m['acc_charger'] as int? ?? 0) == 1,
@@ -143,7 +143,7 @@ bool get isPaymentPending => displayBalance > 0;
         'mobile_name': mobileName,
         'model': model,
         'imei': imei,
-        'complaint': complaint,
+        'complaint': complaint, 'fault_amounts': faultAmounts,
         'device_condition': deviceCondition,
         'existing_damage': existingDamage,
         'acc_charger': accCharger ? 1 : 0,
