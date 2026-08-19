@@ -36,6 +36,7 @@ dependencies:
 
   # WhatsApp / SMS share (opens native share sheet or wa.me / sms: links)
   url_launcher: ^6.3.0
+  another_telephony: ^0.4.1 # Silent background SMS (SmsManager) for service intimation
 
   # Optional Google Drive backup (requires the shop owner's own Google Cloud
   # OAuth client id - see README "Google Drive Backup Setup")
