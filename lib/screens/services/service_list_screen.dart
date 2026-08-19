@@ -83,7 +83,7 @@ class _ServiceListScreenState extends State<ServiceListScreen> {
                                 title: Text('${s.billNo}  •  ${s.mobileName ?? 'Device'}',
                                     style: const TextStyle(fontWeight: FontWeight.w700)),
                                 subtitle: Text(
-                                    '${s.complaint ?? '-'}\n${formatCurrency(s.finalAmount)}  •  Balance: ${formatCurrency(s.balance)}'),
+                                  '${s.complaint ?? '-'}\n${formatCurrency(s.billTotal)} • Balance: ${formatCurrency(s.displayBalance)}'),
                                 isThreeLine: true,
                                 trailing: StatusBadge(s.status, fontSize: 10),
                                 onTap: () async {
