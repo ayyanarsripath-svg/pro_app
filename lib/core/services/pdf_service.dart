@@ -330,7 +330,7 @@ class PdfService {
                   if (raw.isEmpty) return '-';
                   final match = RegExp(r'^(\d+)\s*(day|days|week|weeks|month|months|mon|year|years|yr|yrs)$', caseSensitive: false)
                                     .firstMatch(raw);
-                  if (match == null) return raw;
+                  if (match == null) return RegExp(r'^\d+$').hasMatch(raw) ? '$raw days' : raw;
                   final n = int.parse(match.group(1)!);
                   final unit = match.group(2)!.toLowerCase();
                   DateTime end;
