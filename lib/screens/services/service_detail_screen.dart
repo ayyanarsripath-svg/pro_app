@@ -579,7 +579,7 @@ class _ServiceDetailScreenState extends State<ServiceDetailScreen> {
   Future<void> _printBill() async {
     if (_customer == null || _service == null) return;
     final bytes = await _pdfService.buildServiceBill(service: _service!, customer: _customer!);
-    await Printing.layoutPdf(format: PdfPageFormat.a5, onLayout: (format) async => bytes);
+    await Printing.layoutPdf(format: PdfPageFormat.a5, name: 'Service_${_service!.billNo}', onLayout: (format) async => bytes);
   }
 
   Future<void> _sendWhatsApp() async {
