@@ -352,6 +352,7 @@ class PdfService {
         Future<Uint8List> buildServiceBill({
                   required ServiceJob service,
                   required Customer customer,
+        List<ServiceSparePartUsage> partsUsed = const [],
         }) async {
                   final shop = await _shopInfo();
                   final logo = await _logo();
@@ -407,6 +408,11 @@ class PdfService {
                                                                                                   _kv('Period', _warrantyRangeText(service.warrantyPeriod, warrantyStart)),
                                                                             ]),
                                                   pw.SizedBox(height: 3),
+                            if (partsUsed.isNotEmpty)
+                                                                                  _box('PARTS / REPAIR ITEMS ADDED', [
+                                                                                                                          for (final u in partsUsed)
+                                                                                                                            _kv(u.itemName, 'Qty: ${u.quantity.toStringAsFixed(u.quantity == u.quantity.roundToDouble() ? 0 : 2)}'),
+                                                                                                                        ]),
                                                   // TOTAL AMOUNT - ADVANCE AMOUNT = BALANCE AMOUNT, centered so the
                                                   // customer can see the working at a glance. Before the shop has
                                                   // set a Final Amount (fresh intake, still Checking/Repairing),
