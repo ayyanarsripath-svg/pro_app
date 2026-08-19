@@ -162,6 +162,6 @@ class _MonthEndReportScreenState extends State<MonthEndReportScreen> {
 
   Future<void> _print() async {
     final bytes = await _pdfService.buildPnlReport(periodLabel: formatMonthLabel(_monthStart), totals: _totals!);
-    await Printing.layoutPdf(onLayout: (format) async => bytes);
+    await Printing.layoutPdf(name: 'MonthEnd_${formatMonthLabel(_monthStart)}', onLayout: (format) async => bytes);
   }
 }
