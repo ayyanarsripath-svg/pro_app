@@ -196,27 +196,34 @@ class _ServiceFormScreenState extends State<ServiceFormScreen> {
       expectedDate: _expectedDate,
       );
 
-    // Auto-send the WhatsApp job-card intimation the moment the job is
-    // created (free wa.me link - no API key). Opens WhatsApp with the
-    // message ready; failures here should never block saving the job card.
-    if (customer.phone != null && customer.phone!.trim().isNotEmpty) {
-      try {
-        final message = _waService.serviceIntimationMessage(
-          customerName: customer.name,
-          customerPhone: customer.phone!,
-          mobileModel: _modelCtrl.text.trim().isNotEmpty ? _modelCtrl.text.trim() : _mobileNameCtrl.text.trim(),
-          imei: _imeiCtrl.text.trim(),
-          complaint: _complaintCtrl.text.trim(),
-          serviceCharge: double.tryParse(_estimatedCtrl.text.trim()) ?? 0,
-          status: service.status,
-          receivedDate: service.createdAt,
-          expectedDelivery: _expectedDate,
-          );
-        await _waService.sendWhatsApp(phone: customer.phone!, message: message);
-      } catch (_) {
-        // Ignore - WhatsApp app may be unavailable; the job card is still saved.
-      }
-    }
+        // Auto-send the job-card intimation the moment the job is created, via
+        // both WhatsApp (wa.me link) and SMS (sms: URI) - both just open the
+        // phone's own app with the message pre-filled and need one tap to send,
+        // so no API key or Android SMS permission is ever needed. Failures here
+        // should never block saving the job card.
+        if (customer.phone != null && customer.phone!.trim().isNotEmpty) {
+                final message = _waService.serviceIntimationMessage(
+                          customerName: customer.name,
+                          customerPhone: customer.phone!,
+                          mobileModel: _modelCtrl.text.trim().isNotEmpty ? _modelCtrl.text.trim() : _mobileNameCtrl.text.trim(),
+                          imei: _imeiCtrl.text.trim(),
+                          complaint: _complaintCtrl.text.trim(),
+                          serviceCharge: double.tryParse(_estimatedCtrl.text.trim()) ?? 0,
+                          status: service.status,
+                          receivedDate: service.createdAt,
+                          expectedDelivery: _expectedDate,
+                        );
+                try {
+                          await _waService.sendWhatsApp(phone: customer.phone!, message: message);
+                } catch (_) {
+                          // Ignore - WhatsApp app may be unavailable; the job card is still saved.
+                }
+                try {
+                          await _waService.sendSms(phone: customer.phone!, message: message);
+                } catch (_) {
+                          // Ignore - SMS app may be unavailable; the job card is still saved.
+                }
+        }
 
     if (mounted) Navigator.pop(context, true);
   }
