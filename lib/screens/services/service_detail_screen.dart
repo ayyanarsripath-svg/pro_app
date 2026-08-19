@@ -51,7 +51,7 @@ class _ServiceDetailScreenState extends State<ServiceDetailScreen> {
   List<ServicePayment> _payments = [];
   List<ServicePhoto> _photos = [];
   ServiceProfitBreakdown? _profit;
-  bool _loading = true;
+  bool _loading = true; bool _warrantyClaimed = false;
 
   @override
   void initState() {
@@ -71,7 +71,7 @@ class _ServiceDetailScreenState extends State<ServiceDetailScreen> {
     final others = await _serviceRepo.otherCosts(service.id);
     final payments = await _serviceRepo.payments(service.id);
     final photos = await _serviceRepo.photos(service.id);
-    final profit = await _serviceRepo.profitBreakdown(service.id);
+    final profit = await _serviceRepo.profitBreakdown(service.id); final claims = await _warrantyRepo.forReference(service.id);
 
     setState(() {
       _service = service;
@@ -80,7 +80,7 @@ class _ServiceDetailScreenState extends State<ServiceDetailScreen> {
       _otherCosts = others;
       _payments = payments;
       _photos = photos;
-      _profit = profit;
+      _profit = profit; _warrantyClaimed = claims.isNotEmpty;
       _loading = false;
     });
   }
@@ -223,7 +223,7 @@ class _ServiceDetailScreenState extends State<ServiceDetailScreen> {
       _QuickAction('WhatsApp', Icons.chat_rounded, _sendWhatsApp),
       _QuickAction('SMS', Icons.sms_rounded, _sendSms),
       _QuickAction('Delivery', Icons.local_shipping_rounded, _markDelivery),
-      _QuickAction('Warranty Claim', Icons.assignment_return_rounded, _fileWarrantyClaim),
+      if (!_warrantyClaimed) _QuickAction('Warranty Claim', Icons.assignment_return_rounded, _fileWarrantyClaim),
     ];
     return SizedBox(
       height: 74,
@@ -578,7 +578,7 @@ _amountBlock('FINAL AMOUNT', s.billTotal),
 
   Future<void> _printBill() async {
     if (_customer == null || _service == null) return;
-    final bytes = await _pdfService.buildServiceBill(service: _service!, customer: _customer!, partsUsed: _usages);
+    final bytes = await _pdfService.buildServiceBill(service: _service!, customer: _customer!, partsUsed: _usages, warrantyClaimed: _warrantyClaimed);
     await Printing.layoutPdf(format: PdfPageFormat.a5, name: 'Service_${_service!.billNo}', onLayout: (format) async => bytes);
   }
 
@@ -622,7 +622,7 @@ _amountBlock('FINAL AMOUNT', s.billTotal),
       ),
     );
     if (ok == true && descCtrl.text.trim().isNotEmpty) {
-      await _warrantyRepo.fileClaim(claimType: 'service', referenceId: widget.serviceId, description: descCtrl.text.trim());
+      await _warrantyRepo.fileClaim(claimType: 'service', referenceId: widget.serviceId, description: descCtrl.text.trim()); if (_customer?.phone != null && _customer!.phone!.trim().isNotEmpty) { final waMsg = _waService.warrantyClaimMessage(customerName: _customer!.name, referenceLabel: 'Service ${_service!.billNo}', description: descCtrl.text.trim()); try { await _waService.sendWhatsApp(phone: _customer!.phone!, message: waMsg); } catch (_) {} try { await _waService.sendSms(phone: _customer!.phone!, message: waMsg); } catch (_) {} }
       await _serviceRepo.changeStatus(widget.serviceId, ServiceStatus.warranty, notes: descCtrl.text.trim());
       if (mounted) {
         ScaffoldMessenger.of(context).showSnackBar(const SnackBar(content: Text('Warranty claim filed')));
