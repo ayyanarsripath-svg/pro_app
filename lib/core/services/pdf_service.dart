@@ -275,7 +275,7 @@ class PdfService {
         pw.Widget _serviceAmountSummary({
                   required double totalAmount,
                   required double advanceAmount,
-                  required double balanceAmount,
+                  required double balanceAmount, String? faultBreakdown,
         }) {
                   return pw.Center(
                               child: pw.Container(
@@ -288,7 +288,7 @@ class PdfService {
                                                         ),
                                             child: pw.Column(
                                                           children: [
-                                                                        _amountLine('TOTAL AMOUNT', totalAmount),
+                                                                        _amountLine('TOTAL AMOUNT', totalAmount), if (faultBreakdown != null) pw.Padding(padding: const pw.EdgeInsets.symmetric(vertical: 1), child: pw.Text(faultBreakdown, style: const pw.TextStyle(fontSize: 7.5, color: PdfColors.grey800), textAlign: pw.TextAlign.center)),
                                                                         _amountLine('- ADVANCE AMOUNT', advanceAmount),
                                                                         pw.Container(
                                                                                       margin: const pw.EdgeInsets.symmetric(vertical: 2.5),
@@ -423,7 +423,7 @@ class PdfService {
                                                   _serviceAmountSummary(
                                                         totalAmount: _billTotal(service),
                                                         advanceAmount: service.paid,
-                                                        balanceAmount: _billTotal(service) - service.paid,
+                                                        balanceAmount: _billTotal(service) - service.paid, faultBreakdown: _faultBreakdownText(service.faultAmounts),
                                                         ),
                                                   pw.SizedBox(height: 3),
                                                   _box('DELIVERY', [
