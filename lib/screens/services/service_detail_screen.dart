@@ -268,12 +268,12 @@ class _ServiceDetailScreenState extends State<ServiceDetailScreen> {
           Row(
             mainAxisAlignment: MainAxisAlignment.spaceBetween,
             children: [
-              _amountBlock('FINAL AMOUNT', s.finalAmount),
+_amountBlock('FINAL AMOUNT', s.billTotal),
               _amountBlock('PAID', s.paid),
-              _amountBlock('BALANCE', s.balance),
-            ],
-          ),
-          if (s.balance > 0)
+              _amountBlock('BALANCE', s.displayBalance),
+              ],
+            ),
+          if (s.displayBalance > 0)
             Padding(
               padding: const EdgeInsets.only(top: 10),
               child: Container(
