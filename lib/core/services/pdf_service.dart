@@ -432,6 +432,7 @@ class PdfService {
                                                               service.deliveryStatus == 'Pending' ? 'On Working' : service.deliveryStatus,
                                                               labelWidth: 78,
                                                               ),
+              if ((service.deliveryPerson ?? '').isNotEmpty) _kv('Delivery Person', service.deliveryPerson, labelWidth: 78),
                                                         ]),
                                                   pw.SizedBox(height: 2),
                                                   termsWidget,
