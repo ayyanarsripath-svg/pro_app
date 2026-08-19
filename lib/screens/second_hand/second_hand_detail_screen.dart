@@ -14,7 +14,7 @@ import '../../models/second_hand_phone.dart';
 import '../../models/spare_part.dart';
 import '../../widgets/section_card.dart';
 import '../../widgets/stat_card.dart';
-import '../../widgets/status_badge.dart';
+import '../../widgets/status_badge.dart'; import '../../core/repositories/warranty_repository.dart'; import '../../core/services/whatsapp_sms_service.dart';
 
 class SecondHandDetailScreen extends StatefulWidget {
   final String phoneId;
@@ -28,7 +28,7 @@ class _SecondHandDetailScreenState extends State<SecondHandDetailScreen> {
   final _repo = SecondHandRepository();
   final _customerRepo = CustomerRepository();
   final _sparePartRepo = SparePartRepository();
-  final _pdfService = PdfService();
+  final _pdfService = PdfService(); final _warrantyRepo = WarrantyRepository(); final _waService = WhatsAppSmsService(); bool _warrantyClaimed = false;
 
   SecondHandPhone? _phone;
   List<SecondHandRepairItem> _repairs = [];
@@ -43,10 +43,10 @@ class _SecondHandDetailScreenState extends State<SecondHandDetailScreen> {
   Future<void> _load() async {
     setState(() => _loading = true);
     final phone = await _repo.byId(widget.phoneId);
-    final repairs = phone != null ? await _repo.repairItems(widget.phoneId) : <SecondHandRepairItem>[];
+    final repairs = phone != null ? await _repo.repairItems(widget.phoneId) : <SecondHandRepairItem>[]; final claims = phone != null ? await _warrantyRepo.forReference(widget.phoneId) : [];
     setState(() {
       _phone = phone;
-      _repairs = repairs;
+      _repairs = repairs; _warrantyClaimed = claims.isNotEmpty;
       _loading = false;
     });
   }
@@ -76,7 +76,7 @@ class _SecondHandDetailScreenState extends State<SecondHandDetailScreen> {
               _actionChip('Change Status', Icons.sync_alt_rounded, _changeStatus),
               if (phone.status != SecondHandStatus.sold) _actionChip('Sell Phone', Icons.sell_rounded, _sellPhone),
               if (phone.status == SecondHandStatus.sold) _actionChip('Print Sales Bill', Icons.print_rounded, _printSale),
-              if (phone.status == SecondHandStatus.sold) _actionChip('Customer Return', Icons.assignment_return_rounded, _customerReturn),
+              if (phone.status == SecondHandStatus.sold) _actionChip('Customer Return', Icons.assignment_return_rounded, _customerReturn), if (phone.status == SecondHandStatus.sold && phone.warranty && !_warrantyClaimed) _actionChip('Warranty Claim', Icons.verified_user_rounded, _fileWarrantyClaim),
             ]),
             const SizedBox(height: 14),
             SectionCard(title: 'Device Details', icon: Icons.phone_iphone_rounded, children: [
@@ -321,7 +321,7 @@ class _SecondHandDetailScreenState extends State<SecondHandDetailScreen> {
       return;
     }
     final customer = sale.customerId != null ? await _customerRepo.byId(sale.customerId!) : null;
-    final bytes = await _pdfService.buildSecondHandSalesBill(phone: phone, sale: sale, customer: customer);
+    final bytes = await _pdfService.buildSecondHandSalesBill(phone: phone, sale: sale, customer: customer, warrantyClaimed: _warrantyClaimed);
     await Printing.layoutPdf(format: PdfPageFormat.a5, name: '2ndHandSale_${phone.purchaseNo}', onLayout: (format) async => bytes);
   }
 
@@ -355,6 +355,35 @@ class _SecondHandDetailScreenState extends State<SecondHandDetailScreen> {
         reason: reasonCtrl.text.trim(),
         restock: true,
       );
+      _load();
+    }
+  }
+  Future<void> _fileWarrantyClaim() async {
+    final phone = _phone!;
+    final sale = await _repo.latestSaleForPhone(widget.phoneId);
+    final descCtrl = TextEditingController();
+    final ok = await showDialog<bool>(
+      context: context,
+      builder: (context) => AlertDialog(
+        title: const Text('File Warranty Claim'),
+        content: TextField(controller: descCtrl, maxLines: 3, decoration: const InputDecoration(labelText: 'Describe the issue')),
+        actions: [
+          TextButton(onPressed: () => Navigator.pop(context, false), child: const Text('Cancel')),
+          ElevatedButton(onPressed: () => Navigator.pop(context, true), child: const Text('File Claim')),
+          ],
+        ),
+      );
+    if (ok == true && descCtrl.text.trim().isNotEmpty) {
+      await _warrantyRepo.fileClaim(claimType: 'second_hand', referenceId: widget.phoneId, description: descCtrl.text.trim());
+      final customer = sale?.customerId != null ? await _customerRepo.byId(sale!.customerId!) : null;
+      if (customer?.phone != null && customer!.phone!.trim().isNotEmpty) {
+        final waMsg = _waService.warrantyClaimMessage(customerName: customer.name, referenceLabel: '2nd Hand ${phone.purchaseNo}', description: descCtrl.text.trim());
+        try { await _waService.sendWhatsApp(phone: customer.phone!, message: waMsg); } catch (_) {}
+        try { await _waService.sendSms(phone: customer.phone!, message: waMsg); } catch (_) {}
+      }
+      if (mounted) {
+        ScaffoldMessenger.of(context).showSnackBar(const SnackBar(content: Text('Warranty claim filed')));
+      }
       _load();
     }
   }
