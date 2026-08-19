@@ -15,6 +15,7 @@ class SettingsRepository {
   static const lastBackupAt = 'last_backup_at';
   static const weeklyAutoBackupEnabled = 'weekly_auto_backup_enabled';
   static const googleDriveLinked = 'google_drive_linked';
+  static const complaintPresets = 'complaint_presets';
 
   Future<String?> get(String key) async {
     final db = await _dbHelper.database;
@@ -26,7 +27,7 @@ class SettingsRepository {
   Future<void> set(String key, String value) async {
     final db = await _dbHelper.database;
     await db.insert('settings', {'key': key, 'value': value},
-        conflictAlgorithm: ConflictAlgorithm.replace);
+                    conflictAlgorithm: ConflictAlgorithm.replace);
   }
 
   Future<Map<String, String>> getAll() async {
@@ -44,5 +45,32 @@ class SettingsRepository {
     final next = (int.tryParse(current ?? '0') ?? 0) + 1;
     await set(sequenceKey, next.toString());
     return next;
+  }
+
+  /// Shop-editable quick-pick list of common fault/complaint phrases shown
+  /// as chips on the service intake form (spec: quick-select presets the
+  /// shop can extend themselves). Stored as a simple pipe-separated string
+  /// so no JSON dependency is needed; falls back to a sensible default set
+  /// the first time the app runs.
+  Future<List<String>> getComplaintPresets() async {
+    final raw = await get(complaintPresets);
+    if (raw == null || raw.trim().isEmpty) {
+      return const [
+        'Display',
+        'Battery',
+        'Charging Port',
+        'Speaker',
+        'Mic',
+        'Camera',
+        'Button',
+        'Water Damage',
+        'Software',
+        ];
+    }
+    return raw.split('|').map((s) => s.trim()).where((s) => s.isNotEmpty).toList();
+  }
+
+  Future<void> saveComplaintPresets(List<String> presets) async {
+    await set(complaintPresets, presets.join('|'));
   }
 }
