@@ -88,8 +88,19 @@ class ServiceJob {
     required this.updatedAt,
   });
 
-  bool get isPaymentPending => balance > 0;
+bool get isPaymentPending => displayBalance > 0;
   bool get isDelivered => status == ServiceStatus.delivered;
+
+  /// The amount to treat as the bill total for display: the real Final
+  /// Amount once the shop sets it via Edit, or the Estimated Amount quoted
+  /// at intake until then. Mirrors PdfService._billTotal so the in-app
+  /// screens and the printed receipt always agree - a fresh job with an
+  /// advance paid no longer shows "TOTAL ₹0" and a negative balance.
+  double get billTotal => finalAmount > 0 ? finalAmount : estimatedAmount;
+
+  /// Balance computed from [billTotal] rather than the possibly-still-₹0
+  /// stored finalAmount.
+  double get displayBalance => billTotal - paid;
 
   factory ServiceJob.fromMap(Map<String, dynamic> m) => ServiceJob(
         id: m['id'] as String,
