@@ -112,6 +112,13 @@ SHA-1 never changes once you've set this up:
    Google Drive** in the app - no code changes needed, `google_sign_in`
    picks up the registered client automatically.
 
+   Status: Google Cloud project `pro-app-drive-backup` is set up - Drive
+   API enabled, OAuth consent screen configured (Testing, with
+   ayyanarsripath@gmail.com as a test user), and the Android OAuth client
+   above is created and matches this SHA-1. This commit's push is the
+   "fresh build" step, so the very next CI run already picks up the
+   stable keystore and this registered client.
+
 ### If you build locally on your own machine
 
 1. Go to https://console.cloud.google.com → create a project.
