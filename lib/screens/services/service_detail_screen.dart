@@ -126,7 +126,16 @@ class _ServiceDetailScreenState extends State<ServiceDetailScreen> {
               _row('Model', s.model),
               _row('IMEI', s.imei),
             ]),
-            SectionCard(title: 'Complaint', icon: Icons.report_problem_rounded, children: [Text(s.complaint ?? '-')]),
+            SectionCard(
+              title: 'Complaint',
+              icon: Icons.report_problem_rounded,
+              trailing: TextButton.icon(
+                onPressed: _editComplaint,
+                icon: const Icon(Icons.edit_rounded, size: 16),
+                label: const Text('Edit'),
+              ),
+              children: [Text(s.complaint ?? '-')],
+            ),
             SectionCard(title: 'Condition', icon: Icons.fact_check_rounded, children: [
               _row('Device Condition', s.deviceCondition),
               _row('Existing Damage', s.existingDamage),
@@ -369,6 +378,7 @@ _amountBlock('FINAL AMOUNT', s.billTotal),
         model: s.model,
         imei: s.imei,
         complaint: s.complaint,
+        faultAmounts: s.faultAmounts,
         deviceCondition: s.deviceCondition,
         existingDamage: s.existingDamage,
         accCharger: s.accCharger,
@@ -391,6 +401,69 @@ _amountBlock('FINAL AMOUNT', s.billTotal),
         deliveryPerson: s.deliveryPerson,
         deliveryStatus: s.deliveryStatus,
         additionalExpense: double.tryParse(expenseCtrl.text.trim()) ?? s.additionalExpense,
+        createdAt: s.createdAt,
+        updatedAt: DateTime.now(),
+      );
+      await _serviceRepo.update(updated);
+      _load();
+    }
+  }
+
+  /// Lets the shop correct the Fault / Complaint text at any time - even
+  /// after the job has been booked and the bill already printed, which
+  /// previously had no edit path at all once intake was done.
+  Future<void> _editComplaint() async {
+    final s = _service!;
+    final complaintCtrl = TextEditingController(text: s.complaint ?? '');
+
+    final ok = await showDialog<bool>(
+      context: context,
+      builder: (context) => AlertDialog(
+        title: const Text('Edit Fault / Complaint'),
+        content: TextField(
+          controller: complaintCtrl,
+          maxLines: 4,
+          decoration: const InputDecoration(labelText: 'Fault / Complaint'),
+        ),
+        actions: [
+          TextButton(onPressed: () => Navigator.pop(context, false), child: const Text('Cancel')),
+          ElevatedButton(onPressed: () => Navigator.pop(context, true), child: const Text('Save')),
+        ],
+      ),
+    );
+
+    if (ok == true) {
+      final updated = ServiceJob(
+        id: s.id,
+        billNo: s.billNo,
+        customerId: s.customerId,
+        mobileName: s.mobileName,
+        model: s.model,
+        imei: s.imei,
+        complaint: complaintCtrl.text.trim(),
+        faultAmounts: s.faultAmounts,
+        deviceCondition: s.deviceCondition,
+        existingDamage: s.existingDamage,
+        accCharger: s.accCharger,
+        accCable: s.accCable,
+        accSim: s.accSim,
+        accMemoryCard: s.accMemoryCard,
+        accOther: s.accOther,
+        technician: s.technician,
+        status: s.status,
+        labourCost: s.labourCost,
+        warranty: s.warranty,
+        warrantyPeriod: s.warrantyPeriod,
+        estimatedAmount: s.estimatedAmount,
+        finalAmount: s.finalAmount,
+        advance: s.advance,
+        paid: s.paid,
+        balance: s.balance,
+        expectedDate: s.expectedDate,
+        actualDate: s.actualDate,
+        deliveryPerson: s.deliveryPerson,
+        deliveryStatus: s.deliveryStatus,
+        additionalExpense: s.additionalExpense,
         createdAt: s.createdAt,
         updatedAt: DateTime.now(),
       );
@@ -532,24 +605,48 @@ _amountBlock('FINAL AMOUNT', s.billTotal),
     }
   }
 
+  /// Delivery action: previously this dialog only captured the delivery
+  /// person's name (the amount had to be added separately via Add Payment,
+  /// which was easy to forget before handing the device back). Now it also
+  /// collects the final amount right here - filling it in and confirming
+  /// records the payment, marks the job Delivered in one step, and pushes a
+  /// WhatsApp "delivered" message to the customer.
   Future<void> _markDelivery() async {
-    final personCtrl = TextEditingController(text: _service!.deliveryPerson ?? '');
+    final s = _service!;
+    final personCtrl = TextEditingController(text: s.deliveryPerson ?? '');
+    final suggestedAmount = s.displayBalance > 0 ? s.displayBalance : 0.0;
+    final amountCtrl = TextEditingController(
+      text: suggestedAmount > 0 ? suggestedAmount.toStringAsFixed(suggestedAmount == suggestedAmount.roundToDouble() ? 0 : 2) : '',
+    );
+
     final ok = await showDialog<bool>(
       context: context,
       builder: (context) => AlertDialog(
         title: const Text('Delivery'),
-        content: TextField(controller: personCtrl, decoration: const InputDecoration(labelText: 'Delivery Person')),
+        content: Column(
+          mainAxisSize: MainAxisSize.min,
+          children: [
+            TextField(controller: personCtrl, decoration: const InputDecoration(labelText: 'Delivery Person')),
+            const SizedBox(height: 10),
+            TextField(
+              controller: amountCtrl,
+              keyboardType: TextInputType.number,
+              decoration: const InputDecoration(labelText: 'Amount Collected (₹)'),
+            ),
+          ],
+        ),
         actions: [
           TextButton(onPressed: () => Navigator.pop(context, false), child: const Text('Cancel')),
-          ElevatedButton(onPressed: () => Navigator.pop(context, true), child: const Text('Mark Delivered')),
+          ElevatedButton(onPressed: () => Navigator.pop(context, true), child: const Text('OK - Mark Delivered')),
         ],
       ),
     );
     if (ok == true) {
-      final s = _service!;
+      final amountCollected = double.tryParse(amountCtrl.text.trim()) ?? 0;
+
       final updated = ServiceJob(
         id: s.id, billNo: s.billNo, customerId: s.customerId, mobileName: s.mobileName, model: s.model, imei: s.imei,
-        complaint: s.complaint, deviceCondition: s.deviceCondition, existingDamage: s.existingDamage,
+        complaint: s.complaint, faultAmounts: s.faultAmounts, deviceCondition: s.deviceCondition, existingDamage: s.existingDamage,
         accCharger: s.accCharger, accCable: s.accCable, accSim: s.accSim, accMemoryCard: s.accMemoryCard, accOther: s.accOther,
         technician: s.technician, status: ServiceStatus.delivered, labourCost: s.labourCost, warranty: s.warranty,
         warrantyPeriod: s.warrantyPeriod, estimatedAmount: s.estimatedAmount, finalAmount: s.finalAmount, advance: s.advance,
@@ -557,8 +654,35 @@ _amountBlock('FINAL AMOUNT', s.billTotal),
         deliveryPerson: personCtrl.text.trim(), deliveryStatus: 'Delivered', additionalExpense: s.additionalExpense,
         createdAt: s.createdAt, updatedAt: DateTime.now(),
       );
+      // Update delivery details first (paid/balance untouched here), then
+      // record the collected amount as a real payment - so it shows in the
+      // Payments history too, not just as a raw number overwrite.
       await _serviceRepo.update(updated);
+      if (amountCollected > 0) {
+        await _serviceRepo.recordPayment(serviceId: widget.serviceId, amount: amountCollected, paymentMethod: 'Delivery Collection');
+      }
       await _serviceRepo.changeStatus(widget.serviceId, ServiceStatus.delivered);
+
+      // Best-effort WhatsApp "delivered" notification - must never block the
+      // delivery from being recorded if WhatsApp isn't available.
+      if (_customer?.phone != null && _customer!.phone!.trim().isNotEmpty) {
+        try {
+          final freshTotal = s.billTotal;
+          final freshPaid = s.paid + amountCollected;
+          final msg = _waService.deliveryMessage(
+            customerName: _customer!.name,
+            billNo: s.billNo,
+            mobileName: s.mobileName,
+            totalAmount: freshTotal,
+            paidAmount: freshPaid,
+          );
+          await _waService.sendWhatsApp(phone: _customer!.phone!, message: msg);
+        } catch (_) {}
+      }
+
+      if (mounted) {
+        ScaffoldMessenger.of(context).showSnackBar(const SnackBar(content: Text('Marked as Delivered')));
+      }
       _load();
     }
   }
