@@ -1,7 +1,10 @@
 import 'package:flutter/material.dart';
+import 'package:provider/provider.dart';
 
 import '../../core/repositories/purchase_repository.dart';
 import '../../core/repositories/supplier_repository.dart';
+import '../../core/services/auth_service.dart';
+import '../../core/theme/app_theme.dart';
 import '../../core/utils/formatters.dart';
 import '../../models/purchase.dart';
 import '../../widgets/section_card.dart';
@@ -40,6 +43,7 @@ class _PurchaseListScreenState extends State<PurchaseListScreen> {
 
   @override
   Widget build(BuildContext context) {
+    final auth = context.watch<AuthService>();
     return Scaffold(
       body: _loading
           ? const Center(child: CircularProgressIndicator())
@@ -56,6 +60,13 @@ class _PurchaseListScreenState extends State<PurchaseListScreen> {
                         subtitle: Text(
                             '${_supplierNames[purchase.supplierId] ?? 'No supplier'}\n${formatDate(purchase.purchaseDate)}  •  Balance: ${formatCurrency(purchase.balance)}'),
                         isThreeLine: true,
+                        trailing: auth.canDelete
+                            ? IconButton(
+                                icon: const Icon(Icons.delete_rounded, color: AppColors.danger),
+                                tooltip: 'Delete purchase',
+                                onPressed: () => _delete(purchase),
+                              )
+                            : null,
                       ),
                     );
                   },
@@ -69,5 +80,34 @@ class _PurchaseListScreenState extends State<PurchaseListScreen> {
         label: const Text('New Purchase'),
       ),
     );
+  }
+
+  /// Admin/permission-gated Delete. Reverses the stock/cost impact of every
+  /// line item in this purchase before removing it (see
+  /// PurchaseRepository.delete).
+  Future<void> _delete(Purchase purchase) async {
+    final ok = await showDialog<bool>(
+      context: context,
+      builder: (context) => AlertDialog(
+        title: const Text('Delete Purchase?'),
+        content: Text(
+            'This ${purchase.category} purchase (${formatCurrency(purchase.totalAmount)}) will be removed and the stock it added will be reversed. This cannot be undone from here.'),
+        actions: [
+          TextButton(onPressed: () => Navigator.pop(context, false), child: const Text('Cancel')),
+          ElevatedButton(
+            style: ElevatedButton.styleFrom(backgroundColor: AppColors.danger),
+            onPressed: () => Navigator.pop(context, true),
+            child: const Text('Delete'),
+          ),
+        ],
+      ),
+    );
+    if (ok == true) {
+      await _repo.delete(purchase.id);
+      if (mounted) {
+        ScaffoldMessenger.of(context).showSnackBar(const SnackBar(content: Text('Purchase deleted')));
+      }
+      _load();
+    }
   }
 }

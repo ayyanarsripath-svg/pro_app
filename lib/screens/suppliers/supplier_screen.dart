@@ -1,6 +1,9 @@
 import 'package:flutter/material.dart';
+import 'package:provider/provider.dart';
 
 import '../../core/repositories/supplier_repository.dart';
+import '../../core/services/auth_service.dart';
+import '../../core/theme/app_theme.dart';
 import '../../models/supplier.dart';
 import '../../widgets/section_card.dart';
 
@@ -33,6 +36,7 @@ class _SupplierScreenState extends State<SupplierScreen> {
 
   @override
   Widget build(BuildContext context) {
+    final auth = context.watch<AuthService>();
     return Scaffold(
       body: _loading
           ? const Center(child: CircularProgressIndicator())
@@ -49,6 +53,13 @@ class _SupplierScreenState extends State<SupplierScreen> {
                         title: Text(s.name),
                         subtitle: Text('${s.phone ?? ''}\n${s.address ?? ''}'),
                         isThreeLine: true,
+                        trailing: auth.canDelete
+                            ? IconButton(
+                                icon: const Icon(Icons.delete_rounded, color: AppColors.danger),
+                                tooltip: 'Delete supplier',
+                                onPressed: () => _delete(s),
+                              )
+                            : null,
                       ),
                     );
                   },
@@ -59,6 +70,33 @@ class _SupplierScreenState extends State<SupplierScreen> {
         label: const Text('Add Supplier'),
       ),
     );
+  }
+
+  /// Admin/permission-gated Delete (small confirmation dialog, same pattern
+  /// used for accessories/spare parts).
+  Future<void> _delete(Supplier s) async {
+    final ok = await showDialog<bool>(
+      context: context,
+      builder: (context) => AlertDialog(
+        title: const Text('Delete Supplier?'),
+        content: Text('${s.name} will be removed from the list. Past purchases from this supplier stay in your records. This cannot be undone from here.'),
+        actions: [
+          TextButton(onPressed: () => Navigator.pop(context, false), child: const Text('Cancel')),
+          ElevatedButton(
+            style: ElevatedButton.styleFrom(backgroundColor: AppColors.danger),
+            onPressed: () => Navigator.pop(context, true),
+            child: const Text('Delete'),
+          ),
+        ],
+      ),
+    );
+    if (ok == true) {
+      await _repo.delete(s.id);
+      if (mounted) {
+        ScaffoldMessenger.of(context).showSnackBar(const SnackBar(content: Text('Supplier deleted')));
+      }
+      _load();
+    }
   }
 
   Future<void> _add() async {

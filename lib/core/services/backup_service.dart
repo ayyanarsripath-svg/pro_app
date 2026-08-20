@@ -1,5 +1,6 @@
 import 'dart:io';
 
+import 'package:flutter/services.dart' show PlatformException;
 import 'package:path/path.dart' as p;
 import 'package:path_provider/path_provider.dart';
 import 'package:googleapis/drive/v3.dart' as drive;
@@ -109,11 +110,47 @@ class BackupService {
   // see class doc comment above).
   // ---------------------------------------------------------------------
 
+  /// Opens the "choose a Google account" picker and links Drive backup.
+  ///
+  /// Before this fix, if the account picker itself failed to hand back a
+  /// signed-in account - almost always because this build's Google Cloud
+  /// OAuth client hasn't been set up yet, or its SHA-1/package name don't
+  /// match this APK (see README "Google Drive Backup Setup") -
+  /// `_googleSignIn.signIn()` throws a [PlatformException] that nothing
+  /// caught. That exception was silently swallowed by Flutter's error zone,
+  /// so the "Connect Google Drive" button just looked frozen after tapping
+  /// an account: no error, no snackbar, nothing. It now always resolves,
+  /// and throws a plain-English [Exception] the screen can show the user.
   Future<bool> signInToGoogleDrive() async {
-    final account = await _googleSignIn.signIn();
-    if (account == null) return false;
-    await _settings.set(SettingsRepository.googleDriveLinked, 'true');
-    return true;
+    try {
+      final account = await _googleSignIn.signIn();
+      if (account == null) return false; // user cancelled the picker
+      await _settings.set(SettingsRepository.googleDriveLinked, 'true');
+      return true;
+    } on PlatformException catch (e) {
+      throw Exception(_friendlyGoogleError(e));
+    }
+  }
+
+  /// Translates the raw Google sign-in error codes into something a shop
+  /// owner (not a developer) can act on.
+  String _friendlyGoogleError(PlatformException e) {
+    switch (e.code) {
+      case 'sign_in_failed':
+        // Code 10 / DEVELOPER_ERROR under this same code is by far the most
+        // common cause: no OAuth client configured yet for this app, or its
+        // SHA-1 fingerprint / package name doesn't match this build.
+        return 'Google sign-in failed (${e.message ?? 'sign_in_failed'}). '
+            'This almost always means the Google Cloud OAuth client for this '
+            'app isn\'t set up yet, or its SHA-1 fingerprint / package name '
+            'doesn\'t match this build. See README "Google Drive Backup Setup".';
+      case 'network_error':
+        return 'No internet connection - Google sign-in needs one. Try again once you\'re online.';
+      case 'sign_in_canceled':
+        return 'Sign-in was cancelled.';
+      default:
+        return 'Google sign-in failed: ${e.message ?? e.code}.';
+    }
   }
 
   Future<void> signOutOfGoogleDrive() async {
@@ -125,32 +162,38 @@ class BackupService {
       (await _settings.get(SettingsRepository.googleDriveLinked)) == 'true';
 
   Future<String?> backupToGoogleDrive() async {
-    final account = _googleSignIn.currentUser ?? await _googleSignIn.signInSilently();
-    if (account == null) return null;
+    try {
+      final account = _googleSignIn.currentUser ?? await _googleSignIn.signInSilently();
+      if (account == null) {
+        throw Exception('Not signed in to Google Drive - use "Connect Google Drive" first.');
+      }
 
-    final authHeaders = await account.authHeaders;
-    final client = _GoogleAuthClient(authHeaders);
-    final driveApi = drive.DriveApi(client);
+      final authHeaders = await account.authHeaders;
+      final client = _GoogleAuthClient(authHeaders);
+      final driveApi = drive.DriveApi(client);
 
-    final backupFile = await createManualBackup();
-    final driveFile = drive.File()
-      ..name = p.basename(backupFile.path)
-      ..parents = ['appDataFolder'];
+      final backupFile = await createManualBackup();
+      final driveFile = drive.File()
+        ..name = p.basename(backupFile.path)
+        ..parents = ['appDataFolder'];
 
-    final media = drive.Media(backupFile.openRead(), await backupFile.length());
-    final uploaded = await driveApi.files.create(driveFile, uploadMedia: media);
+      final media = drive.Media(backupFile.openRead(), await backupFile.length());
+      final uploaded = await driveApi.files.create(driveFile, uploadMedia: media);
 
-    final db = await _dbHelper.database;
-    await db.insert('backups', {
-      'id': newId(),
-      'backup_date': DateTime.now().toIso8601String(),
-      'type': 'google_drive',
-      'file_path': uploaded.id,
-      'status': 'success',
-      'notes': 'Uploaded to Google Drive App Data folder',
-    });
+      final db = await _dbHelper.database;
+      await db.insert('backups', {
+        'id': newId(),
+        'backup_date': DateTime.now().toIso8601String(),
+        'type': 'google_drive',
+        'file_path': uploaded.id,
+        'status': 'success',
+        'notes': 'Uploaded to Google Drive App Data folder',
+      });
 
-    return uploaded.id;
+      return uploaded.id;
+    } on PlatformException catch (e) {
+      throw Exception(_friendlyGoogleError(e));
+    }
   }
 }
 

@@ -1,12 +1,17 @@
+import 'dart:io';
+
 import 'package:flutter/material.dart';
+import 'package:image_picker/image_picker.dart';
 import 'package:provider/provider.dart';
 
 import '../../core/repositories/settings_repository.dart';
 import '../../core/services/auth_service.dart';
+import '../../core/services/logo_service.dart';
 import '../../core/services/theme_service.dart';
 import '../../core/theme/app_theme.dart';
 import '../../widgets/section_card.dart';
 import 'backup_screen.dart';
+import 'menu_order_screen.dart';
 import 'staff_screen.dart';
 
 class SettingsScreen extends StatefulWidget {
@@ -47,10 +52,28 @@ class _SettingsScreenState extends State<SettingsScreen> {
     if (mounted) ScaffoldMessenger.of(context).showSnackBar(const SnackBar(content: Text('Shop details saved - will appear on printed bills.')));
   }
 
+  Future<void> _changeLogo() async {
+    final picker = ImagePicker();
+    final picked = await picker.pickImage(source: ImageSource.gallery, imageQuality: 90);
+    if (picked == null) return;
+    await context.read<LogoService>().setLogo(File(picked.path));
+    if (mounted) {
+      ScaffoldMessenger.of(context).showSnackBar(
+        const SnackBar(content: Text('Logo updated - it now shows in the menu and on printed bills.')),
+      );
+    }
+  }
+
+  Future<void> _resetLogo() async {
+    await context.read<LogoService>().clearLogo();
+    if (mounted) ScaffoldMessenger.of(context).showSnackBar(const SnackBar(content: Text('Logo reset to default')));
+  }
+
   @override
   Widget build(BuildContext context) {
     final auth = context.watch<AuthService>();
     final theme = context.watch<ThemeService>();
+    final logo = context.watch<LogoService>();
     if (_loading) return const Center(child: CircularProgressIndicator());
 
     return ListView(
@@ -66,6 +89,46 @@ class _SettingsScreenState extends State<SettingsScreen> {
             onChanged: (v) => theme.setDark(v),
           ),
         ]),
+        SectionCard(title: 'App Logo', icon: Icons.image_rounded, children: [
+          Text(
+            'Shown in the menu and on printed bills.',
+            style: TextStyle(color: AppColors.textSecondaryOf(context), fontSize: 12.5),
+          ),
+          const SizedBox(height: 10),
+          Row(
+            children: [
+              Container(
+                width: 64,
+                height: 64,
+                padding: const EdgeInsets.all(6),
+                decoration: BoxDecoration(
+                  color: AppColors.bgOf(context),
+                  borderRadius: BorderRadius.circular(12),
+                  border: Border.all(color: AppColors.borderOf(context)),
+                ),
+                child: logo.hasCustomLogo
+                    ? Image.file(logo.logoFile!, fit: BoxFit.contain)
+                    : Image.asset('assets/images/logo_color.png', fit: BoxFit.contain),
+              ),
+              const SizedBox(width: 14),
+              Expanded(
+                child: Wrap(
+                  spacing: 8,
+                  runSpacing: 8,
+                  children: [
+                    ElevatedButton.icon(
+                      onPressed: _changeLogo,
+                      icon: const Icon(Icons.upload_rounded),
+                      label: const Text('Change Logo'),
+                    ),
+                    if (logo.hasCustomLogo)
+                      OutlinedButton(onPressed: _resetLogo, child: const Text('Reset to Default')),
+                  ],
+                ),
+              ),
+            ],
+          ),
+        ]),
         SectionCard(title: 'Shop Details (shown on printed bills)', icon: Icons.storefront_rounded, children: [
           TextField(controller: _nameCtrl, decoration: const InputDecoration(labelText: 'Shop Name')),
           const SizedBox(height: 10),
@@ -77,6 +140,15 @@ class _SettingsScreenState extends State<SettingsScreen> {
           const SizedBox(height: 12),
           ElevatedButton(onPressed: _saveShopInfo, child: const Text('Save Shop Details')),
         ]),
+        Card(
+          child: ListTile(
+            leading: const Icon(Icons.reorder_rounded, color: AppColors.primaryBlue),
+            title: const Text('Customize Menu'),
+            subtitle: const Text('Reorder the drawer menu - move what you use most to the top'),
+            trailing: const Icon(Icons.chevron_right),
+            onTap: () => Navigator.push(context, MaterialPageRoute(builder: (_) => const MenuOrderScreen())),
+          ),
+        ),
         Card(
           child: ListTile(
             leading: const Icon(Icons.backup_rounded, color: AppColors.primaryBlue),

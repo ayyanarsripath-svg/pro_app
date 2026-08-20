@@ -36,4 +36,12 @@ class SupplierRepository {
     if (rows.isEmpty) return null;
     return Supplier.fromMap(rows.first);
   }
+
+  /// Deletes a supplier. Purchases already recorded against this supplier
+  /// keep their own history (supplier_id is simply left dangling on old
+  /// rows), so past purchase/P&L numbers are never affected.
+  Future<void> delete(String id) async {
+    final db = await _dbHelper.database;
+    await db.delete('suppliers', where: 'id = ?', whereArgs: [id]);
+  }
 }

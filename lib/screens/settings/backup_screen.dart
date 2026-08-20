@@ -96,40 +96,82 @@ class _BackupScreenState extends State<BackupScreen> {
     );
   }
 
+  /// Shows an error in a dialog (not just a snackbar) so a long "why this
+  /// failed" message - e.g. the Google OAuth setup explanation - is fully
+  /// readable instead of getting clipped at the bottom of the screen.
+  void _showError(String title, Object error) {
+    if (!mounted) return;
+    final message = error.toString().replaceFirst('Exception: ', '');
+    showDialog(
+      context: context,
+      builder: (context) => AlertDialog(
+        title: Text(title),
+        content: Text(message),
+        actions: [TextButton(onPressed: () => Navigator.pop(context), child: const Text('OK'))],
+      ),
+    );
+  }
+
   Future<void> _createBackup() async {
     setState(() => _working = true);
-    await _backupService.createManualBackup();
-    if (mounted) ScaffoldMessenger.of(context).showSnackBar(const SnackBar(content: Text('Backup created')));
-    setState(() => _working = false);
+    try {
+      await _backupService.createManualBackup();
+      if (mounted) ScaffoldMessenger.of(context).showSnackBar(const SnackBar(content: Text('Backup created')));
+    } catch (e) {
+      _showError('Backup failed', e);
+    } finally {
+      if (mounted) setState(() => _working = false);
+    }
     _load();
   }
 
+  // Previously this called signInToGoogleDrive() with no try/catch: an
+  // unconfigured/mismatched Google OAuth client throws instead of
+  // returning, so the button just sat on "working" forever with no error
+  // shown - exactly the "click பண்ணா entha responsum illa" symptom. Now
+  // every outcome (success / cancel / real error) always clears _working
+  // and, on a real error, shows why.
   Future<void> _linkDrive() async {
     setState(() => _working = true);
-    final ok = await _backupService.signInToGoogleDrive();
-    if (mounted && !ok) {
-      ScaffoldMessenger.of(context).showSnackBar(const SnackBar(content: Text('Google sign-in was cancelled or failed')));
+    try {
+      final ok = await _backupService.signInToGoogleDrive();
+      if (mounted && !ok) {
+        ScaffoldMessenger.of(context).showSnackBar(const SnackBar(content: Text('Google sign-in was cancelled')));
+      }
+    } catch (e) {
+      _showError('Google Drive connection failed', e);
+    } finally {
+      if (mounted) setState(() => _working = false);
     }
-    setState(() => _working = false);
     _load();
   }
 
   Future<void> _unlinkDrive() async {
     setState(() => _working = true);
-    await _backupService.signOutOfGoogleDrive();
-    setState(() => _working = false);
+    try {
+      await _backupService.signOutOfGoogleDrive();
+    } catch (e) {
+      _showError('Could not disconnect', e);
+    } finally {
+      if (mounted) setState(() => _working = false);
+    }
     _load();
   }
 
   Future<void> _backupToDrive() async {
     setState(() => _working = true);
-    final id = await _backupService.backupToGoogleDrive();
-    if (mounted) {
-      ScaffoldMessenger.of(context).showSnackBar(
-        SnackBar(content: Text(id != null ? 'Uploaded to Google Drive' : 'Google Drive backup failed')),
-      );
+    try {
+      final id = await _backupService.backupToGoogleDrive();
+      if (mounted) {
+        ScaffoldMessenger.of(context).showSnackBar(
+          SnackBar(content: Text(id != null ? 'Uploaded to Google Drive' : 'Google Drive backup failed')),
+        );
+      }
+    } catch (e) {
+      _showError('Google Drive backup failed', e);
+    } finally {
+      if (mounted) setState(() => _working = false);
     }
-    setState(() => _working = false);
     _load();
   }
 
@@ -147,11 +189,16 @@ class _BackupScreenState extends State<BackupScreen> {
     );
     if (confirm == true) {
       setState(() => _working = true);
-      await _backupService.restoreFrom(file);
-      if (mounted) {
-        ScaffoldMessenger.of(context).showSnackBar(const SnackBar(content: Text('Restored. Please close and reopen the app.')));
+      try {
+        await _backupService.restoreFrom(file);
+        if (mounted) {
+          ScaffoldMessenger.of(context).showSnackBar(const SnackBar(content: Text('Restored. Please close and reopen the app.')));
+        }
+      } catch (e) {
+        _showError('Restore failed', e);
+      } finally {
+        if (mounted) setState(() => _working = false);
       }
-      setState(() => _working = false);
     }
   }
 }

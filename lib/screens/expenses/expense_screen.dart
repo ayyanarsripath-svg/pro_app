@@ -1,6 +1,9 @@
 import 'package:flutter/material.dart';
+import 'package:provider/provider.dart';
 
 import '../../core/repositories/expense_repository.dart';
+import '../../core/services/auth_service.dart';
+import '../../core/theme/app_theme.dart';
 import '../../core/utils/formatters.dart';
 import '../../models/expense.dart';
 import '../../widgets/section_card.dart';
@@ -34,6 +37,7 @@ class _ExpenseScreenState extends State<ExpenseScreen> {
 
   @override
   Widget build(BuildContext context) {
+    final auth = context.watch<AuthService>();
     final total = _expenses.fold<double>(0, (s, e) => s + e.amount);
     return Scaffold(
       body: _loading
@@ -59,6 +63,13 @@ class _ExpenseScreenState extends State<ExpenseScreen> {
                         title: Text('${e.category}  •  ${formatCurrency(e.amount)}'),
                         subtitle: Text('${e.description ?? ''}\n${formatDate(e.expenseDate)}  •  ${e.paymentMethod ?? '-'}  •  ${_allocationLabel(e.allocation)}'),
                         isThreeLine: true,
+                        trailing: auth.canDelete
+                            ? IconButton(
+                                icon: const Icon(Icons.delete_rounded, color: AppColors.danger),
+                                tooltip: 'Delete expense',
+                                onPressed: () => _delete(e),
+                              )
+                            : null,
                       ),
                     )),
               ],
@@ -69,6 +80,34 @@ class _ExpenseScreenState extends State<ExpenseScreen> {
         label: const Text('Add Expense'),
       ),
     );
+  }
+
+  /// Admin/permission-gated Delete (small confirmation dialog, same pattern
+  /// used for accessories/spare parts). Also removes the matching P&L
+  /// ledger row via ExpenseRepository.delete.
+  Future<void> _delete(Expense e) async {
+    final ok = await showDialog<bool>(
+      context: context,
+      builder: (context) => AlertDialog(
+        title: const Text('Delete Expense?'),
+        content: Text('${e.category} - ${formatCurrency(e.amount)} will be removed and its P&L entry reversed. This cannot be undone from here.'),
+        actions: [
+          TextButton(onPressed: () => Navigator.pop(context, false), child: const Text('Cancel')),
+          ElevatedButton(
+            style: ElevatedButton.styleFrom(backgroundColor: AppColors.danger),
+            onPressed: () => Navigator.pop(context, true),
+            child: const Text('Delete'),
+          ),
+        ],
+      ),
+    );
+    if (ok == true) {
+      await _repo.delete(e.id);
+      if (mounted) {
+        ScaffoldMessenger.of(context).showSnackBar(const SnackBar(content: Text('Expense deleted')));
+      }
+      _load();
+    }
   }
 
   String _allocationLabel(String allocation) {

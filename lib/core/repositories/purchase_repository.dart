@@ -1,8 +1,11 @@
 import '../db/database_helper.dart';
 import '../utils/id_gen.dart';
 import '../../models/purchase.dart';
+import '../../models/spare_part.dart';
+import '../../models/accessory.dart';
 import 'spare_part_repository.dart';
 import 'accessory_repository.dart';
+import 'ledger_repository.dart';
 
 class PurchaseLineInput {
   final String itemType; // spare_part | accessory
@@ -100,5 +103,81 @@ class PurchaseRepository {
     final db = await _dbHelper.database;
     final rows = await db.query('purchase_items', where: 'purchase_id = ?', whereArgs: [purchaseId]);
     return rows.map(PurchaseItem.fromMap).toList();
+  }
+
+  /// Deletes a purchase: reverses the stock/weighted-average-cost impact of
+  /// every line item (exact reversal if nothing else touched that item
+  /// since), removes its transaction-log rows and any ledger entries tied
+  /// to it (e.g. the accessory "investment" row), then the line items and
+  /// the purchase header itself.
+  Future<void> delete(String id) async {
+    final items = await itemsFor(id);
+
+    for (final item in items) {
+      if (item.itemType == 'spare_part') {
+        await _reverseSparePart(item);
+      } else if (item.itemType == 'accessory') {
+        await _reverseAccessory(item);
+      }
+    }
+
+    final db = await _dbHelper.database;
+    await db.delete('purchase_items', where: 'purchase_id = ?', whereArgs: [id]);
+    await db.delete('purchases', where: 'id = ?', whereArgs: [id]);
+    await LedgerRepository().clearForReference('purchase', id);
+  }
+
+  Future<void> _reverseSparePart(PurchaseItem item) async {
+    final db = await _dbHelper.database;
+    await db.transaction((txn) async {
+      final rows = await txn.query('spare_parts', where: 'id = ?', whereArgs: [item.itemId]);
+      if (rows.isEmpty) return;
+      final part = SparePart.fromMap(rows.first);
+      final newStock = part.currentStock - item.quantity;
+      final newAvgCost = newStock > 0
+          ? ((part.currentStock * part.avgPurchaseCost) - (item.quantity * item.unitCost)) / newStock
+          : 0.0;
+      await txn.update(
+        'spare_parts',
+        {
+          'current_stock': newStock < 0 ? 0.0 : newStock,
+          'avg_purchase_cost': newAvgCost < 0 ? 0.0 : newAvgCost,
+        },
+        where: 'id = ?',
+        whereArgs: [item.itemId],
+      );
+      await txn.delete(
+        'spare_part_transactions',
+        where: 'reference_type = ? AND reference_id = ? AND spare_part_id = ?',
+        whereArgs: ['purchase', item.purchaseId, item.itemId],
+      );
+    });
+  }
+
+  Future<void> _reverseAccessory(PurchaseItem item) async {
+    final db = await _dbHelper.database;
+    await db.transaction((txn) async {
+      final rows = await txn.query('accessories', where: 'id = ?', whereArgs: [item.itemId]);
+      if (rows.isEmpty) return;
+      final acc = Accessory.fromMap(rows.first);
+      final newStock = acc.currentStock - item.quantity;
+      final newAvgCost = newStock > 0
+          ? ((acc.currentStock * acc.purchasePrice) - (item.quantity * item.unitCost)) / newStock
+          : 0.0;
+      await txn.update(
+        'accessories',
+        {
+          'current_stock': newStock < 0 ? 0.0 : newStock,
+          'purchase_price': newAvgCost < 0 ? 0.0 : newAvgCost,
+        },
+        where: 'id = ?',
+        whereArgs: [item.itemId],
+      );
+      await txn.delete(
+        'accessory_transactions',
+        where: 'reference_type = ? AND reference_id = ? AND accessory_id = ?',
+        whereArgs: ['purchase', item.purchaseId, item.itemId],
+      );
+    });
   }
 }

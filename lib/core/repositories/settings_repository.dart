@@ -16,6 +16,7 @@ class SettingsRepository {
   static const weeklyAutoBackupEnabled = 'weekly_auto_backup_enabled';
   static const googleDriveLinked = 'google_drive_linked';
   static const complaintPresets = 'complaint_presets';
+  static const logoPath = 'logo_path';
 
   Future<String?> get(String key) async {
     final db = await _dbHelper.database;

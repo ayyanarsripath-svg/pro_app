@@ -1,3 +1,4 @@
+import 'dart:io';
 import 'dart:typed_data';
 
 import 'package:flutter/services.dart' show rootBundle;
@@ -27,8 +28,21 @@ class PdfService {
         Uint8List? _termsNoteBytes;
         pw.Font? _fontRegular;
 
+        /// Uses the shop's own logo (set from Settings -> App Logo) once
+        /// they've replaced the default artwork, falling back to the bundled
+        /// black & white phoenix logo otherwise. Cached per PdfService
+        /// instance/print job, same as before.
         Future<Uint8List> _logo() async {
-                  _logoBytes ??= (await rootBundle.load('assets/images/logo_bw.png')).buffer.asUint8List();
+                  if (_logoBytes != null) return _logoBytes!;
+                  final customPath = await _settings.get(SettingsRepository.logoPath);
+                  if (customPath != null && customPath.isNotEmpty) {
+                    final file = File(customPath);
+                    if (await file.exists()) {
+                      _logoBytes = await file.readAsBytes();
+                      return _logoBytes!;
+                    }
+                  }
+                  _logoBytes = (await rootBundle.load('assets/images/logo_bw.png')).buffer.asUint8List();
                   return _logoBytes!;
         }
 
