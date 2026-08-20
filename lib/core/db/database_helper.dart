@@ -13,7 +13,7 @@ class DatabaseHelper {
   static final DatabaseHelper instance = DatabaseHelper._internal();
 
   static Database? _db;
-  static const int dbVersion = 2;
+  static const int dbVersion = 3;
   static const String dbFileName = 'professional_mobiles.db';
 
   Future<Database> get database async {
@@ -39,6 +39,10 @@ class DatabaseHelper {
 
   Future<void> _onUpgrade(Database db, int oldVersion, int newVersion) async {
     if (oldVersion < 2) { await db.execute('ALTER TABLE services ADD COLUMN fault_amounts TEXT'); }
+    if (oldVersion < 3) {
+      await db.execute('ALTER TABLE services ADD COLUMN active INTEGER NOT NULL DEFAULT 1');
+      await db.execute('ALTER TABLE second_hand_phones ADD COLUMN active INTEGER NOT NULL DEFAULT 1');
+    }
   }
 
   Future<void> _onCreate(Database db, int version) async {
@@ -263,6 +267,7 @@ class DatabaseHelper {
         delivery_person TEXT,
         delivery_status TEXT NOT NULL DEFAULT 'Pending',
         additional_expense REAL NOT NULL DEFAULT 0,
+        active INTEGER NOT NULL DEFAULT 1,
         created_at TEXT NOT NULL,
         updated_at TEXT NOT NULL,
         FOREIGN KEY (customer_id) REFERENCES customers(id)
@@ -376,6 +381,7 @@ class DatabaseHelper {
         notes TEXT,
         photo_path TEXT,
         status TEXT NOT NULL DEFAULT 'Purchased', -- Purchased|Repairing|Ready for Sale|Sold|Returned|Reserved
+        active INTEGER NOT NULL DEFAULT 1,
         created_at TEXT NOT NULL,
         FOREIGN KEY (customer_id) REFERENCES customers(id)
       )

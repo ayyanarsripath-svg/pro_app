@@ -1,6 +1,8 @@
 import 'package:flutter/material.dart';
+import 'package:provider/provider.dart';
 
 import '../../core/repositories/spare_part_repository.dart';
+import '../../core/services/auth_service.dart';
 import '../../core/theme/app_theme.dart';
 import '../../models/spare_part.dart';
 import '../../widgets/section_card.dart';
@@ -34,6 +36,7 @@ class _SparePartsScreenState extends State<SparePartsScreen> {
 
   @override
   Widget build(BuildContext context) {
+    final auth = context.watch<AuthService>();
     final stockValue = _parts.fold<double>(0, (s, p) => s + p.stockValue);
     return Scaffold(
       body: _loading
@@ -70,11 +73,11 @@ class _SparePartsScreenState extends State<SparePartsScreen> {
                             crossAxisAlignment: CrossAxisAlignment.end,
                             children: [
                               Text('${part.currentStock.toStringAsFixed(0)} ${part.unit}',
-                                  style: TextStyle(fontWeight: FontWeight.w800, color: part.isLowStock ? AppColors.danger : AppColors.textPrimary)),
+                                  style: TextStyle(fontWeight: FontWeight.w800, color: part.isLowStock ? AppColors.danger : AppColors.textPrimaryOf(context))),
                               if (part.isLowStock) const Text('LOW STOCK', style: TextStyle(color: AppColors.danger, fontSize: 10, fontWeight: FontWeight.w700)),
                             ],
                           ),
-                          onTap: () => _showActions(part),
+                          onTap: () => _showActions(part, auth),
                         ),
                       )),
                 ],
@@ -128,7 +131,7 @@ class _SparePartsScreenState extends State<SparePartsScreen> {
     }
   }
 
-  Future<void> _showActions(SparePart part) async {
+  Future<void> _showActions(SparePart part, AuthService auth) async {
     final action = await showModalBottomSheet<String>(
       context: context,
       builder: (context) => SafeArea(
@@ -136,12 +139,90 @@ class _SparePartsScreenState extends State<SparePartsScreen> {
           ListTile(leading: const Icon(Icons.add_box_rounded), title: const Text('Record Purchase (Stock In)'), onTap: () => Navigator.pop(context, 'purchase')),
           ListTile(leading: const Icon(Icons.tune_rounded), title: const Text('Adjust Stock'), onTap: () => Navigator.pop(context, 'adjust')),
           ListTile(leading: const Icon(Icons.assignment_return_rounded), title: const Text('Return to Supplier'), onTap: () => Navigator.pop(context, 'return')),
+          ListTile(leading: const Icon(Icons.edit_rounded), title: const Text('Edit'), onTap: () => Navigator.pop(context, 'edit')),
+          if (auth.canDelete)
+            ListTile(
+              leading: const Icon(Icons.delete_rounded, color: AppColors.danger),
+              title: const Text('Delete', style: TextStyle(color: AppColors.danger)),
+              onTap: () => Navigator.pop(context, 'delete'),
+            ),
         ]),
       ),
     );
+    if (!mounted) return;
     if (action == 'purchase') await _recordPurchase(part);
     if (action == 'adjust') await _adjustStock(part);
     if (action == 'return') await _returnToSupplier(part);
+    if (action == 'edit') await _editPart(part);
+    if (action == 'delete') await _deletePart(part);
+  }
+
+  /// Lets the shop edit an existing spare part's details/threshold.
+  Future<void> _editPart(SparePart part) async {
+    final nameCtrl = TextEditingController(text: part.name);
+    final categoryCtrl = TextEditingController(text: part.category ?? '');
+    final modelCtrl = TextEditingController(text: part.compatibleModel ?? '');
+    final thresholdCtrl = TextEditingController(text: part.lowStockThreshold.toStringAsFixed(0));
+    final ok = await showDialog<bool>(
+      context: context,
+      builder: (context) => AlertDialog(
+        title: const Text('Edit Spare Part'),
+        content: SingleChildScrollView(
+          child: Column(
+            mainAxisSize: MainAxisSize.min,
+            children: [
+              TextField(controller: nameCtrl, decoration: const InputDecoration(labelText: 'Name')),
+              const SizedBox(height: 10),
+              TextField(controller: categoryCtrl, decoration: const InputDecoration(labelText: 'Category')),
+              const SizedBox(height: 10),
+              TextField(controller: modelCtrl, decoration: const InputDecoration(labelText: 'Compatible Model')),
+              const SizedBox(height: 10),
+              TextField(controller: thresholdCtrl, keyboardType: TextInputType.number, decoration: const InputDecoration(labelText: 'Low Stock Alert Threshold')),
+            ],
+          ),
+        ),
+        actions: [
+          TextButton(onPressed: () => Navigator.pop(context, false), child: const Text('Cancel')),
+          ElevatedButton(onPressed: () => Navigator.pop(context, true), child: const Text('Save')),
+        ],
+      ),
+    );
+    if (ok == true) {
+      await _repo.update(
+        id: part.id,
+        name: nameCtrl.text.trim().isEmpty ? part.name : nameCtrl.text.trim(),
+        category: categoryCtrl.text.trim(),
+        compatibleModel: modelCtrl.text.trim(),
+        lowStockThreshold: double.tryParse(thresholdCtrl.text.trim()) ?? part.lowStockThreshold,
+      );
+      _load();
+    }
+  }
+
+  /// Admin/permission-gated Delete (spec: small confirmation dialog).
+  Future<void> _deletePart(SparePart part) async {
+    final ok = await showDialog<bool>(
+      context: context,
+      builder: (context) => AlertDialog(
+        title: const Text('Delete Spare Part?'),
+        content: Text('${part.name} will be removed from the list. This cannot be undone from here.'),
+        actions: [
+          TextButton(onPressed: () => Navigator.pop(context, false), child: const Text('Cancel')),
+          ElevatedButton(
+            style: ElevatedButton.styleFrom(backgroundColor: AppColors.danger),
+            onPressed: () => Navigator.pop(context, true),
+            child: const Text('Delete'),
+          ),
+        ],
+      ),
+    );
+    if (ok == true) {
+      await _repo.delete(part.id);
+      if (mounted) {
+        ScaffoldMessenger.of(context).showSnackBar(const SnackBar(content: Text('Spare part deleted')));
+      }
+      _load();
+    }
   }
 
   Future<void> _returnToSupplier(SparePart part) async {

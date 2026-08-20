@@ -103,10 +103,10 @@ class _AppShellState extends State<AppShell> {
                     final d = _destinations[i];
                     final selected = i == _index;
                     return ListTile(
-                      leading: Icon(d.icon, color: selected ? AppColors.primaryBlue : AppColors.textSecondary),
+                      leading: Icon(d.icon, color: selected ? AppColors.primaryBlue : AppColors.textSecondaryOf(context)),
                       title: Text(d.label,
                           style: TextStyle(
-                              color: selected ? AppColors.primaryBlue : AppColors.textPrimary,
+                              color: selected ? AppColors.primaryBlue : AppColors.textPrimaryOf(context),
                               fontWeight: selected ? FontWeight.w700 : FontWeight.w500)),
                       selected: selected,
                       selectedTileColor: AppColors.primaryBlue.withOpacity(0.08),

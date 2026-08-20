@@ -27,9 +27,9 @@ class StatCard extends StatelessWidget {
     return Container(
       padding: const EdgeInsets.all(14),
       decoration: BoxDecoration(
-        color: Colors.white,
+        color: AppColors.cardOf(context),
         borderRadius: BorderRadius.circular(14),
-        border: Border.all(color: AppColors.border),
+        border: Border.all(color: AppColors.borderOf(context)),
       ),
       child: Column(
         crossAxisAlignment: CrossAxisAlignment.start,
@@ -46,14 +46,14 @@ class StatCard extends StatelessWidget {
               ],
               Expanded(
                 child: Text(label,
-                    style: const TextStyle(fontSize: 12.5, color: AppColors.textSecondary, fontWeight: FontWeight.w600)),
+                    style: TextStyle(fontSize: 12.5, color: AppColors.textSecondaryOf(context), fontWeight: FontWeight.w600)),
               ),
             ],
           ),
           const SizedBox(height: 8),
           Text(
             isCurrency ? formatCurrency(value) : '${value.toStringAsFixed(0)}${suffixText ?? ''}',
-            style: TextStyle(fontSize: 19, fontWeight: FontWeight.w800, color: AppColors.textPrimary),
+            style: TextStyle(fontSize: 19, fontWeight: FontWeight.w800, color: AppColors.textPrimaryOf(context)),
           ),
         ],
       ),

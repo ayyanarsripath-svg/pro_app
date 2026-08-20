@@ -77,6 +77,7 @@ class _SecondHandDetailScreenState extends State<SecondHandDetailScreen> {
               if (phone.status != SecondHandStatus.sold) _actionChip('Sell Phone', Icons.sell_rounded, _sellPhone),
               if (phone.status == SecondHandStatus.sold) _actionChip('Print Sales Bill', Icons.print_rounded, _printSale),
               if (phone.status == SecondHandStatus.sold) _actionChip('Customer Return', Icons.assignment_return_rounded, _customerReturn), if (phone.status == SecondHandStatus.sold && phone.warranty && !_warrantyClaimed) _actionChip('Warranty Claim', Icons.verified_user_rounded, _fileWarrantyClaim),
+              if (auth.canDelete) _actionChip('Delete', Icons.delete_rounded, _deletePhone, color: AppColors.danger),
             ]),
             const SizedBox(height: 14),
             SectionCard(title: 'Device Details', icon: Icons.phone_iphone_rounded, children: [
@@ -103,7 +104,7 @@ class _SecondHandDetailScreenState extends State<SecondHandDetailScreen> {
               title: 'Repair / Investment',
               icon: Icons.handyman_rounded,
               children: [
-                if (_repairs.isEmpty) const Text('No repair items added', style: TextStyle(color: AppColors.textSecondary, fontSize: 12.5)),
+                if (_repairs.isEmpty) Text('No repair items added', style: TextStyle(color: AppColors.textSecondaryOf(context), fontSize: 12.5)),
                 ..._repairs.map((r) => ListTile(
                       dense: true,
                       contentPadding: EdgeInsets.zero,
@@ -132,7 +133,7 @@ class _SecondHandDetailScreenState extends State<SecondHandDetailScreen> {
                   ),
                 ] else
                   Text('Potential Profit: ${formatCurrency(phone.potentialProfit)}',
-                      style: const TextStyle(fontStyle: FontStyle.italic, color: AppColors.textSecondary)),
+                      style: TextStyle(fontStyle: FontStyle.italic, color: AppColors.textSecondaryOf(context))),
               ]),
             if (phone.notes != null && phone.notes!.isNotEmpty)
               SectionCard(title: 'Notes', icon: Icons.notes_rounded, children: [Text(phone.notes!)]),
@@ -146,7 +147,7 @@ class _SecondHandDetailScreenState extends State<SecondHandDetailScreen> {
         padding: const EdgeInsets.only(bottom: 4),
         child: RichText(
           text: TextSpan(
-            style: const TextStyle(color: AppColors.textPrimary, fontSize: 13.5),
+            style: TextStyle(color: AppColors.textPrimaryOf(context), fontSize: 13.5),
             children: [
               TextSpan(text: '$label: ', style: const TextStyle(fontWeight: FontWeight.w700)),
               TextSpan(text: (value == null || value.isEmpty) ? '-' : value),
@@ -155,8 +156,8 @@ class _SecondHandDetailScreenState extends State<SecondHandDetailScreen> {
         ),
       );
 
-  Widget _actionChip(String label, IconData icon, VoidCallback onTap) => ActionChip(
-        avatar: Icon(icon, size: 16, color: AppColors.primaryBlue),
+  Widget _actionChip(String label, IconData icon, VoidCallback onTap, {Color? color}) => ActionChip(
+        avatar: Icon(icon, size: 16, color: color ?? AppColors.primaryBlue),
         label: Text(label),
         onPressed: onTap,
       );
@@ -358,6 +359,33 @@ class _SecondHandDetailScreenState extends State<SecondHandDetailScreen> {
       _load();
     }
   }
+  /// Admin/permission-gated Delete (spec: small confirmation dialog).
+  Future<void> _deletePhone() async {
+    final phone = _phone!;
+    final ok = await showDialog<bool>(
+      context: context,
+      builder: (context) => AlertDialog(
+        title: const Text('Delete Record?'),
+        content: Text('${phone.purchaseNo} (${phone.brand ?? ''} ${phone.model ?? ''}) will be removed from lists. This cannot be undone from here.'),
+        actions: [
+          TextButton(onPressed: () => Navigator.pop(context, false), child: const Text('Cancel')),
+          ElevatedButton(
+            style: ElevatedButton.styleFrom(backgroundColor: AppColors.danger),
+            onPressed: () => Navigator.pop(context, true),
+            child: const Text('Delete'),
+          ),
+        ],
+      ),
+    );
+    if (ok == true) {
+      await _repo.delete(phone.id);
+      if (mounted) {
+        ScaffoldMessenger.of(context).showSnackBar(const SnackBar(content: Text('Record deleted')));
+        Navigator.of(context).pop();
+      }
+    }
+  }
+
   Future<void> _fileWarrantyClaim() async {
     final phone = _phone!;
     final sale = await _repo.latestSaleForPhone(widget.phoneId);

@@ -154,7 +154,7 @@ class _MonthEndReportScreenState extends State<MonthEndReportScreen> {
                 style: TextStyle(
                   fontWeight: bold ? FontWeight.w800 : FontWeight.w500,
                   fontSize: big ? 17 : 13,
-                  color: value < 0 ? AppColors.danger : AppColors.textPrimary,
+                  color: value < 0 ? AppColors.danger : AppColors.textPrimaryOf(context),
                 )),
           ],
         ),

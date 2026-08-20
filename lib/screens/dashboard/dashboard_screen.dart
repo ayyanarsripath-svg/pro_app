@@ -94,10 +94,10 @@ class _DashboardScreenState extends State<DashboardScreen> {
                 ],
               ),
               if (!auth.canSeeProfit)
-                const Padding(
-                  padding: EdgeInsets.only(top: 8),
+                Padding(
+                  padding: const EdgeInsets.only(top: 8),
                   child: Text('Profit figures are hidden for your account. Ask Admin for access.',
-                      style: TextStyle(color: AppColors.textSecondary, fontSize: 11.5)),
+                      style: TextStyle(color: AppColors.textSecondaryOf(context), fontSize: 11.5)),
                 ),
               const SizedBox(height: 18),
               Row(
@@ -174,7 +174,7 @@ class _DashboardScreenState extends State<DashboardScreen> {
       child: Column(
         crossAxisAlignment: CrossAxisAlignment.start,
         children: [
-          Text(label, style: const TextStyle(fontSize: 11, color: AppColors.textSecondary)),
+          Text(label, style: TextStyle(fontSize: 11, color: AppColors.textSecondaryOf(context))),
           const SizedBox(height: 2),
           Text(
             isCurrency ? '₹${value.toStringAsFixed(0)}' : value.toStringAsFixed(0),
@@ -211,7 +211,7 @@ class _QuickStat extends StatelessWidget {
               crossAxisAlignment: CrossAxisAlignment.start,
               children: [
                 Text(value, style: TextStyle(fontSize: 20, fontWeight: FontWeight.w800, color: color)),
-                Text(title, style: const TextStyle(fontSize: 11.5, color: AppColors.textSecondary)),
+                Text(title, style: TextStyle(fontSize: 11.5, color: AppColors.textSecondaryOf(context))),
               ],
             ),
           ),

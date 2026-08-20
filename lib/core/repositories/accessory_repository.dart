@@ -52,6 +52,43 @@ class AccessoryRepository {
     return Accessory.fromMap(rows.first);
   }
 
+  /// Edits an existing accessory's details - most importantly the
+  /// low-stock threshold, which previously could only be set at creation.
+  Future<void> update({
+    required String id,
+    String? name,
+    String? category,
+    String? brand,
+    String? unit,
+    double? sellingPrice,
+    double? lowStockThreshold,
+  }) async {
+    final db = await _dbHelper.database;
+    final rows = await db.query('accessories', where: 'id = ?', whereArgs: [id]);
+    if (rows.isEmpty) return;
+    final acc = Accessory.fromMap(rows.first);
+    final updated = Accessory(
+      id: acc.id,
+      name: name ?? acc.name,
+      category: category ?? acc.category,
+      brand: brand ?? acc.brand,
+      unit: unit ?? acc.unit,
+      currentStock: acc.currentStock,
+      purchasePrice: acc.purchasePrice,
+      sellingPrice: sellingPrice ?? acc.sellingPrice,
+      lowStockThreshold: lowStockThreshold ?? acc.lowStockThreshold,
+      active: acc.active,
+      createdAt: acc.createdAt,
+    );
+    await db.update('accessories', updated.toMap(), where: 'id = ?', whereArgs: [id]);
+  }
+
+  /// Soft-deletes an accessory (admin-gated Delete option).
+  Future<void> delete(String id) async {
+    final db = await _dbHelper.database;
+    await db.update('accessories', {'active': 0}, where: 'id = ?', whereArgs: [id]);
+  }
+
   /// Purchase stock-in. Recomputes purchase_price as weighted average and
   /// logs an "investment" ledger row (money spent buying stock - visible in
   /// inventory valuation) WITHOUT touching the Accessories P&L cost line.

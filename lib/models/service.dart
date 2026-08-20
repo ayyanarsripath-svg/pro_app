@@ -51,6 +51,7 @@ class ServiceJob {
   final String? deliveryPerson;
   final String deliveryStatus;
   final double additionalExpense;
+  final bool active;
   final DateTime createdAt;
   final DateTime updatedAt;
 
@@ -84,6 +85,7 @@ class ServiceJob {
     this.deliveryPerson,
     this.deliveryStatus = 'Pending',
     this.additionalExpense = 0,
+    this.active = true,
     required this.createdAt,
     required this.updatedAt,
   });
@@ -132,6 +134,7 @@ bool get isPaymentPending => displayBalance > 0;
         deliveryPerson: m['delivery_person'] as String?,
         deliveryStatus: m['delivery_status'] as String? ?? 'Pending',
         additionalExpense: (m['additional_expense'] as num?)?.toDouble() ?? 0,
+        active: (m['active'] as int? ?? 1) == 1,
         createdAt: DateTime.parse(m['created_at'] as String),
         updatedAt: DateTime.parse(m['updated_at'] as String),
       );
@@ -166,6 +169,7 @@ bool get isPaymentPending => displayBalance > 0;
         'delivery_person': deliveryPerson,
         'delivery_status': deliveryStatus,
         'additional_expense': additionalExpense,
+        'active': active ? 1 : 0,
         'created_at': createdAt.toIso8601String(),
         'updated_at': updatedAt.toIso8601String(),
       };

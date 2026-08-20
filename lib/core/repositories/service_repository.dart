@@ -170,11 +170,21 @@ class ServiceRepository {
       deliveryPerson: service.deliveryPerson,
       deliveryStatus: service.deliveryStatus,
       additionalExpense: service.additionalExpense,
+      active: service.active,
       createdAt: service.createdAt,
       updatedAt: DateTime.now(),
     );
     await db.update('services', updated.toMap(), where: 'id = ?', whereArgs: [service.id]);
     await _syncCoreLedger(updated);
+  }
+
+  /// Soft-deletes a service job (spec: Delete option gated by admin
+  /// "Delete Records" permission). Keeps the row (and its ledger/payment
+  /// history) intact for accounting integrity - just hides it from lists.
+  Future<void> delete(String serviceId) async {
+    final db = await _dbHelper.database;
+    await db.update('services', {'active': 0, 'updated_at': DateTime.now().toIso8601String()},
+        where: 'id = ?', whereArgs: [serviceId]);
   }
 
   Future<void> changeStatus(String serviceId, String newStatus, {String? changedBy, String? notes}) async {
@@ -333,12 +343,19 @@ class ServiceRepository {
     ).toMap());
   }
 
-  Future<List<ServiceJob>> all({String? statusFilter}) async {
+  Future<List<ServiceJob>> all({String? statusFilter, bool activeOnly = true}) async {
     final db = await _dbHelper.database;
+    final conditions = <String>[];
+    final args = <Object?>[];
+    if (activeOnly) conditions.add('active = 1');
+    if (statusFilter != null) {
+      conditions.add('status = ?');
+      args.add(statusFilter);
+    }
     final rows = await db.query(
       'services',
-      where: statusFilter != null ? 'status = ?' : null,
-      whereArgs: statusFilter != null ? [statusFilter] : null,
+      where: conditions.isEmpty ? null : conditions.join(' AND '),
+      whereArgs: args.isEmpty ? null : args,
       orderBy: 'created_at DESC',
     );
     return rows.map(ServiceJob.fromMap).toList();

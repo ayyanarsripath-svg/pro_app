@@ -113,7 +113,7 @@ class _ServiceDetailScreenState extends State<ServiceDetailScreen> {
               ],
             ),
             const SizedBox(height: 12),
-            _quickActions(),
+            _quickActions(auth),
             const SizedBox(height: 14),
             _paymentSummaryCard(s),
             const SizedBox(height: 14),
@@ -161,7 +161,7 @@ class _ServiceDetailScreenState extends State<ServiceDetailScreen> {
                 _row('Technician', s.technician),
                 _row('Status', s.status),
                 const SizedBox(height: 6),
-                if (_usages.isEmpty) const Text('No spare parts used yet', style: TextStyle(color: AppColors.textSecondary, fontSize: 12.5)),
+                if (_usages.isEmpty) Text('No spare parts used yet', style: TextStyle(color: AppColors.textSecondaryOf(context), fontSize: 12.5)),
                 ..._usages.map((u) => ListTile(
                       dense: true,
                       contentPadding: EdgeInsets.zero,
@@ -181,7 +181,7 @@ class _ServiceDetailScreenState extends State<ServiceDetailScreen> {
               trailing: TextButton.icon(onPressed: _addPhoto, icon: const Icon(Icons.add_a_photo_rounded, size: 16), label: const Text('Add')),
               children: [
                 if (_photos.isEmpty)
-                  const Text('No photos added', style: TextStyle(color: AppColors.textSecondary, fontSize: 12.5))
+                  Text('No photos added', style: TextStyle(color: AppColors.textSecondaryOf(context), fontSize: 12.5))
                 else
                   SizedBox(
                     height: 84,
@@ -209,7 +209,7 @@ class _ServiceDetailScreenState extends State<ServiceDetailScreen> {
         padding: const EdgeInsets.only(bottom: 4),
         child: RichText(
           text: TextSpan(
-            style: const TextStyle(color: AppColors.textPrimary, fontSize: 13.5),
+            style: TextStyle(color: AppColors.textPrimaryOf(context), fontSize: 13.5),
             children: [
               TextSpan(text: '$label: ', style: const TextStyle(fontWeight: FontWeight.w700)),
               TextSpan(text: (value == null || value.isEmpty) ? '-' : value),
@@ -219,11 +219,11 @@ class _ServiceDetailScreenState extends State<ServiceDetailScreen> {
       );
 
   Widget _tag(String label, bool active) => Chip(
-        avatar: Icon(active ? Icons.check_circle : Icons.circle_outlined, size: 16, color: active ? AppColors.success : AppColors.textSecondary),
+        avatar: Icon(active ? Icons.check_circle : Icons.circle_outlined, size: 16, color: active ? AppColors.success : AppColors.textSecondaryOf(context)),
         label: Text(label),
       );
 
-  Widget _quickActions() {
+  Widget _quickActions(AuthService auth) {
     final actions = <_QuickAction>[
       _QuickAction('Edit', Icons.edit_rounded, _editService),
       _QuickAction('Add Payment', Icons.payments_rounded, _addPayment),
@@ -233,6 +233,7 @@ class _ServiceDetailScreenState extends State<ServiceDetailScreen> {
       _QuickAction('SMS', Icons.sms_rounded, _sendSms),
       _QuickAction('Delivery', Icons.local_shipping_rounded, _markDelivery),
       if (!_warrantyClaimed) _QuickAction('Warranty Claim', Icons.assignment_return_rounded, _fileWarrantyClaim),
+      if (auth.canDelete) _QuickAction('Delete', Icons.delete_rounded, _deleteService),
     ];
     return SizedBox(
       height: 74,
@@ -249,14 +250,14 @@ class _ServiceDetailScreenState extends State<ServiceDetailScreen> {
               width: 74,
               padding: const EdgeInsets.symmetric(vertical: 8),
               decoration: BoxDecoration(
-                color: Colors.white,
+                color: AppColors.cardOf(context),
                 borderRadius: BorderRadius.circular(12),
-                border: Border.all(color: AppColors.border),
+                border: Border.all(color: AppColors.borderOf(context)),
               ),
               child: Column(
                 mainAxisAlignment: MainAxisAlignment.center,
                 children: [
-                  Icon(a.icon, size: 20, color: AppColors.primaryBlue),
+                  Icon(a.icon, size: 20, color: a.label == 'Delete' ? AppColors.danger : AppColors.primaryBlue),
                   const SizedBox(height: 4),
                   Text(a.label, textAlign: TextAlign.center, style: const TextStyle(fontSize: 9.5)),
                 ],
@@ -401,6 +402,7 @@ _amountBlock('FINAL AMOUNT', s.billTotal),
         deliveryPerson: s.deliveryPerson,
         deliveryStatus: s.deliveryStatus,
         additionalExpense: double.tryParse(expenseCtrl.text.trim()) ?? s.additionalExpense,
+        active: s.active,
         createdAt: s.createdAt,
         updatedAt: DateTime.now(),
       );
@@ -464,6 +466,7 @@ _amountBlock('FINAL AMOUNT', s.billTotal),
         deliveryPerson: s.deliveryPerson,
         deliveryStatus: s.deliveryStatus,
         additionalExpense: s.additionalExpense,
+        active: s.active,
         createdAt: s.createdAt,
         updatedAt: DateTime.now(),
       );
@@ -652,7 +655,7 @@ _amountBlock('FINAL AMOUNT', s.billTotal),
         warrantyPeriod: s.warrantyPeriod, estimatedAmount: s.estimatedAmount, finalAmount: s.finalAmount, advance: s.advance,
         paid: s.paid, balance: s.balance, expectedDate: s.expectedDate, actualDate: DateTime.now(),
         deliveryPerson: personCtrl.text.trim(), deliveryStatus: 'Delivered', additionalExpense: s.additionalExpense,
-        createdAt: s.createdAt, updatedAt: DateTime.now(),
+        active: s.active, createdAt: s.createdAt, updatedAt: DateTime.now(),
       );
       // Update delivery details first (paid/balance untouched here), then
       // record the collected amount as a real payment - so it shows in the
@@ -684,6 +687,34 @@ _amountBlock('FINAL AMOUNT', s.billTotal),
         ScaffoldMessenger.of(context).showSnackBar(const SnackBar(content: Text('Marked as Delivered')));
       }
       _load();
+    }
+  }
+
+  /// Admin/permission-gated Delete (spec: small confirmation dialog, hides
+  /// the record without losing its accounting/ledger history).
+  Future<void> _deleteService() async {
+    final s = _service!;
+    final ok = await showDialog<bool>(
+      context: context,
+      builder: (context) => AlertDialog(
+        title: const Text('Delete Service?'),
+        content: Text('SERVICE ${s.billNo} will be removed from lists. This cannot be undone from here.'),
+        actions: [
+          TextButton(onPressed: () => Navigator.pop(context, false), child: const Text('Cancel')),
+          ElevatedButton(
+            style: ElevatedButton.styleFrom(backgroundColor: AppColors.danger),
+            onPressed: () => Navigator.pop(context, true),
+            child: const Text('Delete'),
+          ),
+        ],
+      ),
+    );
+    if (ok == true) {
+      await _serviceRepo.delete(s.id);
+      if (mounted) {
+        ScaffoldMessenger.of(context).showSnackBar(const SnackBar(content: Text('Service deleted')));
+        Navigator.of(context).pop();
+      }
     }
   }
 

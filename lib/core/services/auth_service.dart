@@ -54,6 +54,11 @@ class AuthService extends ChangeNotifier {
   bool get canSeeProfit => _current?.canViewProfit ?? false;
   bool get canSeeCost => _current?.canViewCost ?? false;
 
+  /// Delete Records permission (spec: admin can grant a "Delete Records"
+  /// permission to staff via the Staff/Employee permissions screen).
+  /// Admins always have it implicitly.
+  bool get canDelete => isAdmin || (_current?.canDeleteRecords ?? false);
+
   Future<bool> hasAnyAccount() => _staffRepo.hasAnyStaff();
 
   Future<Staff> setupFirstAdmin({required String name, required String pin, String? phone}) async {

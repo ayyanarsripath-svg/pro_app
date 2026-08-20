@@ -1,6 +1,8 @@
 import 'package:flutter/material.dart';
+import 'package:provider/provider.dart';
 
 import '../../core/repositories/accessory_repository.dart';
+import '../../core/services/auth_service.dart';
 import '../../core/theme/app_theme.dart';
 import '../../models/accessory.dart';
 import '../../widgets/section_card.dart';
@@ -34,6 +36,7 @@ class _AccessoriesScreenState extends State<AccessoriesScreen> {
 
   @override
   Widget build(BuildContext context) {
+    final auth = context.watch<AuthService>();
     final stockValue = _items.fold<double>(0, (s, a) => s + a.stockValue);
     return Scaffold(
       body: _loading
@@ -67,11 +70,11 @@ class _AccessoriesScreenState extends State<AccessoriesScreen> {
                             crossAxisAlignment: CrossAxisAlignment.end,
                             children: [
                               Text('${a.currentStock.toStringAsFixed(0)} ${a.unit}',
-                                  style: TextStyle(fontWeight: FontWeight.w800, color: a.isLowStock ? AppColors.danger : AppColors.textPrimary)),
+                                  style: TextStyle(fontWeight: FontWeight.w800, color: a.isLowStock ? AppColors.danger : AppColors.textPrimaryOf(context))),
                               if (a.isLowStock) const Text('LOW STOCK', style: TextStyle(color: AppColors.danger, fontSize: 10, fontWeight: FontWeight.w700)),
                             ],
                           ),
-                          onTap: () => _recordPurchase(a),
+                          onTap: () => _showActions(a, auth),
                         ),
                       )),
                 ],
@@ -131,6 +134,120 @@ class _AccessoriesScreenState extends State<AccessoriesScreen> {
         sellingPrice: double.tryParse(sellCtrl.text.trim()) ?? 0,
         lowStockThreshold: double.tryParse(thresholdCtrl.text.trim()) ?? 3,
       );
+      _load();
+    }
+  }
+
+  /// Restock / Edit / Delete menu for a single accessory (Edit is how the
+  /// low-stock threshold - and other details - can now be changed after
+  /// creation, which previously wasn't possible).
+  Future<void> _showActions(Accessory a, AuthService auth) async {
+    final action = await showModalBottomSheet<String>(
+      context: context,
+      builder: (context) => SafeArea(
+        child: Wrap(
+          children: [
+            ListTile(
+              leading: const Icon(Icons.add_shopping_cart_rounded),
+              title: const Text('Record Purchase'),
+              onTap: () => Navigator.pop(context, 'purchase'),
+            ),
+            ListTile(
+              leading: const Icon(Icons.edit_rounded),
+              title: const Text('Edit'),
+              onTap: () => Navigator.pop(context, 'edit'),
+            ),
+            if (auth.canDelete)
+              ListTile(
+                leading: const Icon(Icons.delete_rounded, color: AppColors.danger),
+                title: const Text('Delete', style: TextStyle(color: AppColors.danger)),
+                onTap: () => Navigator.pop(context, 'delete'),
+              ),
+          ],
+        ),
+      ),
+    );
+    if (!mounted || action == null) return;
+    if (action == 'purchase') {
+      await _recordPurchase(a);
+    } else if (action == 'edit') {
+      await _editAccessory(a);
+    } else if (action == 'delete') {
+      await _deleteAccessory(a);
+    }
+  }
+
+  /// Lets the shop edit an already-created accessory - most importantly the
+  /// low-stock threshold, which previously could only be set at creation.
+  Future<void> _editAccessory(Accessory a) async {
+    final nameCtrl = TextEditingController(text: a.name);
+    final categoryCtrl = TextEditingController(text: a.category ?? '');
+    final brandCtrl = TextEditingController(text: a.brand ?? '');
+    final sellCtrl = TextEditingController(text: a.sellingPrice.toStringAsFixed(0));
+    final thresholdCtrl = TextEditingController(text: a.lowStockThreshold.toStringAsFixed(0));
+
+    final ok = await showDialog<bool>(
+      context: context,
+      builder: (context) => AlertDialog(
+        title: const Text('Edit Accessory'),
+        content: SingleChildScrollView(
+          child: Column(
+            mainAxisSize: MainAxisSize.min,
+            children: [
+              TextField(controller: nameCtrl, decoration: const InputDecoration(labelText: 'Name')),
+              const SizedBox(height: 10),
+              TextField(controller: categoryCtrl, decoration: const InputDecoration(labelText: 'Category')),
+              const SizedBox(height: 10),
+              TextField(controller: brandCtrl, decoration: const InputDecoration(labelText: 'Brand')),
+              const SizedBox(height: 10),
+              TextField(controller: sellCtrl, keyboardType: TextInputType.number, decoration: const InputDecoration(labelText: 'Selling Price (₹)')),
+              const SizedBox(height: 10),
+              TextField(controller: thresholdCtrl, keyboardType: TextInputType.number, decoration: const InputDecoration(labelText: 'Low Stock Threshold')),
+            ],
+          ),
+        ),
+        actions: [
+          TextButton(onPressed: () => Navigator.pop(context, false), child: const Text('Cancel')),
+          ElevatedButton(onPressed: () => Navigator.pop(context, true), child: const Text('Save')),
+        ],
+      ),
+    );
+
+    if (ok == true) {
+      await _repo.update(
+        id: a.id,
+        name: nameCtrl.text.trim().isEmpty ? a.name : nameCtrl.text.trim(),
+        category: categoryCtrl.text.trim(),
+        brand: brandCtrl.text.trim(),
+        sellingPrice: double.tryParse(sellCtrl.text.trim()) ?? a.sellingPrice,
+        lowStockThreshold: double.tryParse(thresholdCtrl.text.trim()) ?? a.lowStockThreshold,
+      );
+      _load();
+    }
+  }
+
+  /// Admin/permission-gated Delete (spec: small confirmation dialog).
+  Future<void> _deleteAccessory(Accessory a) async {
+    final ok = await showDialog<bool>(
+      context: context,
+      builder: (context) => AlertDialog(
+        title: const Text('Delete Accessory?'),
+        content: Text('${a.name} will be removed from the list. This cannot be undone from here.'),
+        actions: [
+          TextButton(onPressed: () => Navigator.pop(context, false), child: const Text('Cancel')),
+          ElevatedButton(
+            style: ElevatedButton.styleFrom(backgroundColor: AppColors.danger),
+            onPressed: () => Navigator.pop(context, true),
+            child: const Text('Delete'),
+          ),
+        ],
+      ),
+    );
+    if (ok == true) {
+      await _repo.delete(a.id);
+      if (mounted) {
+        ScaffoldMessenger.of(context).showSnackBar(const SnackBar(content: Text('Accessory deleted')));
+      }
       _load();
     }
   }

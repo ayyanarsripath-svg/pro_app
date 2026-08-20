@@ -118,12 +118,12 @@ class _PnlDashboardScreenState extends State<PnlDashboardScreen> {
             child: Column(
               mainAxisSize: MainAxisSize.min,
               children: [
-                const Icon(Icons.lock_rounded, size: 48, color: AppColors.textSecondary),
+                Icon(Icons.lock_rounded, size: 48, color: AppColors.textSecondaryOf(context)),
                 const SizedBox(height: 12),
                 const Text('Profit & Loss is restricted', style: TextStyle(fontWeight: FontWeight.w700, fontSize: 16)),
                 const SizedBox(height: 6),
-                const Text('Ask an Admin to grant "View Profit" access to your account.',
-                    textAlign: TextAlign.center, style: TextStyle(color: AppColors.textSecondary)),
+                Text('Ask an Admin to grant "View Profit" access to your account.',
+                    textAlign: TextAlign.center, style: TextStyle(color: AppColors.textSecondaryOf(context))),
               ],
             ),
           ),
@@ -142,11 +142,16 @@ class _PnlDashboardScreenState extends State<PnlDashboardScreen> {
           : RefreshIndicator(
               onRefresh: _load,
               child: ListView(
-                padding: const EdgeInsets.all(14),
+                // Extra bottom padding (~FAB height + margin) so the
+                // floating "Other Sale" button never sits on top of the
+                // Print/PDF and Month-End Report buttons at the end of the
+                // list - previously they overlapped when scrolled to the
+                // bottom.
+                padding: const EdgeInsets.fromLTRB(14, 14, 14, 96),
                 children: [
                   _rangeSelector(),
                   const SizedBox(height: 6),
-                  Text(_periodLabel, style: const TextStyle(fontWeight: FontWeight.w700, color: AppColors.textSecondary)),
+                  Text(_periodLabel, style: TextStyle(fontWeight: FontWeight.w700, color: AppColors.textSecondaryOf(context))),
                   const SizedBox(height: 14),
                   _categoryCards(),
                   const SizedBox(height: 18),
@@ -227,7 +232,7 @@ class _PnlDashboardScreenState extends State<PnlDashboardScreen> {
     return Container(
       padding: const EdgeInsets.all(14),
       decoration: BoxDecoration(
-        color: Colors.white,
+        color: AppColors.cardOf(context),
         borderRadius: BorderRadius.circular(14),
         border: Border.all(color: color.withOpacity(0.25)),
       ),
@@ -256,14 +261,14 @@ class _PnlDashboardScreenState extends State<PnlDashboardScreen> {
         child: Column(
           crossAxisAlignment: CrossAxisAlignment.start,
           children: [
-            Text(label, style: const TextStyle(fontSize: 10.5, color: AppColors.textSecondary)),
+            Text(label, style: TextStyle(fontSize: 10.5, color: AppColors.textSecondaryOf(context))),
             const SizedBox(height: 2),
             Text(
               formatCurrency(value),
               style: TextStyle(
                 fontWeight: FontWeight.w800,
                 fontSize: 13.5,
-                color: highlight ? (value < 0 ? AppColors.danger : AppColors.success) : AppColors.textPrimary,
+                color: highlight ? (value < 0 ? AppColors.danger : AppColors.success) : AppColors.textPrimaryOf(context),
               ),
             ),
           ],

@@ -24,9 +24,9 @@ class SectionCard extends StatelessWidget {
       margin: const EdgeInsets.only(bottom: 12),
       padding: const EdgeInsets.all(14),
       decoration: BoxDecoration(
-        color: Colors.white,
+        color: AppColors.cardOf(context),
         borderRadius: BorderRadius.circular(14),
-        border: Border.all(color: AppColors.border),
+        border: Border.all(color: AppColors.borderOf(context)),
       ),
       child: Column(
         crossAxisAlignment: CrossAxisAlignment.start,
@@ -37,8 +37,8 @@ class SectionCard extends StatelessWidget {
               if (icon != null) const SizedBox(width: 6),
               Expanded(
                 child: Text(title.toUpperCase(),
-                    style: const TextStyle(
-                        fontSize: 12, fontWeight: FontWeight.w800, letterSpacing: 0.6, color: AppColors.textSecondary)),
+                    style: TextStyle(
+                        fontSize: 12, fontWeight: FontWeight.w800, letterSpacing: 0.6, color: AppColors.textSecondaryOf(context))),
               ),
               if (trailing != null) trailing!,
             ],
@@ -62,9 +62,9 @@ class EmptyState extends StatelessWidget {
       padding: const EdgeInsets.symmetric(vertical: 60),
       child: Column(
         children: [
-          Icon(icon, size: 46, color: AppColors.textSecondary.withOpacity(0.4)),
+          Icon(icon, size: 46, color: AppColors.textSecondaryOf(context).withOpacity(0.4)),
           const SizedBox(height: 10),
-          Text(message, style: const TextStyle(color: AppColors.textSecondary)),
+          Text(message, style: TextStyle(color: AppColors.textSecondaryOf(context))),
         ],
       ),
     );

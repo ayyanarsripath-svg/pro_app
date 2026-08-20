@@ -276,34 +276,34 @@ class PdfService {
                   required double totalAmount,
                   required double advanceAmount,
                   required double balanceAmount, String? faultBreakdown,
+                  bool paid = false,
         }) {
-                  return pw.Center(
-                              child: pw.Container(
-                                            width: 270,
-                                            padding: const pw.EdgeInsets.symmetric(horizontal: 12, vertical: 6),
-                                            decoration: pw.BoxDecoration(
-                                                          color: PdfColors.grey200,
-                                                          border: pw.Border.all(color: PdfColors.grey700, width: 0.7),
-                                                          borderRadius: const pw.BorderRadius.all(pw.Radius.circular(3)),
-                                                        ),
-                                            child: pw.Column(
-                                                          children: [
-                                                                        _amountLine('TOTAL AMOUNT', totalAmount), if (faultBreakdown != null) pw.Padding(padding: const pw.EdgeInsets.symmetric(vertical: 1), child: pw.Text(faultBreakdown, style: const pw.TextStyle(fontSize: 7.5, color: PdfColors.grey800), textAlign: pw.TextAlign.center)),
-                                                                        _amountLine('- ADVANCE AMOUNT', advanceAmount),
-                                                                        pw.Container(
-                                                                                      margin: const pw.EdgeInsets.symmetric(vertical: 2.5),
-                                                                                      height: 0.7,
-                                                                                      color: PdfColors.grey700,
-                                                                                    ),
-                                                                        _amountLine(
-                                                                                      balanceAmount > 0 ? 'BALANCE AMOUNT (PENDING)' : 'BALANCE AMOUNT',
-                                                                                      balanceAmount,
-                                                                                      emphasize: true,
-                                                                                    ),
-                                                                      ],
-                                                        ),
-                                          ),
-                            );
+                  final box = pw.Container(
+                                width: 270,
+                                padding: const pw.EdgeInsets.symmetric(horizontal: 12, vertical: 6),
+                                decoration: pw.BoxDecoration(
+                                              color: PdfColors.grey200,
+                                              border: pw.Border.all(color: PdfColors.grey700, width: 0.7),
+                                              borderRadius: const pw.BorderRadius.all(pw.Radius.circular(3)),
+                                            ),
+                                child: pw.Column(
+                                              children: [
+                                                            _amountLine('TOTAL AMOUNT', totalAmount), if (faultBreakdown != null) pw.Padding(padding: const pw.EdgeInsets.symmetric(vertical: 1), child: pw.Text(faultBreakdown, style: const pw.TextStyle(fontSize: 7.5, color: PdfColors.grey800), textAlign: pw.TextAlign.center)),
+                                                            _amountLine('- ADVANCE AMOUNT', advanceAmount),
+                                                            pw.Container(
+                                                                          margin: const pw.EdgeInsets.symmetric(vertical: 2.5),
+                                                                          height: 0.7,
+                                                                          color: PdfColors.grey700,
+                                                                        ),
+                                                            _amountLine(
+                                                                          balanceAmount > 0 ? 'BALANCE AMOUNT (PENDING)' : 'BALANCE AMOUNT',
+                                                                          balanceAmount,
+                                                                          emphasize: true,
+                                                                        ),
+                                                          ],
+                                            ),
+                              );
+                  return pw.Center(child: paid ? _withPaidStamp(box) : box);
         }
 
         pw.Widget _amountLine(String label, double amount, {bool emphasize = false}) => pw.Padding(
@@ -327,11 +327,56 @@ class PdfService {
         /// the raw text unchanged if it doesn't match a recognisable pattern.
         pw.Widget _warrantyClaimedStamp() => pw.Container(width: double.infinity, margin: const pw.EdgeInsets.only(bottom: 5), padding: const pw.EdgeInsets.symmetric(vertical: 6), decoration: pw.BoxDecoration(border: pw.Border.all(color: PdfColors.red900, width: 1.6), borderRadius: const pw.BorderRadius.all(pw.Radius.circular(4))), child: pw.Center(child: pw.Text('WARRANTY CLAIMED', style: pw.TextStyle(fontSize: 18, fontWeight: pw.FontWeight.bold, color: PdfColors.red900, letterSpacing: 2))));
 
-        /// Green "PAID" seal printed once the job has been marked Delivered
-        /// and the full bill amount has been collected - lets the customer
-        /// (and the shop, on a re-print) see at a glance that nothing is
-        /// pending, without having to read the balance line.
-        pw.Widget _paidStamp() => pw.Container(width: double.infinity, margin: const pw.EdgeInsets.only(bottom: 5), padding: const pw.EdgeInsets.symmetric(vertical: 6), decoration: pw.BoxDecoration(border: pw.Border.all(color: PdfColors.green900, width: 1.6), borderRadius: const pw.BorderRadius.all(pw.Radius.circular(4))), child: pw.Center(child: pw.Text('PAID', style: pw.TextStyle(fontSize: 18, fontWeight: pw.FontWeight.bold, color: PdfColors.green900, letterSpacing: 3))));
+        /// Round, rotated "PAID" seal - like a physical rubber stamp pressed
+        /// right on top of the amount box - printed once the bill is fully
+        /// paid. Unlike the old full-width bordered "PAID" box (which added
+        /// its own line of page height and pushed the Service Bill onto a
+        /// 2nd A5 page), this is only ever used inside [_withPaidStamp] as a
+        /// Positioned overlay, so it adds ZERO extra page height.
+        pw.Widget _paidStampOverlay() => pw.Transform.rotate(
+                    angle: 0.3,
+                    child: pw.Container(
+                                width: 46,
+                                height: 46,
+                                decoration: pw.BoxDecoration(
+                                            shape: pw.BoxShape.circle,
+                                            border: pw.Border.all(color: PdfColors.green900, width: 1.8),
+                                          ),
+                                child: pw.Center(
+                                            child: pw.Container(
+                                                          width: 38,
+                                                          height: 38,
+                                                          decoration: pw.BoxDecoration(
+                                                                        shape: pw.BoxShape.circle,
+                                                                        border: pw.Border.all(color: PdfColors.green900, width: 0.7),
+                                                                      ),
+                                                          child: pw.Center(
+                                                                        child: pw.Text('PAID',
+                                                                                    style: pw.TextStyle(
+                                                                                                fontSize: 9.5,
+                                                                                                fontWeight: pw.FontWeight.bold,
+                                                                                                color: PdfColors.green900,
+                                                                                                letterSpacing: 1,
+                                                                                              )),
+                                                                      ),
+                                                        ),
+                                          ),
+                              ),
+                  );
+
+        /// Overlays the round PAID stamp directly on top of an amount-summary
+        /// box's balance/amount corner via Stack/Positioned instead of adding
+        /// it to the normal document flow - a Positioned child never
+        /// contributes to a Stack's size, so the box keeps its original
+        /// height and no extra page space is used (unlike the old full-width
+        /// bordered PAID box, which added its own line and pushed the
+        /// Service Bill onto a 2nd A5 page).
+        pw.Widget _withPaidStamp(pw.Widget amountBox) => pw.Stack(
+                    children: [
+                                amountBox,
+                                pw.Positioned(right: 2, top: 2, child: _paidStampOverlay()),
+                              ],
+                  );
 
         String _warrantyRangeText(String? period, DateTime start) {
                   final raw = period?.trim() ?? '';
@@ -377,7 +422,6 @@ class PdfService {
                                             margin: const pw.EdgeInsets.all(14),
                                             build: (context) => [
                                                             _header(shop, logo, 'BILL RECEIPT'), if (warrantyClaimed) _warrantyClaimedStamp(),
-                                                            if (service.deliveryStatus == 'Delivered' && (_billTotal(service) - service.paid) <= 0) _paidStamp(),
                                                             pw.SizedBox(height: 3),
                                                             pw.Row(
                                                                               mainAxisAlignment: pw.MainAxisAlignment.spaceBetween,
@@ -433,6 +477,7 @@ class PdfService {
                                                         totalAmount: _billTotal(service),
                                                         advanceAmount: service.paid,
                                                         balanceAmount: _billTotal(service) - service.paid, faultBreakdown: _faultBreakdownText(service.faultAmounts),
+                                                        paid: service.deliveryStatus == 'Delivered' && (_billTotal(service) - service.paid) <= 0,
                                                         ),
                                                   pw.SizedBox(height: 3),
                                                   _box('DELIVERY', [
@@ -539,7 +584,9 @@ class PdfService {
                                                       ),
                                                 ),
                                           pw.SizedBox(height: 6),
-                                          _paymentSummary(finalAmount: bill.total, paid: bill.paid, balance: bill.balance),
+                                          bill.balance <= 0
+                                              ? _withPaidStamp(_paymentSummary(finalAmount: bill.total, paid: bill.paid, balance: bill.balance))
+                                              : _paymentSummary(finalAmount: bill.total, paid: bill.paid, balance: bill.balance),
                                           pw.SizedBox(height: 4),
                                           pw.Text('Payment Method: ${bill.paymentMethod ?? '-'}', style: const pw.TextStyle(fontSize: 9)),
                                           pw.Spacer(),
@@ -601,7 +648,9 @@ class PdfService {
                                                 if (sale.warranty) _kv('Period', sale.warrantyPeriod, labelWidth: 75),
                                                 ]),
                                           pw.SizedBox(height: 4),
-                                          _paymentSummary(finalAmount: sale.salePrice, paid: sale.paid, balance: sale.balance),
+                                          sale.balance <= 0
+                                              ? _withPaidStamp(_paymentSummary(finalAmount: sale.salePrice, paid: sale.paid, balance: sale.balance))
+                                              : _paymentSummary(finalAmount: sale.salePrice, paid: sale.paid, balance: sale.balance),
                                           pw.SizedBox(height: 4),
                                           pw.Text('Payment Method: ${sale.paymentMethod ?? '-'}', style: const pw.TextStyle(fontSize: 9)),
                                           pw.Spacer(),

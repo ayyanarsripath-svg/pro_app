@@ -3,6 +3,7 @@ import 'package:provider/provider.dart';
 
 import '../../core/repositories/settings_repository.dart';
 import '../../core/services/auth_service.dart';
+import '../../core/services/theme_service.dart';
 import '../../core/theme/app_theme.dart';
 import '../../widgets/section_card.dart';
 import 'backup_screen.dart';
@@ -49,11 +50,22 @@ class _SettingsScreenState extends State<SettingsScreen> {
   @override
   Widget build(BuildContext context) {
     final auth = context.watch<AuthService>();
+    final theme = context.watch<ThemeService>();
     if (_loading) return const Center(child: CircularProgressIndicator());
 
     return ListView(
       padding: const EdgeInsets.all(14),
       children: [
+        SectionCard(title: 'Appearance', icon: Icons.dark_mode_rounded, children: [
+          SwitchListTile(
+            contentPadding: EdgeInsets.zero,
+            title: const Text('Dark Mode'),
+            subtitle: Text(theme.isDark ? 'Dark theme (easier on the eyes at night)' : 'Light theme (default, bright/sunlight friendly)'),
+            secondary: Icon(theme.isDark ? Icons.dark_mode_rounded : Icons.light_mode_rounded, color: AppColors.primaryBlue),
+            value: theme.isDark,
+            onChanged: (v) => theme.setDark(v),
+          ),
+        ]),
         SectionCard(title: 'Shop Details (shown on printed bills)', icon: Icons.storefront_rounded, children: [
           TextField(controller: _nameCtrl, decoration: const InputDecoration(labelText: 'Shop Name')),
           const SizedBox(height: 10),

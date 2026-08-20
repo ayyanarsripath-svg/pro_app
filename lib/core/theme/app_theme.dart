@@ -23,6 +23,28 @@ class AppColors {
   static const Color warning = Color(0xFFF59E0B);
   static const Color info = Color(0xFF2563EB);
 
+  // Dark-mode counterparts of bg/card/border/text - the light-mode consts
+  // above stay as-is (used directly by AppTheme.light and anywhere a fixed
+  // brand color is wanted regardless of theme); these are only used via the
+  // *Of(context) helpers below so every screen picks the right set for the
+  // theme that's actually active.
+  static const Color _darkBg = Color(0xFF14161C);
+  static const Color _darkCard = Color(0xFF1E212B);
+  static const Color _darkBorder = Color(0xFF33384A);
+  static const Color _darkTextPrimary = Color(0xFFE9EAF2);
+  static const Color _darkTextSecondary = Color(0xFF9BA0B4);
+
+  /// Theme-aware replacements for the fixed [bg]/[card]/[border]/
+  /// [textPrimary]/[textSecondary] constants - resolve against whichever
+  /// theme (light or dark) is actually active instead of always returning
+  /// the light-mode value, so screens using these render correctly in dark
+  /// mode instead of showing light-mode colors on a dark background.
+  static Color bgOf(BuildContext c) => Theme.of(c).brightness == Brightness.dark ? _darkBg : bg;
+  static Color cardOf(BuildContext c) => Theme.of(c).brightness == Brightness.dark ? _darkCard : card;
+  static Color borderOf(BuildContext c) => Theme.of(c).brightness == Brightness.dark ? _darkBorder : border;
+  static Color textPrimaryOf(BuildContext c) => Theme.of(c).brightness == Brightness.dark ? _darkTextPrimary : textPrimary;
+  static Color textSecondaryOf(BuildContext c) => Theme.of(c).brightness == Brightness.dark ? _darkTextSecondary : textSecondary;
+
   static const LinearGradient brandGradient = LinearGradient(
     begin: Alignment.topLeft,
     end: Alignment.bottomRight,
@@ -145,6 +167,92 @@ class AppTheme {
       chipTheme: base.chipTheme.copyWith(
         backgroundColor: AppColors.bg,
         shape: StadiumBorder(side: BorderSide(color: AppColors.border)),
+      ),
+    );
+  }
+
+  /// Mirrors [light] field-for-field but with the dark palette - kept as a
+  /// close structural copy on purpose so the two stay easy to compare and
+  /// keep in sync.
+  static ThemeData get dark {
+    final base = ThemeData(
+      useMaterial3: true,
+      brightness: Brightness.dark,
+      colorScheme: ColorScheme.fromSeed(
+        seedColor: AppColors.primaryBlue,
+        brightness: Brightness.dark,
+        primary: AppColors.flameOrange,
+        secondary: AppColors.flameOrange,
+        tertiary: AppColors.accentPurple,
+        error: AppColors.danger,
+        surface: AppColors._darkCard,
+      ),
+      scaffoldBackgroundColor: AppColors._darkBg,
+      fontFamily: 'Roboto',
+    );
+
+    return base.copyWith(
+      appBarTheme: const AppBarTheme(
+        backgroundColor: AppColors.deepBlue,
+        foregroundColor: Colors.white,
+        elevation: 0,
+        centerTitle: false,
+        titleTextStyle: TextStyle(
+          color: Colors.white,
+          fontSize: 19,
+          fontWeight: FontWeight.w700,
+        ),
+      ),
+      cardTheme: CardThemeData(
+        color: AppColors._darkCard,
+        elevation: 0,
+        shape: RoundedRectangleBorder(
+          borderRadius: BorderRadius.circular(16),
+          side: const BorderSide(color: AppColors._darkBorder),
+        ),
+        margin: EdgeInsets.zero,
+      ),
+      inputDecorationTheme: InputDecorationTheme(
+        filled: true,
+        fillColor: AppColors._darkCard,
+        contentPadding: const EdgeInsets.symmetric(horizontal: 14, vertical: 12),
+        border: OutlineInputBorder(
+          borderRadius: BorderRadius.circular(12),
+          borderSide: const BorderSide(color: AppColors._darkBorder),
+        ),
+        enabledBorder: OutlineInputBorder(
+          borderRadius: BorderRadius.circular(12),
+          borderSide: const BorderSide(color: AppColors._darkBorder),
+        ),
+        focusedBorder: OutlineInputBorder(
+          borderRadius: BorderRadius.circular(12),
+          borderSide: const BorderSide(color: AppColors.flameOrange, width: 1.6),
+        ),
+      ),
+      elevatedButtonTheme: ElevatedButtonThemeData(
+        style: ElevatedButton.styleFrom(
+          backgroundColor: AppColors.primaryBlue,
+          foregroundColor: Colors.white,
+          padding: const EdgeInsets.symmetric(horizontal: 18, vertical: 14),
+          shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(12)),
+          textStyle: const TextStyle(fontWeight: FontWeight.w600, fontSize: 15),
+        ),
+      ),
+      outlinedButtonTheme: OutlinedButtonThemeData(
+        style: OutlinedButton.styleFrom(
+          foregroundColor: AppColors.flameOrange,
+          side: const BorderSide(color: AppColors.flameOrange),
+          padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 12),
+          shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(12)),
+        ),
+      ),
+      textTheme: base.textTheme.apply(
+        bodyColor: AppColors._darkTextPrimary,
+        displayColor: AppColors._darkTextPrimary,
+      ),
+      chipTheme: base.chipTheme.copyWith(
+        backgroundColor: AppColors._darkCard,
+        shape: StadiumBorder(side: BorderSide(color: AppColors._darkBorder)),
       ),
     );
   }

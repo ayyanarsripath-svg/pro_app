@@ -4,6 +4,7 @@ import 'package:provider/provider.dart';
 import 'core/db/database_helper.dart';
 import 'core/services/auth_service.dart';
 import 'core/services/backup_service.dart';
+import 'core/services/theme_service.dart';
 import 'app.dart';
 
 Future<void> main() async {
@@ -16,10 +17,14 @@ Future<void> main() async {
   // days have passed since the last one (spec "Weekly automatic backup").
   BackupService().runWeeklyAutoBackupIfDue();
 
+  final themeService = ThemeService();
+  await themeService.load();
+
   runApp(
     MultiProvider(
       providers: [
         ChangeNotifierProvider(create: (_) => AuthService()),
+        ChangeNotifierProvider.value(value: themeService),
       ],
       child: const ProfessionalMobilesApp(),
     ),

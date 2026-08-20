@@ -3,6 +3,7 @@ import 'package:provider/provider.dart';
 
 import 'core/theme/app_theme.dart';
 import 'core/services/auth_service.dart';
+import 'core/services/theme_service.dart';
 import 'screens/auth/app_access_gate_screen.dart';
 import 'screens/auth/first_run_setup_screen.dart';
 import 'screens/auth/pin_login_screen.dart';
@@ -13,10 +14,13 @@ class ProfessionalMobilesApp extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) {
+    final themeMode = context.watch<ThemeService>().mode;
     return MaterialApp(
       title: 'Professional Mobiles & Laptop Service',
       debugShowCheckedModeBanner: false,
       theme: AppTheme.light,
+      darkTheme: AppTheme.dark,
+      themeMode: themeMode,
       home: const _RootGate(),
       );
   }

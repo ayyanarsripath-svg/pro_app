@@ -111,6 +111,14 @@ class SecondHandRepository {
     await db.update('second_hand_phones', phone.toMap(), where: 'id = ?', whereArgs: [phone.id]);
   }
 
+  /// Soft-deletes a 2nd hand phone record (admin-gated Delete option).
+  /// Keeps the row (and any linked sale/ledger history) for accounting
+  /// integrity - just hides it from lists.
+  Future<void> delete(String phoneId) async {
+    final db = await _dbHelper.database;
+    await db.update('second_hand_phones', {'active': 0}, where: 'id = ?', whereArgs: [phoneId]);
+  }
+
   /// Adds a repair line (spec section 7 example: Display Repair ₹1,500,
   /// Battery ₹800). If linked to a spare part, stock is consumed at that
   /// part's current average cost.
@@ -272,12 +280,19 @@ class SecondHandRepository {
     return SecondHandSale.fromMap(rows.first);
   }
 
-  Future<List<SecondHandPhone>> all({String? statusFilter}) async {
+  Future<List<SecondHandPhone>> all({String? statusFilter, bool activeOnly = true}) async {
     final db = await _dbHelper.database;
+    final conditions = <String>[];
+    final args = <Object?>[];
+    if (activeOnly) conditions.add('active = 1');
+    if (statusFilter != null) {
+      conditions.add('status = ?');
+      args.add(statusFilter);
+    }
     final rows = await db.query(
       'second_hand_phones',
-      where: statusFilter != null ? 'status = ?' : null,
-      whereArgs: statusFilter != null ? [statusFilter] : null,
+      where: conditions.isEmpty ? null : conditions.join(' AND '),
+      whereArgs: args.isEmpty ? null : args,
       orderBy: 'purchase_date DESC',
     );
     final phones = <SecondHandPhone>[];

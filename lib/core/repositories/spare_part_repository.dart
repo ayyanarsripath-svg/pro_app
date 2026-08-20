@@ -52,6 +52,40 @@ class SparePartRepository {
     return SparePart.fromMap(rows.first);
   }
 
+  /// Edits an existing spare part's details (name/category/model/threshold).
+  Future<void> update({
+    required String id,
+    String? name,
+    String? category,
+    String? compatibleModel,
+    String? unit,
+    double? lowStockThreshold,
+  }) async {
+    final db = await _dbHelper.database;
+    final rows = await db.query('spare_parts', where: 'id = ?', whereArgs: [id]);
+    if (rows.isEmpty) return;
+    final part = SparePart.fromMap(rows.first);
+    final updated = SparePart(
+      id: part.id,
+      name: name ?? part.name,
+      category: category ?? part.category,
+      compatibleModel: compatibleModel ?? part.compatibleModel,
+      unit: unit ?? part.unit,
+      currentStock: part.currentStock,
+      avgPurchaseCost: part.avgPurchaseCost,
+      lowStockThreshold: lowStockThreshold ?? part.lowStockThreshold,
+      active: part.active,
+      createdAt: part.createdAt,
+    );
+    await db.update('spare_parts', updated.toMap(), where: 'id = ?', whereArgs: [id]);
+  }
+
+  /// Soft-deletes a spare part (admin-gated Delete option).
+  Future<void> delete(String id) async {
+    final db = await _dbHelper.database;
+    await db.update('spare_parts', {'active': 0}, where: 'id = ?', whereArgs: [id]);
+  }
+
   /// Records a spare-part purchase: increases stock and recomputes the
   /// weighted-average purchase cost used for internal service costing
   /// (spec section 3 example: Samsung A15 Display, 5 x ₹1,500).

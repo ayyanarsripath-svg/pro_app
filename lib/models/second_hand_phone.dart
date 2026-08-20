@@ -38,6 +38,7 @@ class SecondHandPhone {
   final String? notes;
   final String? photoPath;
   final String status;
+  final bool active;
   final DateTime createdAt;
 
   // Populated by the repository from second_hand_repair_items - not a DB column.
@@ -73,6 +74,7 @@ class SecondHandPhone {
     this.notes,
     this.photoPath,
     this.status = SecondHandStatus.purchased,
+    this.active = true,
     required this.createdAt,
     this.repairCost = 0,
     this.sparePartCost = 0,
@@ -121,6 +123,7 @@ class SecondHandPhone {
       notes: m['notes'] as String?,
       photoPath: m['photo_path'] as String?,
       status: m['status'] as String? ?? SecondHandStatus.purchased,
+      active: (m['active'] as int? ?? 1) == 1,
       createdAt: DateTime.parse(m['created_at'] as String),
       repairCost: repairCost,
       sparePartCost: sparePartCost,
@@ -156,6 +159,7 @@ class SecondHandPhone {
         'notes': notes,
         'photo_path': photoPath,
         'status': status,
+        'active': active ? 1 : 0,
         'created_at': createdAt.toIso8601String(),
       };
 }

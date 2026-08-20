@@ -72,7 +72,7 @@ class _SecondHandListScreenState extends State<SecondHandListScreen> {
                       children: [
                         Expanded(
                           child: Text('Potential Profit (unsold): ${formatCurrency(_stock['potentialProfit'] ?? 0)}',
-                              style: const TextStyle(fontSize: 12.5, color: AppColors.textSecondary, fontStyle: FontStyle.italic)),
+                              style: TextStyle(fontSize: 12.5, color: AppColors.textSecondaryOf(context), fontStyle: FontStyle.italic)),
                         ),
                       ],
                     ),

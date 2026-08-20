@@ -49,7 +49,7 @@ class _BackupScreenState extends State<BackupScreen> {
               padding: const EdgeInsets.all(14),
               children: [
                 SectionCard(title: 'Manual Backup', icon: Icons.save_rounded, children: [
-                  const Text('Creates a local copy of your entire database right now.', style: TextStyle(color: AppColors.textSecondary, fontSize: 12.5)),
+                  Text('Creates a local copy of your entire database right now.', style: TextStyle(color: AppColors.textSecondaryOf(context), fontSize: 12.5)),
                   const SizedBox(height: 10),
                   ElevatedButton.icon(
                     onPressed: _working ? null : _createBackup,
@@ -58,17 +58,17 @@ class _BackupScreenState extends State<BackupScreen> {
                   ),
                 ]),
                 SectionCard(title: 'Weekly Automatic Backup', icon: Icons.auto_mode_rounded, children: [
-                  const Text(
+                  Text(
                     'A local backup is taken automatically whenever the app is opened and more than 7 days have passed since the last one.',
-                    style: TextStyle(color: AppColors.textSecondary, fontSize: 12.5),
+                    style: TextStyle(color: AppColors.textSecondaryOf(context), fontSize: 12.5),
                   ),
                 ]),
                 SectionCard(title: 'Google Drive Backup (Optional)', icon: Icons.cloud_rounded, children: [
                   Text(_driveLinked ? 'Linked to Google Drive.' : 'Not linked yet.', style: const TextStyle(fontWeight: FontWeight.w600)),
                   const SizedBox(height: 8),
-                  const Text(
+                  Text(
                     'Requires internet + your own Google Cloud OAuth client (see README "Google Drive Backup Setup"). Everything else in this app works fully offline without this.',
-                    style: TextStyle(color: AppColors.textSecondary, fontSize: 12),
+                    style: TextStyle(color: AppColors.textSecondaryOf(context), fontSize: 12),
                   ),
                   const SizedBox(height: 10),
                   Row(children: [
@@ -82,7 +82,7 @@ class _BackupScreenState extends State<BackupScreen> {
                   ]),
                 ]),
                 SectionCard(title: 'Local Backups (${_backups.length})', icon: Icons.folder_zip_rounded, children: [
-                  if (_backups.isEmpty) const Text('No backups yet.', style: TextStyle(color: AppColors.textSecondary)),
+                  if (_backups.isEmpty) Text('No backups yet.', style: TextStyle(color: AppColors.textSecondaryOf(context))),
                   ..._backups.map((f) => ListTile(
                         contentPadding: EdgeInsets.zero,
                         leading: const Icon(Icons.description_rounded),
