@@ -39,11 +39,24 @@ class BackupService {
 
   static const _driveScopes = [drive.DriveApi.driveAppdataScope, drive.DriveApi.driveFileScope];
 
+  /// Web OAuth client id (NOT the Android client id below it). Android's
+  /// Credential Manager - what google_sign_in 7.x uses under the hood on
+  /// Android - calls this the "server client id" and requires one even
+  /// though this app has no server: without it, initialize() throws
+  /// GoogleSignInExceptionCode.clientConfigurationError ("serverClientId
+  /// must be provided on Android"). Created as a separate OAuth 2.0 "Web
+  /// application" client in Google Cloud Console (Credentials) - it is
+  /// only ever used as this audience value, never for an actual web sign-in
+  /// flow, so it has no authorised origins/redirect URIs. See README
+  /// "Google Drive Backup Setup".
+  static const _serverClientId =
+      '565887732327-7f6lovmktnnav8hiupjr8qgjoujaj406.apps.googleusercontent.com';
+
   /// initialize() only needs to run once per app run - safe to call before
   /// every Drive operation since it no-ops after the first call.
   Future<void> _ensureInitialized() async {
     if (_initialized) return;
-    await _googleSignIn.initialize();
+    await _googleSignIn.initialize(serverClientId: _serverClientId);
     _initialized = true;
   }
 
