@@ -325,7 +325,15 @@ class PdfService {
         /// "01/01/2026 to 31/01/2026" instead of the vague raw text, so there's
         /// no ambiguity about when the warranty actually ends. Falls back to
         /// the raw text unchanged if it doesn't match a recognisable pattern.
-        pw.Widget _warrantyClaimedStamp() => pw.Container(width: double.infinity, margin: const pw.EdgeInsets.only(bottom: 5), padding: const pw.EdgeInsets.symmetric(vertical: 6), decoration: pw.BoxDecoration(border: pw.Border.all(color: PdfColors.red900, width: 1.6), borderRadius: const pw.BorderRadius.all(pw.Radius.circular(4))), child: pw.Center(child: pw.Text('WARRANTY CLAIMED', style: pw.TextStyle(fontSize: 18, fontWeight: pw.FontWeight.bold, color: PdfColors.red900, letterSpacing: 2)))); String _warrantyRangeText(String? period, DateTime start) {
+        pw.Widget _warrantyClaimedStamp() => pw.Container(width: double.infinity, margin: const pw.EdgeInsets.only(bottom: 5), padding: const pw.EdgeInsets.symmetric(vertical: 6), decoration: pw.BoxDecoration(border: pw.Border.all(color: PdfColors.red900, width: 1.6), borderRadius: const pw.BorderRadius.all(pw.Radius.circular(4))), child: pw.Center(child: pw.Text('WARRANTY CLAIMED', style: pw.TextStyle(fontSize: 18, fontWeight: pw.FontWeight.bold, color: PdfColors.red900, letterSpacing: 2))));
+
+        /// Green "PAID" seal printed once the job has been marked Delivered
+        /// and the full bill amount has been collected - lets the customer
+        /// (and the shop, on a re-print) see at a glance that nothing is
+        /// pending, without having to read the balance line.
+        pw.Widget _paidStamp() => pw.Container(width: double.infinity, margin: const pw.EdgeInsets.only(bottom: 5), padding: const pw.EdgeInsets.symmetric(vertical: 6), decoration: pw.BoxDecoration(border: pw.Border.all(color: PdfColors.green900, width: 1.6), borderRadius: const pw.BorderRadius.all(pw.Radius.circular(4))), child: pw.Center(child: pw.Text('PAID', style: pw.TextStyle(fontSize: 18, fontWeight: pw.FontWeight.bold, color: PdfColors.green900, letterSpacing: 3))));
+
+        String _warrantyRangeText(String? period, DateTime start) {
                   final raw = period?.trim() ?? '';
                   if (raw.isEmpty) return '-';
                   final match = RegExp(r'^(\d+)\s*(day|days|week|weeks|month|months|mon|year|years|yr|yrs)$', caseSensitive: false)
@@ -369,6 +377,7 @@ class PdfService {
                                             margin: const pw.EdgeInsets.all(14),
                                             build: (context) => [
                                                             _header(shop, logo, 'BILL RECEIPT'), if (warrantyClaimed) _warrantyClaimedStamp(),
+                                                            if (service.deliveryStatus == 'Delivered' && (_billTotal(service) - service.paid) <= 0) _paidStamp(),
                                                             pw.SizedBox(height: 3),
                                                             pw.Row(
                                                                               mainAxisAlignment: pw.MainAxisAlignment.spaceBetween,
@@ -408,11 +417,11 @@ class PdfService {
                                                                                                   _kv('Period', _warrantyRangeText(service.warrantyPeriod, warrantyStart)),
                                                                             ]),
                                                   pw.SizedBox(height: 3),
-                            if (partsUsed.isNotEmpty)
-                                                                                  _box('PARTS / REPAIR ITEMS ADDED', [
-                                                                                                                          for (final u in partsUsed)
-                                                                                                                            _kv(u.itemName, 'Qty: ${u.quantity.toStringAsFixed(u.quantity == u.quantity.roundToDouble() ? 0 : 2)}'),
-                                                                                                                        ]),
+                                                  // Parts/repair item names used to print here as their own boxed
+                                                  // section ("PARTS / REPAIR ITEMS ADDED"), but that pushed the bill
+                                                  // onto a 2nd A5 page whenever 2+ parts were added - removed per the
+                                                  // shop owner's explicit request; the part cost still shows in the
+                                                  // in-app Repair section (admin-only), just not on the printed bill.
                                                   // TOTAL AMOUNT - ADVANCE AMOUNT = BALANCE AMOUNT, centered so the
                                                   // customer can see the working at a glance. Before the shop has
                                                   // set a Final Amount (fresh intake, still Checking/Repairing),

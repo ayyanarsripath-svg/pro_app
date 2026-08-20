@@ -82,7 +82,35 @@ class WhatsAppSmsService {
       '⚠️ Note: Service முடிந்ததும் உங்களுக்கு WhatsApp மூலம் தகவல் தெரிவிக்கப்படும்.\n'
       '🙏 Thank you for choosing Professional Mobiles.\n'
       '📱 PROFESSIONAL MOBILES\n'
-      'Trusted Mobile Service Center'; } String warrantyClaimMessage({required String customerName, required String referenceLabel, required String description}) { return '''
+      'Trusted Mobile Service Center';
+  }
+
+  /// Delivery confirmation - sent the moment a job is marked Delivered from
+  /// the Delivery Status action, once the final amount has been collected.
+  String deliveryMessage({
+    required String customerName,
+    required String billNo,
+    String? mobileName,
+    required double totalAmount,
+    required double paidAmount,
+  }) {
+    return '📱 PROFESSIONAL MOBILES\n'
+      '✅ Delivery Confirmation\n'
+      'வணக்கம் 🙏 Dear $customerName,\n'
+      'Your device has been delivered.\n'
+      '━━━━━━━━━━━━━━\n'
+      '🧾 Bill No: $billNo\n'
+      '📱 Mobile: ${mobileName ?? '-'}\n'
+      '💰 Total Amount: ${formatCurrency(totalAmount)}\n'
+      '✅ Paid: ${formatCurrency(paidAmount)}\n'
+      '━━━━━━━━━━━━━━\n'
+      '📌 Status: DELIVERED\n'
+      '🙏 Thank you for choosing Professional Mobiles.\n'
+      '📱 PROFESSIONAL MOBILES\n'
+      'Trusted Mobile Service Center';
+  }
+
+  String warrantyClaimMessage({required String customerName, required String referenceLabel, required String description}) { return '''
       📱 PROFESSIONAL MOBILES
       🛡️ Warranty Claim Confirmation
       வணக்கம் 🙏 Dear Customer,
