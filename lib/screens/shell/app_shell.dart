@@ -33,8 +33,14 @@ class AppShell extends StatefulWidget {
 class _AppShellState extends State<AppShell> {
   int _index = 0;
 
-  final _destinations = <_Destination>[
-    const _Destination('Dashboard', Icons.dashboard_rounded, DashboardScreen()),
+  // A fresh key forces DashboardScreen to rebuild its State (and refetch)
+  // rather than reusing the one IndexedStack has kept alive since app
+  // launch - without this, marking a job Delivered (or any other data
+  // change) never showed up on the dashboard until the app was restarted.
+  Key _dashboardKey = UniqueKey();
+
+  List<_Destination> get _destinations => <_Destination>[
+    _Destination('Dashboard', Icons.dashboard_rounded, DashboardScreen(key: _dashboardKey)),
     const _Destination('Customers', Icons.people_alt_rounded, CustomerListScreen()),
     const _Destination('Services', Icons.build_rounded, ServiceListScreen()),
     const _Destination('Spare Parts', Icons.memory_rounded, SparePartsScreen()),
@@ -105,7 +111,10 @@ class _AppShellState extends State<AppShell> {
                       selected: selected,
                       selectedTileColor: AppColors.primaryBlue.withOpacity(0.08),
                       onTap: () {
-                        setState(() => _index = i);
+                        setState(() {
+                          if (i == 0) _dashboardKey = UniqueKey();
+                          _index = i;
+                        });
                         Navigator.pop(context);
                       },
                     );
