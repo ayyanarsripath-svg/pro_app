@@ -46,7 +46,9 @@ flutter create --platforms=android .
 #    <uses-permission android:name="android.permission.INTERNET"/>
 #    (CAMERA is for service/2nd-hand phone photos; INTERNET is only used
 #    for the optional Google Drive backup - the rest of the app is 100%
-#    offline.)
+#    offline.) Only needed if you're building locally - the GitHub Actions
+#    workflow (.github/workflows/build-apk.yml) already does this step
+#    for you automatically, every build.
 
 # 4. Fetch packages:
 flutter pub get
@@ -79,12 +81,49 @@ Permissions**.
 Everything works fully offline without this. If you want automatic Drive
 backups too:
 
+### If you build APKs via the GitHub Actions workflow (recommended)
+
+Every APK built by CI used to be signed with a **brand new, throwaway
+debug keystore generated fresh on each run** - so its SHA-1 fingerprint
+was different every single build, which silently broke Google sign-in
+(`DEVELOPER_ERROR` / "no response after picking an account") the moment
+you built again after registering an OAuth client. The workflow now
+restores a **stable** keystore from a repository secret instead, so the
+SHA-1 never changes once you've set this up:
+
+1. In this repo: **Settings → Secrets and variables → Actions → New
+   repository secret**, name it `DEBUG_KEYSTORE_BASE64`, and paste in the
+   base64-encoded keystore your assistant generated for you (delivered as
+   a file alongside these instructions - keep the original `.jks` file
+   itself somewhere safe too, e.g. a password manager; losing it just
+   means a future rebuild gets a new SHA-1 and you re-register the OAuth
+   client, it does **not** lock you out of your own data).
+2. Go to https://console.cloud.google.com → create a project → enable the
+   **Google Drive API**.
+3. Create an **OAuth 2.0 Client ID** of type "Android" using:
+   - Package name: `com.example.pro_app` (matches the `--project-name=pro_app`
+     the workflow passes to `flutter create` - check
+     `android/app/build.gradle`'s `applicationId` after a build if unsure).
+   - SHA-1 fingerprint: `CC:73:AE:81:85:87:2B:9B:84:A5:83:54:1C:BF:5C:BA:C9:64:F4:0A`
+     (this is fixed now - no need to regenerate it after future builds,
+     as long as the same `DEBUG_KEYSTORE_BASE64` secret stays in place).
+4. Push to `main` (or re-run the workflow) to get a build signed with the
+   stable keystore, then use **Settings → Backup & Restore → Connect
+   Google Drive** in the app - no code changes needed, `google_sign_in`
+   picks up the registered client automatically.
+
+### If you build locally on your own machine
+
 1. Go to https://console.cloud.google.com → create a project.
 2. Enable the **Google Drive API**.
 3. Create an **OAuth 2.0 Client ID** of type "Android", using this app's
-   package name (`com.example.professional_mobiles` unless you changed it
-   in `android/app/build.gradle`) and your keystore's SHA-1 fingerprint
-   (`keytool -list -v -keystore <your-keystore>`).
+   package name (check `android/app/build.gradle`'s `applicationId`,
+   `com.example.pro_app` or `com.example.professional_mobiles` depending
+   on what you passed to `flutter create --project-name=...`) and your own
+   local keystore's SHA-1 fingerprint
+   (`keytool -list -v -keystore <your-keystore>`) - by default this is
+   `~/.android/debug.keystore` (alias `androiddebugkey`, password
+   `android` for both).
 4. That's it - no code changes needed. `google_sign_in` picks up the
    client automatically. Use **Settings → Backup & Restore → Connect
    Google Drive** in the app.
