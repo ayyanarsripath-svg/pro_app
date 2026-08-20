@@ -65,10 +65,13 @@ class _AppShellState extends State<AppShell> {
     const _Destination('settings', 'Settings', Icons.settings_rounded, SettingsScreen()),
   ];
 
-  /// [_baseDestinations] reordered to match the shop's saved preference
-  /// (Settings -> Customize Menu), if any.
-  List<_Destination> _orderedDestinations(MenuOrderService menuOrder) {
-    final base = _baseDestinations;
+  /// [_baseDestinations] filtered to what this login's menu "section" is
+  /// allowed to see (Billing-only / Inventory-only staff never get
+  /// Dashboard, Profit & Loss, Expenses or the other section's screens -
+  /// see AuthService.canAccessMenu), then reordered to match the shop's
+  /// saved preference (Settings -> Customize Menu), if any.
+  List<_Destination> _orderedDestinations(MenuOrderService menuOrder, AuthService auth) {
+    final base = _baseDestinations.where((d) => auth.canAccessMenu(d.id)).toList();
     final byId = {for (final d in base) d.id: d};
     final orderedIds = menuOrder.applyTo(base.map((d) => d.id).toList());
     return orderedIds.map((id) => byId[id]!).toList();
@@ -79,7 +82,7 @@ class _AppShellState extends State<AppShell> {
     final auth = context.watch<AuthService>();
     final logo = context.watch<LogoService>();
     final menuOrder = context.watch<MenuOrderService>();
-    final destinations = _orderedDestinations(menuOrder);
+    final destinations = _orderedDestinations(menuOrder, auth);
     // _index is a position in this ordered list, not a fixed screen - if
     // the shop changes the order while sitting on a non-Dashboard tab, the
     // previous index would silently point at a different screen. Clamping

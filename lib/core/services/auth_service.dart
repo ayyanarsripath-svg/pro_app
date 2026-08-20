@@ -59,6 +59,46 @@ class AuthService extends ChangeNotifier {
   /// Admins always have it implicitly.
   bool get canDelete => isAdmin || (_current?.canDeleteRecords ?? false);
 
+  // -----------------------------------------------------------------
+  // Menu "section" access (Billing-only / Inventory-only / Full)
+  // -----------------------------------------------------------------
+  // Lets a shop hand staff a PIN that only ever shows Billing screens
+  // (Sales/Service/2nd-Hand bills, printing, adding repair parts used) or
+  // only ever shows Inventory screens (Spare Parts/Accessories/2nd-Hand
+  // stock, Suppliers, Purchases) - Dashboard, Profit & Loss and Expenses
+  // are never shown to either, and each section never sees the other's
+  // screens. Admin and 'full' staff are unaffected (see everything, same
+  // as before this existed).
+  String get _section => isAdmin ? 'full' : (_current?.section ?? 'full');
+  bool get isFullAccess => _section == 'full';
+  bool get isBillingSection => _section == 'billing';
+  bool get isInventorySection => _section == 'inventory';
+
+  /// Screen ids a "Billing" login is allowed to open (must match the [id]
+  /// values used in AppShell's destination list).
+  static const _billingMenuIds = {'sales', 'services', 'second_hand'};
+
+  /// Screen ids an "Inventory" login is allowed to open.
+  static const _inventoryMenuIds = {'spare_parts', 'accessories', 'second_hand', 'suppliers', 'purchases'};
+
+  /// Whether the current login's menu/drawer should include screen [id].
+  /// Dashboard, Profit & Loss, Expenses, Customers and Settings are simply
+  /// absent from both restricted sections' allow-lists, so they never show.
+  bool canAccessMenu(String id) {
+    if (isFullAccess) return true;
+    if (isBillingSection) return _billingMenuIds.contains(id);
+    if (isInventorySection) return _inventoryMenuIds.contains(id);
+    return true;
+  }
+
+  /// Billing-side actions inside a shared screen (e.g. "Sell Phone" /
+  /// "Print Sales Bill" on the 2nd-Hand Mobile detail screen, which also
+  /// has Inventory-side actions like "Add Repair Cost" / "Change Status").
+  bool get canDoBillingActions => isFullAccess || isBillingSection;
+
+  /// Inventory-side actions inside a shared screen.
+  bool get canDoInventoryActions => isFullAccess || isInventorySection;
+
   Future<bool> hasAnyAccount() => _staffRepo.hasAnyStaff();
 
   Future<Staff> setupFirstAdmin({required String name, required String pin, String? phone}) async {

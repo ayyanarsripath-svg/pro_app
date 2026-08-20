@@ -27,6 +27,24 @@ const List<_PermInfo> _permissions = [
   _PermInfo('Delete Records', 'Delete suppliers, expenses, purchases and other saved records. Off by default - keep this admin-only unless you trust someone with it.'),
 ];
 
+/// One "Section" choice for the Add/Edit Staff dialog - which whole menu
+/// screens that login even sees, before the permission checkboxes above
+/// come into play at all. 'full' keeps the original behaviour (every
+/// screen); 'billing' and 'inventory' hide Dashboard, Profit & Loss,
+/// Expenses and each other's screens entirely, not just individual figures.
+class _SectionInfo {
+  final String value;
+  final String title;
+  final String help;
+  const _SectionInfo(this.value, this.title, this.help);
+}
+
+const List<_SectionInfo> _sections = [
+  _SectionInfo('full', 'Full Access', 'Sees every screen (Dashboard, all bills, all inventory, Expenses, Profit & Loss) - only the permissions below limit what they can do.'),
+  _SectionInfo('billing', 'Billing Only', 'Sales Bill, Service Bill (+ adding repair parts used), 2nd Hand Bill and printing - nothing else. No Dashboard, Profit & Loss, Expenses or inventory screens.'),
+  _SectionInfo('inventory', 'Inventory Only', 'Spare Parts, Accessories, 2nd Hand stock, Suppliers and Purchases - add/reduce stock only. No Dashboard, Profit & Loss, Expenses or billing screens.'),
+];
+
 class StaffScreen extends StatefulWidget {
   const StaffScreen({super.key});
 
@@ -73,14 +91,18 @@ class _StaffScreenState extends State<StaffScreen> {
                     ),
                     _HowStep(
                       number: '2',
-                      text: 'Tick only the permissions that person should have. Everything is off except "Manage Inventory" until you change it - a new staff account starts with the least access on purpose.',
+                      text: 'Pick a Section - Billing Only shows just Sales/Service/2nd-Hand bills + printing; Inventory Only shows just Spare Parts/Accessories/2nd-Hand stock + Suppliers/Purchases. Neither ever sees Dashboard, Profit & Loss or Expenses. Pick Full Access to see everything, as before.',
                     ),
                     _HowStep(
                       number: '3',
-                      text: 'Tap a staff member any time to change their permissions, or use the switch to temporarily block their PIN from logging in without deleting the account.',
+                      text: 'Then tick only the permissions that person should have. Everything is off except "Manage Inventory" until you change it - a new staff account starts with the least access on purpose.',
                     ),
                     _HowStep(
                       number: '4',
+                      text: 'Tap a staff member any time to change their section or permissions, or use the switch to temporarily block their PIN from logging in without deleting the account.',
+                    ),
+                    _HowStep(
+                      number: '5',
                       text: 'Admin (you) always has full access, including every permission below - it never needs to be granted separately.',
                       isLast: true,
                     ),
@@ -123,7 +145,10 @@ class _StaffScreenState extends State<StaffScreen> {
     if (s.canManageExpenses) perms.add('Manage Expenses');
     if (s.canManageInventory) perms.add('Manage Inventory');
     if (s.canDeleteRecords) perms.add('Delete Records');
-    return perms.isEmpty ? 'No special permissions - tap to change' : '${perms.join(', ')}  •  tap to change';
+    final sectionLabel = s.isFullSection ? null : (s.isBillingSection ? 'Billing Only' : 'Inventory Only');
+    final permsText = perms.isEmpty ? 'No special permissions' : perms.join(', ');
+    final combined = sectionLabel == null ? permsText : '$sectionLabel  •  $permsText';
+    return '$combined  •  tap to change';
   }
 
   /// Builds the six permission checkboxes, each with its title + help text,
@@ -143,12 +168,32 @@ class _StaffScreenState extends State<StaffScreen> {
     });
   }
 
+  /// Builds the "Section" radio choices (Full/Billing/Inventory), shared by
+  /// both the Add and Edit dialogs. [section] holds the current value in a
+  /// single-element list so the closure can mutate it via setLocalState,
+  /// the same trick used for the boolean permission values above.
+  List<Widget> _buildSectionPicker(List<String> section, void Function(void Function()) setLocalState) {
+    return List.generate(_sections.length, (i) {
+      final sec = _sections[i];
+      return RadioListTile<String>(
+        contentPadding: EdgeInsets.zero,
+        title: Text(sec.title, style: const TextStyle(fontWeight: FontWeight.w600)),
+        subtitle: Text(sec.help, style: const TextStyle(fontSize: 11.5)),
+        isThreeLine: true,
+        value: sec.value,
+        groupValue: section[0],
+        onChanged: (v) => setLocalState(() => section[0] = v ?? 'full'),
+      );
+    });
+  }
+
   Future<void> _addStaff() async {
     final nameCtrl = TextEditingController();
     final phoneCtrl = TextEditingController();
     final pinCtrl = TextEditingController();
     // Matches Staff's own defaults: everything off except Manage Inventory.
     final values = [false, false, false, false, true, false];
+    final section = ['full'];
 
     final ok = await showDialog<bool>(
       context: context,
@@ -171,6 +216,10 @@ class _StaffScreenState extends State<StaffScreen> {
                   maxLength: 6,
                   decoration: const InputDecoration(labelText: 'PIN (4-6 digits)', helperText: 'This person will use this PIN to log in'),
                 ),
+                const Divider(),
+                const Text('Section', style: TextStyle(fontWeight: FontWeight.w700)),
+                const Text('Which menu screens this login even sees', style: TextStyle(fontSize: 11.5)),
+                ..._buildSectionPicker(section, setLocalState),
                 const Divider(),
                 const Text('Permissions', style: TextStyle(fontWeight: FontWeight.w700)),
                 ..._buildPermChecks(values, setLocalState),
@@ -199,6 +248,7 @@ class _StaffScreenState extends State<StaffScreen> {
         name: nameCtrl.text.trim(),
         pin: pinCtrl.text.trim(),
         phone: phoneCtrl.text.trim(),
+        section: section[0],
         canViewProfit: values[0],
         canViewCost: values[1],
         canEditPrices: values[2],
@@ -212,6 +262,7 @@ class _StaffScreenState extends State<StaffScreen> {
 
   Future<void> _editPermissions(Staff s) async {
     final values = [s.canViewProfit, s.canViewCost, s.canEditPrices, s.canManageExpenses, s.canManageInventory, s.canDeleteRecords];
+    final section = [s.section];
 
     final ok = await showDialog<bool>(
       context: context,
@@ -222,7 +273,14 @@ class _StaffScreenState extends State<StaffScreen> {
             child: Column(
               mainAxisSize: MainAxisSize.min,
               crossAxisAlignment: CrossAxisAlignment.start,
-              children: _buildPermChecks(values, setLocalState),
+              children: [
+                const Text('Section', style: TextStyle(fontWeight: FontWeight.w700)),
+                const Text('Which menu screens this login even sees', style: TextStyle(fontSize: 11.5)),
+                ..._buildSectionPicker(section, setLocalState),
+                const Divider(),
+                const Text('Permissions', style: TextStyle(fontWeight: FontWeight.w700)),
+                ..._buildPermChecks(values, setLocalState),
+              ],
             ),
           ),
           actions: [
@@ -236,6 +294,7 @@ class _StaffScreenState extends State<StaffScreen> {
     if (ok == true) {
       final updated = Staff(
         id: s.id, name: s.name, phone: s.phone, pinHash: s.pinHash, role: s.role,
+        section: section[0],
         canViewProfit: values[0], canViewCost: values[1], canEditPrices: values[2],
         canManageExpenses: values[3], canManageInventory: values[4], canDeleteRecords: values[5],
         active: s.active, createdAt: s.createdAt,

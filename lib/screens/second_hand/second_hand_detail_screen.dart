@@ -71,12 +71,18 @@ class _SecondHandDetailScreenState extends State<SecondHandDetailScreen> {
               ],
             ),
             const SizedBox(height: 12),
+            // Add Repair Cost / Change Status are Inventory-side (prepping
+            // stock); Sell/Print/Return/Warranty are Billing-side (customer
+            // facing). A Billing-only or Inventory-only login only sees its
+            // own half here - a Full/Admin login sees everything, same as
+            // before this split existed.
             Wrap(spacing: 8, runSpacing: 8, children: [
-              _actionChip('Add Repair Cost', Icons.build_rounded, _addRepairItem),
-              _actionChip('Change Status', Icons.sync_alt_rounded, _changeStatus),
-              if (phone.status != SecondHandStatus.sold) _actionChip('Sell Phone', Icons.sell_rounded, _sellPhone),
-              if (phone.status == SecondHandStatus.sold) _actionChip('Print Sales Bill', Icons.print_rounded, _printSale),
-              if (phone.status == SecondHandStatus.sold) _actionChip('Customer Return', Icons.assignment_return_rounded, _customerReturn), if (phone.status == SecondHandStatus.sold && phone.warranty && !_warrantyClaimed) _actionChip('Warranty Claim', Icons.verified_user_rounded, _fileWarrantyClaim),
+              if (auth.canDoInventoryActions) _actionChip('Add Repair Cost', Icons.build_rounded, _addRepairItem),
+              if (auth.canDoInventoryActions) _actionChip('Change Status', Icons.sync_alt_rounded, _changeStatus),
+              if (auth.canDoBillingActions && phone.status != SecondHandStatus.sold) _actionChip('Sell Phone', Icons.sell_rounded, _sellPhone),
+              if (auth.canDoBillingActions && phone.status == SecondHandStatus.sold) _actionChip('Print Sales Bill', Icons.print_rounded, _printSale),
+              if (auth.canDoBillingActions && phone.status == SecondHandStatus.sold) _actionChip('Customer Return', Icons.assignment_return_rounded, _customerReturn),
+              if (auth.canDoBillingActions && phone.status == SecondHandStatus.sold && phone.warranty && !_warrantyClaimed) _actionChip('Warranty Claim', Icons.verified_user_rounded, _fileWarrantyClaim),
               if (auth.canDelete) _actionChip('Delete', Icons.delete_rounded, _deletePhone, color: AppColors.danger),
             ]),
             const SizedBox(height: 14),
@@ -109,7 +115,7 @@ class _SecondHandDetailScreenState extends State<SecondHandDetailScreen> {
                       dense: true,
                       contentPadding: EdgeInsets.zero,
                       title: Text(r.description),
-                      trailing: Text(formatCurrency(r.cost)),
+                      trailing: auth.canSeeCost ? Text(formatCurrency(r.cost)) : null,
                     )),
               ],
             ),

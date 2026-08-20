@@ -1,6 +1,8 @@
 import 'package:flutter/material.dart';
+import 'package:provider/provider.dart';
 
 import '../../core/repositories/second_hand_repository.dart';
+import '../../core/services/auth_service.dart';
 import '../../core/theme/app_theme.dart';
 import '../../core/utils/formatters.dart';
 import '../../models/second_hand_phone.dart';
@@ -43,6 +45,12 @@ class _SecondHandListScreenState extends State<SecondHandListScreen> {
 
   @override
   Widget build(BuildContext context) {
+    final auth = context.watch<AuthService>();
+    // Investment/profit figures are cost data (spec section 28) - never
+    // shown to a login that isn't cleared to see cost/profit, regardless
+    // of which menu section (Billing/Inventory/Full) it belongs to.
+    final showCost = auth.canSeeCost;
+    final showProfit = auth.canSeeProfit;
     return Scaffold(
       body: _loading
           ? const Center(child: CircularProgressIndicator())
@@ -61,22 +69,23 @@ class _SecondHandListScreenState extends State<SecondHandListScreen> {
                     children: [
                       StatCard(label: 'Total Phones', value: _stock['totalPhones'] ?? 0, isCurrency: false, icon: Icons.phone_iphone_rounded),
                       StatCard(label: 'Unsold Stock', value: _stock['unsoldCount'] ?? 0, isCurrency: false, icon: Icons.inventory_rounded, color: AppColors.warning),
-                      StatCard(label: 'Current Stock Value', value: _stock['currentStockValue'] ?? 0, icon: Icons.savings_rounded, color: AppColors.info),
-                      StatCard(label: 'Realized Profit', value: _stock['realizedProfit'] ?? 0, icon: Icons.trending_up_rounded, color: AppColors.success),
+                      if (showCost) StatCard(label: 'Current Stock Value', value: _stock['currentStockValue'] ?? 0, icon: Icons.savings_rounded, color: AppColors.info),
+                      if (showProfit) StatCard(label: 'Realized Profit', value: _stock['realizedProfit'] ?? 0, icon: Icons.trending_up_rounded, color: AppColors.success),
                     ],
                   ),
                   const SizedBox(height: 6),
-                  Padding(
-                    padding: const EdgeInsets.symmetric(vertical: 8),
-                    child: Row(
-                      children: [
-                        Expanded(
-                          child: Text('Potential Profit (unsold): ${formatCurrency(_stock['potentialProfit'] ?? 0)}',
-                              style: TextStyle(fontSize: 12.5, color: AppColors.textSecondaryOf(context), fontStyle: FontStyle.italic)),
-                        ),
-                      ],
+                  if (showProfit)
+                    Padding(
+                      padding: const EdgeInsets.symmetric(vertical: 8),
+                      child: Row(
+                        children: [
+                          Expanded(
+                            child: Text('Potential Profit (unsold): ${formatCurrency(_stock['potentialProfit'] ?? 0)}',
+                                style: TextStyle(fontSize: 12.5, color: AppColors.textSecondaryOf(context), fontStyle: FontStyle.italic)),
+                          ),
+                        ],
+                      ),
                     ),
-                  ),
                   SizedBox(
                     height: 40,
                     child: ListView(
@@ -92,7 +101,9 @@ class _SecondHandListScreenState extends State<SecondHandListScreen> {
                   ..._phones.map((phone) => Card(
                         child: ListTile(
                           title: Text('${phone.brand ?? ''} ${phone.model ?? ''} (${phone.purchaseNo})'),
-                          subtitle: Text('${phone.conditionGrade ?? '-'}  •  Investment: ${formatCurrency(phone.totalInvestment)}'),
+                          subtitle: Text(showCost
+                              ? '${phone.conditionGrade ?? '-'}  •  Investment: ${formatCurrency(phone.totalInvestment)}'
+                              : phone.conditionGrade ?? '-'),
                           trailing: StatusBadge(phone.status, fontSize: 10),
                           onTap: () async {
                             await Navigator.push(context, MaterialPageRoute(builder: (_) => SecondHandDetailScreen(phoneId: phone.id)));
@@ -103,14 +114,19 @@ class _SecondHandListScreenState extends State<SecondHandListScreen> {
                 ],
               ),
             ),
-      floatingActionButton: FloatingActionButton.extended(
-        onPressed: () async {
-          final created = await Navigator.push<bool>(context, MaterialPageRoute(builder: (_) => const SecondHandPurchaseFormScreen()));
-          if (created == true) _load();
-        },
-        icon: const Icon(Icons.add_rounded),
-        label: const Text('Purchase Phone'),
-      ),
+      // Buying a used phone into stock is an Inventory-side action - a
+      // Billing-section login can still open this screen to sell an
+      // already-purchased phone, but doesn't get the "add stock" button.
+      floatingActionButton: auth.canDoInventoryActions
+          ? FloatingActionButton.extended(
+              onPressed: () async {
+                final created = await Navigator.push<bool>(context, MaterialPageRoute(builder: (_) => const SecondHandPurchaseFormScreen()));
+                if (created == true) _load();
+              },
+              icon: const Icon(Icons.add_rounded),
+              label: const Text('Purchase Phone'),
+            )
+          : null,
     );
   }
 

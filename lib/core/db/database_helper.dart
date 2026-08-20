@@ -13,7 +13,7 @@ class DatabaseHelper {
   static final DatabaseHelper instance = DatabaseHelper._internal();
 
   static Database? _db;
-  static const int dbVersion = 3;
+  static const int dbVersion = 4;
   static const String dbFileName = 'professional_mobiles.db';
 
   Future<Database> get database async {
@@ -43,6 +43,13 @@ class DatabaseHelper {
       await db.execute('ALTER TABLE services ADD COLUMN active INTEGER NOT NULL DEFAULT 1');
       await db.execute('ALTER TABLE second_hand_phones ADD COLUMN active INTEGER NOT NULL DEFAULT 1');
     }
+    // Staff "section" (Billing-only / Inventory-only / Full) - restricts
+    // which menu screens a staff PIN can even see, on top of the existing
+    // per-field permissions. Defaults to 'full' so every staff account
+    // created before this update keeps seeing everything it already could.
+    if (oldVersion < 4) {
+      await db.execute("ALTER TABLE staff ADD COLUMN section TEXT NOT NULL DEFAULT 'full'");
+    }
   }
 
   Future<void> _onCreate(Database db, int version) async {
@@ -65,6 +72,7 @@ class DatabaseHelper {
         phone TEXT,
         pin_hash TEXT NOT NULL,
         role TEXT NOT NULL DEFAULT 'staff', -- admin | staff
+        section TEXT NOT NULL DEFAULT 'full', -- full | billing | inventory
         can_view_profit INTEGER NOT NULL DEFAULT 0,
         can_view_cost INTEGER NOT NULL DEFAULT 0,
         can_edit_prices INTEGER NOT NULL DEFAULT 0,
