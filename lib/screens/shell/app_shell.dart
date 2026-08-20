@@ -96,11 +96,28 @@ class _AppShellState extends State<AppShell> {
           Padding(
             padding: const EdgeInsets.only(right: 12),
             child: Center(
-              child: Chip(
-                avatar: Icon(auth.isAdmin ? Icons.shield_rounded : Icons.badge_rounded, size: 16, color: Colors.white),
-                label: Text(auth.current?.name ?? '', style: const TextStyle(color: Colors.white, fontSize: 12)),
-                backgroundColor: Colors.white.withOpacity(0.15),
-                side: BorderSide.none,
+              // Tappable so one shared shop device can hand off between the
+              // admin and staff PIN logins without digging into the drawer
+              // for "Lock App" - previously that was the only way to switch
+              // who's logged in, which made a same-device, different-PIN
+              // handoff (the recommended way to use this app with staff)
+              // easy to overlook.
+              child: InkWell(
+                borderRadius: BorderRadius.circular(20),
+                onTap: () => _confirmSwitchUser(context, auth),
+                child: Chip(
+                  avatar: Icon(auth.isAdmin ? Icons.shield_rounded : Icons.badge_rounded, size: 16, color: Colors.white),
+                  label: Row(
+                    mainAxisSize: MainAxisSize.min,
+                    children: [
+                      Text(auth.current?.name ?? '', style: const TextStyle(color: Colors.white, fontSize: 12)),
+                      const SizedBox(width: 4),
+                      const Icon(Icons.swap_horiz_rounded, size: 14, color: Colors.white70),
+                    ],
+                  ),
+                  backgroundColor: Colors.white.withOpacity(0.15),
+                  side: BorderSide.none,
+                ),
               ),
             ),
           ),
@@ -184,5 +201,23 @@ class _AppShellState extends State<AppShell> {
         children: destinations.map((d) => d.screen).toList(),
       ),
     );
+  }
+
+  /// Quick same-device handoff: log the current person out and drop back to
+  /// the PIN screen so the next staff member (or the admin) can log in with
+  /// their own PIN, without opening the drawer.
+  Future<void> _confirmSwitchUser(BuildContext context, AuthService auth) async {
+    final ok = await showDialog<bool>(
+      context: context,
+      builder: (context) => AlertDialog(
+        title: const Text('Switch User?'),
+        content: Text('${auth.current?.name ?? 'This account'} will be logged out. The next person can log in with their own PIN.'),
+        actions: [
+          TextButton(onPressed: () => Navigator.pop(context, false), child: const Text('Cancel')),
+          ElevatedButton(onPressed: () => Navigator.pop(context, true), child: const Text('Switch User')),
+        ],
+      ),
+    );
+    if (ok == true) auth.logout();
   }
 }
