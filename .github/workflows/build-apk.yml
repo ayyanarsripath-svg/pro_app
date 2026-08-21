@@ -83,6 +83,12 @@ jobs:
       - run: flutter pub get
       - run: dart run flutter_launcher_icons
       - run: flutter build apk --release
+      - name: Print release APK signing SHA-1 (for OAuth client comparison)
+        run: |
+          keytool -printcert -jarfile build/app/outputs/flutter-apk/app-release.apk
+          echo "---applicationId---"
+          grep -R "applicationId" android/app/build.gradle* || true
+  
 
       - uses: actions/upload-artifact@v4
         with:
