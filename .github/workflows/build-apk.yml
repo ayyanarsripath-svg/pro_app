@@ -80,6 +80,66 @@ jobs:
               print("Added:", to_add)
           PYEOF
 
+      # flutter_local_notifications (Daily Orders reminder - see
+      # OrderReminderService) needs Android's "core library desugaring"
+      # turned on in the app module, or the release build fails at Gradle's
+      # AAR-metadata check with "Dependency ':flutter_local_notifications'
+      # requires core library desugaring to be enabled for :app." Same
+      # situation as the manifest permissions above: android/ is
+      # regenerated fresh by `flutter create` every build, so this has to
+      # be injected here rather than committed as a one-time manual edit.
+      # Handles both the Kotlin DSL (build.gradle.kts) and Groovy
+      # (build.gradle) app-module file, whichever `flutter create`
+      # produced, and is idempotent - skips anything already present.
+      - name: Enable core library desugaring (required by flutter_local_notifications)
+        run: |
+          python3 - <<'PYEOF'
+          import re, glob
+
+          candidates = glob.glob("android/app/build.gradle.kts") + glob.glob("android/app/build.gradle")
+          if not candidates:
+              raise SystemExit("Could not find android/app/build.gradle(.kts) - aborting so this doesn't silently skip a required fix.")
+          path = candidates[0]
+          is_kts = path.endswith(".kts")
+
+          with open(path, "r", encoding="utf-8") as f:
+              content = f.read()
+
+          changed = False
+
+          desugar_flag = "isCoreLibraryDesugaringEnabled = true" if is_kts else "coreLibraryDesugaringEnabled true"
+          if desugar_flag not in content:
+              co_match = re.search(r"compileOptions\s*\{", content)
+              if co_match:
+                  insert_at = co_match.end()
+                  content = content[:insert_at] + f"\n        {desugar_flag}" + content[insert_at:]
+              else:
+                  android_match = re.search(r"android\s*\{", content)
+                  if not android_match:
+                      raise SystemExit(f"Could not find android {{ block in {path} - aborting")
+                  insert_at = android_match.end()
+                  block = f"\n    compileOptions {{\n        {desugar_flag}\n    }}\n"
+                  content = content[:insert_at] + block + content[insert_at:]
+              changed = True
+
+          if "coreLibraryDesugaring" not in content.replace(desugar_flag, ""):
+              dep_line = '    coreLibraryDesugaring("com.android.tools:desugar_jdk_libs:2.1.4")' if is_kts else "    coreLibraryDesugaring 'com.android.tools:desugar_jdk_libs:2.1.4'"
+              deps_match = re.search(r"(?<!android )dependencies\s*\{", content)
+              if deps_match:
+                  insert_at = deps_match.end()
+                  content = content[:insert_at] + "\n" + dep_line + content[insert_at:]
+              else:
+                  content = content.rstrip("\n") + "\n\ndependencies {\n" + dep_line + "\n}\n"
+              changed = True
+
+          if changed:
+              with open(path, "w", encoding="utf-8") as f:
+                  f.write(content)
+              print(f"Updated {path} for core library desugaring.")
+          else:
+              print("Core library desugaring already configured, nothing to do.")
+          PYEOF
+
       - run: flutter pub get
       - run: dart run flutter_launcher_icons
       - run: flutter build apk --release
