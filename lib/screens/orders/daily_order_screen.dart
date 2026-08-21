@@ -9,6 +9,7 @@ import '../../core/repositories/daily_order_repository.dart';
 import '../../core/repositories/settings_repository.dart';
 import '../../core/repositories/supplier_repository.dart';
 import '../../core/services/background_tasks.dart';
+import '../../core/services/daily_order_widget_service.dart';
 import '../../core/services/pdf_service.dart';
 import '../../core/services/whatsapp_sms_service.dart';
 import '../../core/theme/app_theme.dart';
@@ -37,6 +38,7 @@ class _DailyOrderScreenState extends State<DailyOrderScreen> {
   final _supplierRepo = SupplierRepository();
   final _pdfService = PdfService();
   final _waService = WhatsAppSmsService();
+  final _widgetService = DailyOrderWidgetService();
 
   bool _loading = true;
   bool _sending = false;
@@ -45,6 +47,7 @@ class _DailyOrderScreenState extends State<DailyOrderScreen> {
   String _supplierPhone = '';
   String _sendTime = '12:30';
   bool _reminderEnabled = true;
+  bool _widgetEnabled = true;
 
   @override
   void initState() {
@@ -56,14 +59,24 @@ class _DailyOrderScreenState extends State<DailyOrderScreen> {
     setState(() => _loading = true);
     final items = await _repo.all();
     final settings = await _settingsRepo.getAll();
+    // Widget on/off lives outside SQLite/backup - see
+    // DailyOrderWidgetService.isEnabled for why.
+    final widgetEnabled = await _widgetService.isEnabled();
     setState(() {
       _allItems = items;
       _supplierName = settings[SettingsRepository.dailyOrderSupplierName] ?? '';
       _supplierPhone = settings[SettingsRepository.dailyOrderSupplierPhone] ?? '';
       _sendTime = settings[SettingsRepository.dailyOrderSendTime] ?? '12:30';
       _reminderEnabled = settings[SettingsRepository.dailyOrderReminderEnabled] != 'false';
+      _widgetEnabled = widgetEnabled;
       _loading = false;
     });
+    // Keeps the home-screen widget in sync with whatever just changed
+    // (item added/deleted/sent, or a settings save) - see
+    // DailyOrderWidgetService's doc comment for why _load() is the natural
+    // place for this rather than threading a refresh call through every
+    // individual mutation.
+    await _widgetService.refresh();
   }
 
   List<DailyOrderItem> get _pending => _allItems.where((i) => !i.sent).toList();
@@ -168,6 +181,7 @@ class _DailyOrderScreenState extends State<DailyOrderScreen> {
     final phoneCtrl = TextEditingController(text: _supplierPhone);
     var pickedTime = _parseTime(_sendTime);
     var reminderOn = _reminderEnabled;
+    var widgetOn = _widgetEnabled;
 
     final saved = await showDialog<bool>(
       context: context,
@@ -219,6 +233,13 @@ class _DailyOrderScreenState extends State<DailyOrderScreen> {
                   value: reminderOn,
                   onChanged: (v) => setDialogState(() => reminderOn = v),
                 ),
+                SwitchListTile(
+                  contentPadding: EdgeInsets.zero,
+                  title: const Text('Home Screen Widget'),
+                  subtitle: const Text("Show pending items on your phone's home screen"),
+                  value: widgetOn,
+                  onChanged: (v) => setDialogState(() => widgetOn = v),
+                ),
               ],
             ),
           ),
@@ -236,6 +257,8 @@ class _DailyOrderScreenState extends State<DailyOrderScreen> {
       await _settingsRepo.set(SettingsRepository.dailyOrderSupplierPhone, phoneCtrl.text.trim());
       await _settingsRepo.set(SettingsRepository.dailyOrderSendTime, timeStr);
       await _settingsRepo.set(SettingsRepository.dailyOrderReminderEnabled, reminderOn ? 'true' : 'false');
+      // Deliberately not via _settingsRepo - see DailyOrderWidgetService.setEnabled.
+      await _widgetService.setEnabled(widgetOn);
 
       if (reminderOn) {
         await scheduleDailyOrderReminder(hour: pickedTime.hour, minute: pickedTime.minute);
