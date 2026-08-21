@@ -8,6 +8,7 @@ import 'package:pdf/widgets.dart' as pw;
 import '../repositories/settings_repository.dart';
 import '../utils/formatters.dart';
 import '../../models/customer.dart';
+import '../../models/daily_order_item.dart';
 import '../../models/second_hand_phone.dart';
 import '../../models/sales_bill.dart';
 import '../../models/service.dart';
@@ -750,6 +751,88 @@ class PdfService {
                                           ],
                                     );
                         },
+                        ),
+                  );
+
+            return doc.save();
+      }
+
+      // -----------------------------------------------------------------
+      // DAILY ORDER NOTE (Daily Orders feature) - sent to the supplier over
+      // WhatsApp as a PDF attachment. Deliberately excludes the phone
+      // number column: phone numbers are for the shop's own in-app use
+      // only (tap to call - see DailyOrderScreen), never printed or sent
+      // outside the app. Grouped by the date each row was originally noted
+      // on, so a day that got carried forward because it wasn't sent in
+      // time still clearly shows which day each item belongs to.
+      // -----------------------------------------------------------------
+      Future<Uint8List> buildDailyOrderPdf({
+            required String supplierName,
+            required List<DailyOrderItem> items,
+      }) async {
+            final shop = await _shopInfo();
+            final logo = await _logo();
+            final doc = pw.Document(theme: await _theme());
+
+            // Items already arrive sorted order_date ASC, s_no ASC (see
+            // DailyOrderRepository.unsentItems()) - grouping preserves that
+            // order so dates print oldest-first.
+            final byDate = <String, List<DailyOrderItem>>{};
+            for (final item in items) {
+                  byDate.putIfAbsent(item.orderDate, () => []).add(item);
+            }
+
+            pw.Widget dateSection(String date, List<DailyOrderItem> dateItems) {
+                  return pw.Container(
+                        margin: const pw.EdgeInsets.only(bottom: 10),
+                        child: pw.Column(
+                              crossAxisAlignment: pw.CrossAxisAlignment.start,
+                              children: [
+                                    pw.Container(
+                                          padding: const pw.EdgeInsets.symmetric(horizontal: 6, vertical: 3),
+                                          color: PdfColors.grey300,
+                                          child: pw.Text('Order Date: ${formatDate(DateTime.parse(date))}',
+                                                  style: pw.TextStyle(fontSize: 10, fontWeight: pw.FontWeight.bold)),
+                                          ),
+                                    pw.Table(
+                                          border: pw.TableBorder.all(color: PdfColors.grey600, width: 0.6),
+                                          columnWidths: const {
+                                                0: pw.FlexColumnWidth(0.7),
+                                                1: pw.FlexColumnWidth(3.2),
+                                                2: pw.FlexColumnWidth(2),
+                                                3: pw.FlexColumnWidth(1.3),
+                                          },
+                                          children: [
+                                                pw.TableRow(
+                                                      decoration: const pw.BoxDecoration(color: PdfColors.grey200),
+                                                      children: [_th('S.No'), _th('Part / Accessory'), _th('Type / Model'), _th('Qty')],
+                                                      ),
+                                                for (final item in dateItems)
+                                                pw.TableRow(children: [
+                                                      _td('${item.sNo}'),
+                                                      _td(item.partName),
+                                                      _td(item.typeModel?.isNotEmpty == true ? item.typeModel! : '-'),
+                                                      _td(item.quantity),
+                                                      ]),
+                                                ],
+                                          ),
+                                    ],
+                              ),
+                        );
+            }
+
+            doc.addPage(
+                  pw.MultiPage(
+                        pageFormat: PdfPageFormat.a4,
+                        margin: const pw.EdgeInsets.all(24),
+                        build: (context) => [
+                              _header(shop, logo, 'DAILY ORDER NOTE'),
+                              pw.SizedBox(height: 4),
+                              pw.Text('To: $supplierName', style: pw.TextStyle(fontSize: 10, fontWeight: pw.FontWeight.bold)),
+                              pw.Text('Generated: ${formatDate(DateTime.now())}', style: const pw.TextStyle(fontSize: 9)),
+                              pw.SizedBox(height: 10),
+                              for (final date in byDate.keys) dateSection(date, byDate[date]!),
+                              ],
                         ),
                   );
 
