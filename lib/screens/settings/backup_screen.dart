@@ -70,6 +70,12 @@ class _BackupScreenState extends State<BackupScreen> {
                     'Requires internet + your own Google Cloud OAuth client (see README "Google Drive Backup Setup"). Everything else in this app works fully offline without this.',
                     style: TextStyle(color: AppColors.textSecondaryOf(context), fontSize: 12),
                   ),
+                  const SizedBox(height: 8),
+                  if (_driveLinked)
+                    Text(
+                      'Once connected, all your data (except photos) backs up to Google Drive automatically every day, aimed at around 10 PM - no need to tap anything, and no permission popups. Android doesn't guarantee the exact minute, so as a safety net this also runs the moment you open the app if that day's backup hasn't happened yet. If a day is missed (no internet, phone off, etc.), it's simply included in the next successful backup - nothing is lost.',
+                      style: TextStyle(color: AppColors.textSecondaryOf(context), fontSize: 12),
+                    ),
                   const SizedBox(height: 10),
                   Row(children: [
                     if (!_driveLinked)
