@@ -140,6 +140,243 @@ jobs:
               print("Core library desugaring already configured, nothing to do.")
           PYEOF
 
+      # Daily Orders home-screen widget (Phase 2 - see
+      # lib/core/services/daily_order_widget_service.dart). This is a real
+      # native Android AppWidget, so it needs Kotlin + XML files under
+      # android/, plus a manifest <receiver> entry - all of which have to be
+      # written here rather than committed, for the same reason as every
+      # other android/ edit in this workflow: `flutter create` above
+      # regenerates that whole folder fresh on every build, so nothing
+      # placed there directly would ever survive a checkout. Idempotent:
+      # (re)writes the widget's own files every run (harmless - they're
+      # always regenerated anyway) and only touches the manifest if the
+      # receiver isn't already registered.
+      - name: Add Daily Orders home screen widget (Phase 2)
+        run: |
+          python3 - <<'PYEOF'
+          import os
+
+          kotlin_dir = "android/app/src/main/kotlin/com/example/pro_app"
+          layout_dir = "android/app/src/main/res/layout"
+          xml_dir = "android/app/src/main/res/xml"
+          manifest_path = "android/app/src/main/AndroidManifest.xml"
+
+          os.makedirs(kotlin_dir, exist_ok=True)
+          os.makedirs(layout_dir, exist_ok=True)
+          os.makedirs(xml_dir, exist_ok=True)
+
+          provider_kt = '''package com.example.pro_app
+
+          import android.app.PendingIntent
+          import android.appwidget.AppWidgetManager
+          import android.content.Context
+          import android.content.Intent
+          import android.content.SharedPreferences
+          import android.os.Bundle
+          import android.view.View
+          import android.widget.RemoteViews
+          import es.antonborri.home_widget.HomeWidgetPlugin
+          import es.antonborri.home_widget.HomeWidgetProvider
+
+          // Renders the Daily Orders home-screen widget from whatever
+          // DailyOrderWidgetService (Dart side) last wrote via
+          // HomeWidget.saveWidgetData - see that file for what each key
+          // means. HomeWidgetProvider (from the home_widget plugin) is a
+          // thin AppWidgetProvider subclass that hands onUpdate() the
+          // widget's SharedPreferences directly.
+          //
+          // Three static layout tiers stand in for one true scrolling list -
+          // a real scrolling widget needs a RemoteViewsService list adapter,
+          // a much larger native component than this feature warrants.
+          // "Maximum" just shows more static rows, not an actually
+          // scrollable list - a trade-off called out up front.
+          class DailyOrderWidgetProvider : HomeWidgetProvider() {
+
+              override fun onUpdate(
+                  context: Context,
+                  appWidgetManager: AppWidgetManager,
+                  appWidgetIds: IntArray,
+                  widgetData: SharedPreferences
+              ) {
+                  appWidgetIds.forEach { appWidgetId ->
+                      updateAppWidget(context, appWidgetManager, appWidgetId, widgetData)
+                  }
+              }
+
+              override fun onAppWidgetOptionsChanged(
+                  context: Context,
+                  appWidgetManager: AppWidgetManager,
+                  appWidgetId: Int,
+                  newOptions: Bundle
+              ) {
+                  updateAppWidget(context, appWidgetManager, appWidgetId, HomeWidgetPlugin.getData(context))
+              }
+
+              companion object {
+                  private val itemIds = intArrayOf(
+                      R.id.widget_item_0, R.id.widget_item_1, R.id.widget_item_2, R.id.widget_item_3,
+                      R.id.widget_item_4, R.id.widget_item_5, R.id.widget_item_6, R.id.widget_item_7
+                  )
+
+                  fun updateAppWidget(
+                      context: Context,
+                      appWidgetManager: AppWidgetManager,
+                      appWidgetId: Int,
+                      widgetData: SharedPreferences
+                  ) {
+                      val options = appWidgetManager.getAppWidgetOptions(appWidgetId)
+                      val minWidth = options.getInt(AppWidgetManager.OPTION_APPWIDGET_MIN_WIDTH, 0)
+
+                      val layoutId = when {
+                          minWidth < 180 -> R.layout.daily_order_widget_mini
+                          minWidth < 300 -> R.layout.daily_order_widget_medium
+                          else -> R.layout.daily_order_widget_maximum
+                      }
+                      val itemRows = when (layoutId) {
+                          R.layout.daily_order_widget_mini -> 0
+                          R.layout.daily_order_widget_medium -> 3
+                          else -> 8
+                      }
+
+                      val views = RemoteViews(context.packageName, layoutId)
+                      val enabled = widgetData.getString("widget_enabled", "true") ?: "true"
+
+                      if (enabled == "false") {
+                          views.setTextViewText(R.id.widget_title, "Daily Orders (off)")
+                          views.setTextViewText(R.id.widget_count, "Turn on in app Settings")
+                      } else {
+                          val supplierName = widgetData.getString("supplier_name", "Daily Orders") ?: "Daily Orders"
+                          val pendingCount = widgetData.getInt("pending_count", 0)
+                          views.setTextViewText(R.id.widget_title, supplierName)
+                          views.setTextViewText(
+                              R.id.widget_count,
+                              if (pendingCount == 0) "No pending items" else "$pendingCount item(s) pending"
+                          )
+                      }
+
+                      for (i in itemIds.indices) {
+                          if (i >= itemRows) continue
+                          val text = if (enabled == "false") "" else (widgetData.getString("item_$i", "") ?: "")
+                          views.setTextViewText(itemIds[i], text)
+                          views.setViewVisibility(itemIds[i], if (text.isEmpty()) View.GONE else View.VISIBLE)
+                      }
+
+                      val launchIntent = context.packageManager.getLaunchIntentForPackage(context.packageName)
+                      launchIntent?.flags = Intent.FLAG_ACTIVITY_NEW_TASK or Intent.FLAG_ACTIVITY_CLEAR_TOP
+                      val pendingIntent = PendingIntent.getActivity(
+                          context, 0, launchIntent,
+                          PendingIntent.FLAG_UPDATE_CURRENT or PendingIntent.FLAG_IMMUTABLE
+                      )
+                      views.setOnClickPendingIntent(R.id.widget_root, pendingIntent)
+
+                      appWidgetManager.updateAppWidget(appWidgetId, views)
+                  }
+              }
+          }
+          '''
+
+          widget_info_xml = '''<?xml version="1.0" encoding="utf-8"?>
+          <appwidget-provider xmlns:android="http://schemas.android.com/apk/res/android"
+              android:initialLayout="@layout/daily_order_widget_mini"
+              android:minWidth="110dp"
+              android:minHeight="40dp"
+              android:minResizeWidth="110dp"
+              android:minResizeHeight="40dp"
+              android:maxResizeWidth="380dp"
+              android:maxResizeHeight="300dp"
+              android:resizeMode="horizontal|vertical"
+              android:updatePeriodMillis="1800000"
+              android:widgetCategory="home_screen">
+          </appwidget-provider>
+          '''
+
+          def item_row(idx):
+              return (
+                  f'    <TextView\n'
+                  f'        android:id="@+id/widget_item_{idx}"\n'
+                  f'        android:layout_width="match_parent"\n'
+                  f'        android:layout_height="wrap_content"\n'
+                  f'        android:textColor="#FFFFFF"\n'
+                  f'        android:textSize="11sp"\n'
+                  f'        android:maxLines="1"\n'
+                  f'        android:ellipsize="end"\n'
+                  f'        android:visibility="gone" />\n'
+              )
+
+          def widget_layout(item_count):
+              items = "".join(item_row(i) for i in range(item_count))
+              return (
+                  '<?xml version="1.0" encoding="utf-8"?>\n'
+                  '<LinearLayout xmlns:android="http://schemas.android.com/apk/res/android"\n'
+                  '    android:id="@+id/widget_root"\n'
+                  '    android:layout_width="match_parent"\n'
+                  '    android:layout_height="match_parent"\n'
+                  '    android:orientation="vertical"\n'
+                  '    android:padding="10dp"\n'
+                  '    android:background="#1565C0">\n'
+                  '\n'
+                  '    <TextView\n'
+                  '        android:id="@+id/widget_title"\n'
+                  '        android:layout_width="match_parent"\n'
+                  '        android:layout_height="wrap_content"\n'
+                  '        android:text="Daily Orders"\n'
+                  '        android:textColor="#FFFFFF"\n'
+                  '        android:textStyle="bold"\n'
+                  '        android:textSize="13sp"\n'
+                  '        android:maxLines="1"\n'
+                  '        android:ellipsize="end" />\n'
+                  '\n'
+                  '    <TextView\n'
+                  '        android:id="@+id/widget_count"\n'
+                  '        android:layout_width="match_parent"\n'
+                  '        android:layout_height="wrap_content"\n'
+                  '        android:layout_marginBottom="4dp"\n'
+                  '        android:text="No pending items"\n'
+                  '        android:textColor="#E3F2FD"\n'
+                  '        android:textSize="11sp"\n'
+                  '        android:maxLines="1"\n'
+                  '        android:ellipsize="end" />\n'
+                  '\n'
+                  f'{items}'
+                  '</LinearLayout>\n'
+              )
+
+          files = {
+              os.path.join(kotlin_dir, "DailyOrderWidgetProvider.kt"): provider_kt,
+              os.path.join(xml_dir, "daily_order_widget_info.xml"): widget_info_xml,
+              os.path.join(layout_dir, "daily_order_widget_mini.xml"): widget_layout(0),
+              os.path.join(layout_dir, "daily_order_widget_medium.xml"): widget_layout(3),
+              os.path.join(layout_dir, "daily_order_widget_maximum.xml"): widget_layout(8),
+          }
+
+          for path, content in files.items():
+              with open(path, "w", encoding="utf-8") as f:
+                  f.write(content)
+              print("Wrote", path)
+
+          with open(manifest_path, "r", encoding="utf-8") as f:
+              manifest = f.read()
+
+          if "DailyOrderWidgetProvider" in manifest:
+              print("Widget receiver already registered, nothing to do.")
+          else:
+              receiver_block = (
+                  '        <receiver android:name=".DailyOrderWidgetProvider" android:exported="true">\n'
+                  '            <intent-filter>\n'
+                  '                <action android:name="android.appwidget.action.APPWIDGET_UPDATE" />\n'
+                  '            </intent-filter>\n'
+                  '            <meta-data android:name="android.appwidget.provider" android:resource="@xml/daily_order_widget_info" />\n'
+                  '        </receiver>\n'
+              )
+              idx = manifest.rfind("</application>")
+              if idx == -1:
+                  raise SystemExit(f"Could not find </application> in {manifest_path} - aborting so this doesn't silently produce a broken manifest.")
+              manifest = manifest[:idx] + receiver_block + manifest[idx:]
+              with open(manifest_path, "w", encoding="utf-8") as f:
+                  f.write(manifest)
+              print("Registered DailyOrderWidgetProvider receiver.")
+          PYEOF
+
       - run: flutter pub get
       - run: dart run flutter_launcher_icons
       - run: flutter build apk --release
