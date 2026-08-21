@@ -35,7 +35,7 @@ class AuthService extends ChangeNotifier {
       'settings',
       {'key': _appUnlockKey, 'value': '1'},
       conflictAlgorithm: ConflictAlgorithm.replace,
-      );
+    );
     _appUnlocked = true;
     notifyListeners();
     return true;
@@ -78,8 +78,17 @@ class AuthService extends ChangeNotifier {
   /// values used in AppShell's destination list).
   static const _billingMenuIds = {'sales', 'services', 'second_hand'};
 
-  /// Screen ids an "Inventory" login is allowed to open.
-  static const _inventoryMenuIds = {'spare_parts', 'accessories', 'second_hand', 'suppliers', 'purchases'};
+  /// Screen ids an "Inventory" login is allowed to open. Daily Orders lives
+  /// here since it's a supplier-facing, stock-replenishment task, the same
+  /// as Suppliers/Purchases.
+  static const _inventoryMenuIds = {
+    'spare_parts',
+    'accessories',
+    'second_hand',
+    'suppliers',
+    'purchases',
+    'daily_orders',
+  };
 
   /// Whether the current login's menu/drawer should include screen [id].
   /// Dashboard, Profit & Loss, Expenses, Customers and Settings are simply
