@@ -85,13 +85,13 @@ jobs:
       - run: flutter build apk --release
       - name: Print release APK signing SHA-1 (for OAuth client comparison)
         run: |
-        keytool -printcert -jarfile build/app/outputs/flutter-apk/app-release.apk || true
-        echo "---apksigner verify (v2/v3 signing cert)---"
-        APKSIGNER=$(find "$ANDROID_HOME" "$ANDROID_SDK_ROOT" -name apksigner 2>/dev/null | sort -V | tail -1)
-        echo "Using apksigner: $APKSIGNER"
-        "$APKSIGNER" verify --print-certs build/app/outputs/flutter-apk/app-release.apk
-        echo "---applicationId---"
-        grep -R "applicationId" android/app/build.gradle* || true        
+          keytool -printcert -jarfile build/app/outputs/flutter-apk/app-release.apk || true
+          echo "---apksigner verify (v2/v3 signing cert)---"
+          APKSIGNER=$(find "$ANDROID_HOME" "$ANDROID_SDK_ROOT" -name apksigner 2>/dev/null | sort -V | tail -1)
+          echo "Using apksigner: $APKSIGNER"
+          "$APKSIGNER" verify --print-certs build/app/outputs/flutter-apk/app-release.apk
+          echo "---applicationId---"
+          grep -R "applicationId" android/app/build.gradle* || true        
   
 
       - uses: actions/upload-artifact@v4
