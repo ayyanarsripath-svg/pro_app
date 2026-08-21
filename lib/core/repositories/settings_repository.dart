@@ -15,6 +15,8 @@ class SettingsRepository {
   static const lastBackupAt = 'last_backup_at';
   static const weeklyAutoBackupEnabled = 'weekly_auto_backup_enabled';
   static const googleDriveLinked = 'google_drive_linked';
+  static const lastDriveBackupAt = 'last_drive_backup_at';
+  static const dailyDriveAutoBackupEnabled = 'daily_drive_auto_backup_enabled';
   static const complaintPresets = 'complaint_presets';
   static const logoPath = 'logo_path';
 
