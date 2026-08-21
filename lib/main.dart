@@ -1,4 +1,5 @@
 import 'package:flutter/material.dart';
+import 'package:home_widget/home_widget.dart';
 import 'package:provider/provider.dart';
 
 import 'core/db/database_helper.dart';
@@ -10,11 +11,32 @@ import 'core/services/logo_service.dart';
 import 'core/services/menu_order_service.dart';
 import 'core/services/order_reminder_service.dart';
 import 'core/services/theme_service.dart';
+import 'core/services/widget_launch_state.dart';
 import 'core/repositories/settings_repository.dart';
 import 'app.dart';
 
+/// homewidgetpro://quickadd - the deep link the widget's native "+ Add"
+/// button launches the app with (see DailyOrderWidgetProvider.kt, injected
+/// by the CI build script). Anything else is a plain tap, handled as a
+/// normal app open.
+bool _isQuickAddUri(Uri? uri) => uri?.host == 'quickadd';
+
 Future<void> main() async {
   WidgetsFlutterBinding.ensureInitialized();
+
+  // Cold start via the widget's "+ Add" button -> skip straight to
+  // QuickAddOrderScreen, no PIN screen (see WidgetLaunchState / app.dart).
+  final initialWidgetUri = await HomeWidget.initiallyLaunchedFromHomeWidget();
+  if (_isQuickAddUri(initialWidgetUri)) {
+    WidgetLaunchState.quickAddRequested.value = true;
+  }
+  // Same deep link, but the app process was already alive (e.g. sitting
+  // in the background) when the button was tapped.
+  HomeWidget.widgetClicked.listen((uri) {
+    if (_isQuickAddUri(uri)) {
+      WidgetLaunchState.quickAddRequested.value = true;
+    }
+  });
 
   // Warms up the offline SQLite database before the UI needs it.
   await DatabaseHelper.instance.database;
