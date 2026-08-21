@@ -5,6 +5,7 @@ import 'core/db/database_helper.dart';
 import 'core/services/auth_service.dart';
 import 'core/services/background_tasks.dart';
 import 'core/services/backup_service.dart';
+import 'core/services/daily_order_widget_service.dart';
 import 'core/services/logo_service.dart';
 import 'core/services/menu_order_service.dart';
 import 'core/services/order_reminder_service.dart';
@@ -44,6 +45,12 @@ Future<void> main() async {
   final reminderMinute = timeParts.length > 1 ? (int.tryParse(timeParts[1]) ?? 30) : 30;
   scheduleDailyOrderReminder(hour: reminderHour, minute: reminderMinute);
   OrderReminderService().checkAndNotifyIfDue();
+
+  // Daily Orders home-screen widget (Phase 2) - refreshes on every app
+  // startup so the widget reflects carry-forward changes even if the shop
+  // owner never opens the Daily Orders screen itself that day (see
+  // DailyOrderWidgetService's doc comment for the other refresh points).
+  DailyOrderWidgetService().refresh();
 
   final themeService = ThemeService();
   await themeService.load();
