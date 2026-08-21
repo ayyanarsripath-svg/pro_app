@@ -19,6 +19,15 @@ Future<void> main() async {
   // days have passed since the last one (spec "Weekly automatic backup").
   BackupService().runWeeklyAutoBackupIfDue();
 
+  // Registers the ~10 PM daily Google Drive backup with Android's
+  // WorkManager (no permission prompt - see backup_service.dart), and also
+  // runs today's Drive backup right now if it's still due (e.g. the
+  // background run hasn't happened yet, ran late, or failed last time due
+  // to no internet) - this app-open catch-up is what guarantees a missed
+  // day never stays missed for long.
+  scheduleDailyGoogleDriveBackup();
+  BackupService().runDailyGoogleDriveBackupIfDue();
+
   final themeService = ThemeService();
   await themeService.load();
 
