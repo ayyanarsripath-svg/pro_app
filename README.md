@@ -104,7 +104,7 @@ SHA-1 never changes once you've set this up:
    - Package name: `com.example.pro_app` (matches the `--project-name=pro_app`
      the workflow passes to `flutter create` - check
      `android/app/build.gradle`'s `applicationId` after a build if unsure).
-   - SHA-1 fingerprint: `CC:73:AE:81:85:87:2B:9B:84:A5:83:54:1C:BF:5C:BA:C9:64:F4:0A`
+   - SHA-1 fingerprint: `E5:90:16:89:47:1A:FC:46:35:60:03:1E:31:D0:E0:6F:00:DF:5B:33`
      (this is fixed now - no need to regenerate it after future builds,
      as long as the same `DEBUG_KEYSTORE_BASE64` secret stays in place).
 4. Push to `main` (or re-run the workflow) to get a build signed with the
@@ -114,10 +114,11 @@ SHA-1 never changes once you've set this up:
 
    Status: Google Cloud project `pro-app-drive-backup` is set up - Drive
    API enabled, OAuth consent screen configured (Testing, with
-   ayyanarsripath@gmail.com as a test user), and the Android OAuth client
-   above is created and matches this SHA-1. This commit's push is the
-   "fresh build" step, so the very next CI run already picks up the
-   stable keystore and this registered client.
+   ayyanarsripath@gmail.com as a test user), and the Android OAuth
+   client's SHA-1 above was verified against the actual CI-built APK
+   (`apksigner verify --print-certs` in CI, since an earlier
+   guessed registration was wrong) - Google Drive backup is confirmed
+   working end-to-end on a real device.   
 
 ### If you build locally on your own machine
 
