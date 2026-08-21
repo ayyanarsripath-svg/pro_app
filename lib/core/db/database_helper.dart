@@ -13,7 +13,7 @@ class DatabaseHelper {
   static final DatabaseHelper instance = DatabaseHelper._internal();
 
   static Database? _db;
-  static const int dbVersion = 4;
+  static const int dbVersion = 5;
   static const String dbFileName = 'professional_mobiles.db';
 
   Future<Database> get database async {
@@ -49,6 +49,28 @@ class DatabaseHelper {
     // created before this update keeps seeing everything it already could.
     if (oldVersion < 4) {
       await db.execute("ALTER TABLE staff ADD COLUMN section TEXT NOT NULL DEFAULT 'full'");
+    }
+    // Daily Orders feature (daily supplier order note - see
+    // DailyOrderScreen / DailyOrderRepository). Phone is stored here for
+    // the shop's own in-app reference (tap to call) only - it must never
+    // be printed/sent outside the app.
+    if (oldVersion < 5) {
+      await db.execute('''
+        CREATE TABLE daily_order_items (
+          id TEXT PRIMARY KEY,
+          order_date TEXT NOT NULL,
+          s_no INTEGER NOT NULL,
+          part_name TEXT NOT NULL,
+          type_model TEXT,
+          quantity TEXT NOT NULL,
+          phone TEXT,
+          sent INTEGER NOT NULL DEFAULT 0,
+          sent_at TEXT,
+          created_at TEXT NOT NULL
+        )
+      ''');
+      await db.execute('CREATE INDEX idx_daily_order_items_date ON daily_order_items(order_date)');
+      await db.execute('CREATE INDEX idx_daily_order_items_sent ON daily_order_items(sent)');
     }
   }
 
@@ -499,6 +521,26 @@ class DatabaseHelper {
         notes TEXT
       )
     ''');
+
+    // ---------------------------------------------------------------
+    // Daily Orders (daily supplier order note - see DailyOrderScreen)
+    // ---------------------------------------------------------------
+    batch.execute('''
+      CREATE TABLE daily_order_items (
+        id TEXT PRIMARY KEY,
+        order_date TEXT NOT NULL,
+        s_no INTEGER NOT NULL,
+        part_name TEXT NOT NULL,
+        type_model TEXT,
+        quantity TEXT NOT NULL,
+        phone TEXT,
+        sent INTEGER NOT NULL DEFAULT 0,
+        sent_at TEXT,
+        created_at TEXT NOT NULL
+      )
+    ''');
+    batch.execute('CREATE INDEX idx_daily_order_items_date ON daily_order_items(order_date)');
+    batch.execute('CREATE INDEX idx_daily_order_items_sent ON daily_order_items(sent)');
 
     await batch.commit(noResult: true);
   }
