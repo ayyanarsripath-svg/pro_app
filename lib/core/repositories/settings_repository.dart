@@ -31,6 +31,15 @@ class SettingsRepository {
   static const dailyOrderReminderEnabled = 'daily_order_reminder_enabled';
   static const lastOrderReminderAt = 'last_order_reminder_at';
 
+  // NOTE: the Daily Orders home-screen widget's on/off toggle is
+  // deliberately NOT a key in this table. Backups (see BackupService) work
+  // by copying the whole SQLite database file, so anything stored here goes
+  // into every backup and Google Drive upload. The widget toggle is stored
+  // instead via DailyOrderWidgetService, which uses the home_widget
+  // package's own SharedPreferences-backed storage - a separate file the
+  // backup never touches - matching the requirement that widget settings
+  // stay purely local to the device.
+
   Future<String?> get(String key) async {
     final db = await _dbHelper.database;
     final rows = await db.query('settings', where: 'key = ?', whereArgs: [key]);
