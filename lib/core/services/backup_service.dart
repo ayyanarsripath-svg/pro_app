@@ -159,7 +159,7 @@ class BackupService {
       await _settings.set(SettingsRepository.googleDriveLinked, 'true');
       return true;
     } on GoogleSignInException catch (e) {
-      if (e.code == GoogleSignInExceptionCode.canceled) return false; // user cancelled the picker
+if (e.code == GoogleSignInExceptionCode.canceled) return (e.description != null && e.description!.trim().isNotEmpty) ? (throw Exception('Sign-in reported "cancelled", but Android included this extra detail: ${e.description}')) : false; // diagnostic: surface e.description instead of assuming a real user cancel
       throw Exception(_friendlyGoogleError(e));
     }
   }
