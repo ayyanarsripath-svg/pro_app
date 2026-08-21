@@ -34,7 +34,7 @@ class OrderReminderService {
     // answer after that.
     await _plugin
         .resolvePlatformSpecificImplementation<AndroidFlutterLocalNotificationsPlugin>()
-        ?.r9yMnTm4NSzvG9rrwjM2ec8xZgh1cafXH8();
+        ?.requestNotificationsPermission();
     _pluginInitialized = true;
   }
 
