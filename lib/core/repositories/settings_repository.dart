@@ -20,6 +20,17 @@ class SettingsRepository {
   static const complaintPresets = 'complaint_presets';
   static const logoPath = 'logo_path';
 
+  // Daily Orders (daily supplier order note - see DailyOrderScreen). One
+  // supplier per day (spec: simpler than per-row supplier splitting), so
+  // the picked supplier's own name/phone are stored directly here rather
+  // than as a foreign key - the shop can change it any day from Settings
+  // without touching the Suppliers list.
+  static const dailyOrderSupplierName = 'daily_order_supplier_name';
+  static const dailyOrderSupplierPhone = 'daily_order_supplier_phone';
+  static const dailyOrderSendTime = 'daily_order_send_time'; // 'HH:mm', e.g. '12:30'
+  static const dailyOrderReminderEnabled = 'daily_order_reminder_enabled';
+  static const lastOrderReminderAt = 'last_order_reminder_at';
+
   Future<String?> get(String key) async {
     final db = await _dbHelper.database;
     final rows = await db.query('settings', where: 'key = ?', whereArgs: [key]);
@@ -30,7 +41,7 @@ class SettingsRepository {
   Future<void> set(String key, String value) async {
     final db = await _dbHelper.database;
     await db.insert('settings', {'key': key, 'value': value},
-                    conflictAlgorithm: ConflictAlgorithm.replace);
+        conflictAlgorithm: ConflictAlgorithm.replace);
   }
 
   Future<Map<String, String>> getAll() async {
@@ -68,7 +79,7 @@ class SettingsRepository {
         'Button',
         'Water Damage',
         'Software',
-        ];
+      ];
     }
     return raw.split('|').map((s) => s.trim()).where((s) => s.isNotEmpty).toList();
   }
