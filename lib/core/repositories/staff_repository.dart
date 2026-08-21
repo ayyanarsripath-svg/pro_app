@@ -86,6 +86,17 @@ class StaffRepository {
     return Staff.fromMap(rows.first);
   }
 
+  /// Looks up a staff row by id - used to restore a persisted login
+  /// session on app startup (see AuthService.restoreSession). Returns null
+  /// if the id no longer exists or the account was deactivated, so a
+  /// stale/deleted staff id never silently re-authenticates.
+  Future<Staff?> getById(String id) async {
+    final db = await _dbHelper.database;
+    final rows = await db.query('staff', where: 'id = ? AND active = 1', whereArgs: [id]);
+    if (rows.isEmpty) return null;
+    return Staff.fromMap(rows.first);
+  }
+
   Future<List<Staff>> all() async {
     final db = await _dbHelper.database;
     final rows = await db.query('staff', orderBy: 'created_at');
