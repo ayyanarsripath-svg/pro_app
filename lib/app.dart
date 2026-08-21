@@ -91,7 +91,12 @@ class _AccountGateState extends State<_AccountGate> {
   @override
   void initState() {
     super.initState();
-    _hasAccountFuture = context.read<AuthService>().hasAnyAccount();
+    final auth = context.read<AuthService>();
+    // hasAnyAccount() decides FirstRunSetupScreen vs PIN/AppShell below;
+    // restoreSession() (device-local, see AuthService) fills in auth.current
+    // first so a previously logged-in staff skips straight past the PIN
+    // screen to AppShell instead of being asked again every app open.
+    _hasAccountFuture = auth.restoreSession().then((_) => auth.hasAnyAccount());
   }
 
   @override
