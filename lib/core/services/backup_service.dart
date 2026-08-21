@@ -5,74 +5,10 @@ import 'package:path_provider/path_provider.dart';
 import 'package:googleapis/drive/v3.dart' as drive;
 import 'package:google_sign_in/google_sign_in.dart';
 import 'package:http/http.dart' as http;
-import 'package:workmanager/workmanager.dart';
 
 import '../db/database_helper.dart';
 import '../repositories/settings_repository.dart';
 import '../utils/id_gen.dart';
-
-/// Unique identifiers for the daily Google Drive backup background task
-/// (see [scheduleDailyGoogleDriveBackup] / [callbackDispatcher] below).
-const dailyDriveBackupTaskName = 'daily_google_drive_backup_task';
-const dailyDriveBackupUniqueName = 'daily_google_drive_backup';
-
-/// WorkManager entry point - runs in its own background isolate, completely
-/// separate from the app's UI isolate, whenever Android decides to execute
-/// the periodic task registered in [scheduleDailyGoogleDriveBackup]. Must
-/// stay a top-level function annotated with @pragma('vm:entry-point') so
-/// the Android side can still find it after the app process is killed.
-@pragma('vm:entry-point')
-void callbackDispatcher() {
-  Workmanager().executeTask((task, inputData) async {
-    try {
-      await BackupService().runDailyGoogleDriveBackupIfDue();
-    } catch (_) {
-      // Swallow - WorkManager retries failed tasks on its own backoff
-      // policy anyway, and the calendar-date due-check in
-      // runDailyGoogleDriveBackupIfDue() makes sure a failed day is simply
-      // picked up by the next successful run (background retry, or the
-      // moment the app is next opened).
-    }
-    return Future.value(true);
-  });
-}
-
-/// Registers the daily ~10 PM Google Drive backup with Android's
-/// WorkManager. Safe to call on every app startup - registerPeriodicTask()
-/// with ExistingPeriodicWorkPolicy.keep leaves an already-scheduled task
-/// alone instead of restarting its cycle. WorkManager needs no runtime
-/// permission prompt for this (unlike exact-alarm scheduling), so the shop
-/// owner is never asked anything.
-///
-/// IMPORTANT (please read before assuming "night 10 o clock" is exact):
-/// Android's WorkManager does not guarantee an exact run time, even though
-/// the initial delay below is computed to land on 10 PM - the OS can push
-/// it later for battery/Doze-mode reasons. That's a deliberate Android
-/// platform limitation, not a bug here, and it's exactly why
-/// runDailyGoogleDriveBackupIfDue() is *also* called every time the app is
-/// opened (see main.dart): even if the background trigger runs late, or
-/// can't silently sign in, that day's backup still happens the moment the
-/// shop owner next opens the app.
-Future<void> scheduleDailyGoogleDriveBackup() async {
-  await Workmanager().initialize(callbackDispatcher);
-
-  final now = DateTime.now();
-  var next10pm = DateTime(now.year, now.month, now.day, 22);
-  if (!next10pm.isAfter(now)) {
-    next10pm = next10pm.add(const Duration(days: 1));
-  }
-
-  await Workmanager().registerPeriodicTask(
-    dailyDriveBackupUniqueName,
-    dailyDriveBackupTaskName,
-    frequency: const Duration(hours: 24),
-    initialDelay: next10pm.difference(now),
-    existingWorkPolicy: ExistingPeriodicWorkPolicy.keep,
-    constraints: Constraints(networkType: NetworkType.connected),
-    backoffPolicy: BackoffPolicy.exponential,
-    backoffPolicyDelay: const Duration(minutes: 15),
-  );
-}
 
 /// Manual + weekly-automatic local backup, and optional Google Drive backup
 /// (spec: "Google Drive backup, Weekly automatic backup, Manual backup,
@@ -223,7 +159,7 @@ class BackupService {
       await _settings.set(SettingsRepository.googleDriveLinked, 'true');
       return true;
     } on GoogleSignInException catch (e) {
-if (e.code == GoogleSignInExceptionCode.canceled) return (e.description != null && e.description!.trim().isNotEmpty) ? (throw Exception('Sign-in reported "cancelled", but Android included this extra detail: ${e.description}')) : false; // diagnostic: surface e.description instead of assuming a real user cancel
+      if (e.code == GoogleSignInExceptionCode.canceled) return (e.description != null && e.description!.trim().isNotEmpty) ? (throw Exception('Sign-in reported "cancelled", but Android included this extra detail: ${e.description}')) : false; // diagnostic: surface e.description instead of assuming a real user cancel
       throw Exception(_friendlyGoogleError(e));
     }
   }
@@ -312,10 +248,10 @@ if (e.code == GoogleSignInExceptionCode.canceled) return (e.description != null 
   }
 
   /// Called both from the WorkManager background task (once daily, aimed at
-  /// ~10 PM - see [scheduleDailyGoogleDriveBackup]) and every time the app
-  /// is opened (see main.dart). Backs up to Google Drive at most once per
-  /// calendar day - and because this compares calendar dates rather than a
-  /// fixed 24-hour duration, and only advances
+  /// ~10 PM - see [scheduleDailyGoogleDriveBackup] in background_tasks.dart)
+  /// and every time the app is opened (see main.dart). Backs up to Google
+  /// Drive at most once per calendar day - and because this compares
+  /// calendar dates rather than a fixed 24-hour duration, and only advances
   /// [SettingsRepository.lastDriveBackupAt] after an upload actually
   /// succeeds, a day that failed (no internet, sign-in hiccup, etc.) simply
   /// stays "due" and is automatically picked up by the very next successful
