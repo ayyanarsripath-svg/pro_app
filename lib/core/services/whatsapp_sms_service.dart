@@ -110,6 +110,28 @@ class WhatsAppSmsService {
       'Trusted Mobile Service Center';
   }
 
+  /// Daily supplier order (Daily Orders feature) - opens WhatsApp with a
+  /// short text summary. Deliberately does NOT list phone numbers (those
+  /// are for the shop's own in-app use only - see DailyOrderScreen) and
+  /// does NOT try to list every item here either: the full itemised,
+  /// date-wise list goes as the attached PDF (see
+  /// PdfService.buildDailyOrderPdf), sent as a separate share step right
+  /// after this message, since a wa.me link can pre-fill text but can't
+  /// carry a file attachment.
+  String dailyOrderMessage({
+    required String supplierName,
+    required List<String> orderDateLabels,
+    required int itemCount,
+  }) {
+    final dates = orderDateLabels.toSet().join(', ');
+    return '📱 PROFESSIONAL MOBILES\n'
+        '🧾 Daily Parts / Accessories Order\n'
+        'Hello $supplierName,\n'
+        "Please find today's order attached as a PDF ($itemCount item(s), dated: $dates).\n"
+        '🙏 Thank you.\n'
+        '📱 PROFESSIONAL MOBILES';
+  }
+
   String warrantyClaimMessage({required String customerName, required String referenceLabel, required String description}) { return '''
       📱 PROFESSIONAL MOBILES
       🛡️ Warranty Claim Confirmation
