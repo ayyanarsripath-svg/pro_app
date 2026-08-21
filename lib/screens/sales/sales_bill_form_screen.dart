@@ -27,7 +27,7 @@ class _SalesBillFormScreenState extends State<SalesBillFormScreen> {
   final _customerRepo = CustomerRepository();
   final _salesRepo = SalesRepository();
 
-  final _customerNameCtrl = TextEditingController(text: 'Walk-in Customer');
+  final _customerNameCtrl = TextEditingController();
   final _customerPhoneCtrl = TextEditingController();
   final _discountCtrl = TextEditingController(text: '0');
   final _paidCtrl = TextEditingController(text: '0');
@@ -57,7 +57,7 @@ class _SalesBillFormScreenState extends State<SalesBillFormScreen> {
         padding: const EdgeInsets.all(14),
         children: [
           SectionCard(title: 'Customer', icon: Icons.person_rounded, children: [
-            TextField(controller: _customerNameCtrl, decoration: const InputDecoration(labelText: 'Customer Name')),
+            TextField(controller: _customerNameCtrl, decoration: const InputDecoration(labelText: 'Customer Name', hintText: 'Walk-in Customer')),
             const SizedBox(height: 10),
             TextField(controller: _customerPhoneCtrl, keyboardType: TextInputType.phone, decoration: const InputDecoration(labelText: 'Phone (optional)')),
           ]),
