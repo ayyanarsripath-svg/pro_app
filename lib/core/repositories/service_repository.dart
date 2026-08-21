@@ -178,11 +178,23 @@ class ServiceRepository {
     await _syncCoreLedger(updated);
   }
 
+
   /// Soft-deletes a service job (spec: Delete option gated by admin
-  /// "Delete Records" permission). Keeps the row (and its ledger/payment
-  /// history) intact for accounting integrity - just hides it from lists.
+  /// "Delete Records" permission). Keeps the row itself (spec: accounting
+  /// integrity) but clears this service's ledger entries (core amount,
+  /// spare-part costs, other costs) so dashboard/P&L totals correctly
+  /// drop the deleted bill's amount.
   Future<void> delete(String serviceId) async {
     final db = await _dbHelper.database;
+    await _ledger.clearForReference('service_core', serviceId);
+    final usages = await sparePartUsages(serviceId);
+    for (final u in usages) {
+      await _ledger.clearForReference('service_spare_part', u.id);
+    }
+    final others = await otherCosts(serviceId);
+    for (final o in others) {
+      await _ledger.clearForReference('service_other_cost', o.id);
+    }
     await db.update('services', {'active': 0, 'updated_at': DateTime.now().toIso8601String()},
         where: 'id = ?', whereArgs: [serviceId]);
   }
