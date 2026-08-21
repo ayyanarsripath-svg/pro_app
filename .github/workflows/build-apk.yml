@@ -159,11 +159,13 @@ jobs:
           kotlin_dir = "android/app/src/main/kotlin/com/example/pro_app"
           layout_dir = "android/app/src/main/res/layout"
           xml_dir = "android/app/src/main/res/xml"
+          drawable_dir = "android/app/src/main/res/drawable"
           manifest_path = "android/app/src/main/AndroidManifest.xml"
 
           os.makedirs(kotlin_dir, exist_ok=True)
           os.makedirs(layout_dir, exist_ok=True)
           os.makedirs(xml_dir, exist_ok=True)
+          os.makedirs(drawable_dir, exist_ok=True)
 
           provider_kt = '''package com.example.pro_app
 
@@ -172,6 +174,7 @@ jobs:
           import android.content.Context
           import android.content.Intent
           import android.content.SharedPreferences
+          import android.net.Uri
           import android.os.Bundle
           import android.view.View
           import android.widget.RemoteViews
@@ -232,9 +235,13 @@ jobs:
                           minWidth < 300 -> R.layout.daily_order_widget_medium
                           else -> R.layout.daily_order_widget_maximum
                       }
+                      // Mini used to show 0 item rows (title + count only),
+                      // which is why pending orders looked "invisible" on
+                      // the home screen at the smallest drop-in size - now
+                      // every tier shows at least a couple of items.
                       val itemRows = when (layoutId) {
-                          R.layout.daily_order_widget_mini -> 0
-                          R.layout.daily_order_widget_medium -> 3
+                          R.layout.daily_order_widget_mini -> 2
+                          R.layout.daily_order_widget_medium -> 4
                           else -> 8
                       }
 
@@ -256,11 +263,12 @@ jobs:
 
                       for (i in itemIds.indices) {
                           if (i >= itemRows) continue
-                          val text = if (enabled == "false") "" else (widgetData.getString("item_$i", "") ?: "")
-                          views.setTextViewText(itemIds[i], text)
-                          views.setViewVisibility(itemIds[i], if (text.isEmpty()) View.GONE else View.VISIBLE)
+                          val raw = if (enabled == "false") "" else (widgetData.getString("item_$i", "") ?: "")
+                          views.setTextViewText(itemIds[i], if (raw.isEmpty()) "" else "•  $raw")
+                          views.setViewVisibility(itemIds[i], if (raw.isEmpty()) View.GONE else View.VISIBLE)
                       }
 
+                      // Tapping anywhere else on the widget opens the app as before.
                       val launchIntent = context.packageManager.getLaunchIntentForPackage(context.packageName)
                       launchIntent?.flags = Intent.FLAG_ACTIVITY_NEW_TASK or Intent.FLAG_ACTIVITY_CLEAR_TOP
                       val pendingIntent = PendingIntent.getActivity(
@@ -268,6 +276,23 @@ jobs:
                           PendingIntent.FLAG_UPDATE_CURRENT or PendingIntent.FLAG_IMMUTABLE
                       )
                       views.setOnClickPendingIntent(R.id.widget_root, pendingIntent)
+
+                      // "+ Add" button opens the app with a homewidgetpro://quickadd
+                      // deep link. Flutter's _RootGate (see app.dart) checks for this
+                      // via WidgetLaunchState and jumps straight to QuickAddOrderScreen,
+                      // skipping the staff PIN screen entirely - noting one order item
+                      // should never need a full login. Uses a different request code
+                      // (1) than the plain-tap PendingIntent above (0) so Android keeps
+                      // them as two distinct PendingIntents instead of overwriting one
+                      // with the other.
+                      val addIntent = context.packageManager.getLaunchIntentForPackage(context.packageName)
+                      addIntent?.data = Uri.parse("homewidgetpro://quickadd")
+                      addIntent?.flags = Intent.FLAG_ACTIVITY_NEW_TASK or Intent.FLAG_ACTIVITY_CLEAR_TOP
+                      val addPendingIntent = PendingIntent.getActivity(
+                          context, 1, addIntent,
+                          PendingIntent.FLAG_UPDATE_CURRENT or PendingIntent.FLAG_IMMUTABLE
+                      )
+                      views.setOnClickPendingIntent(R.id.widget_add_btn, addPendingIntent)
 
                       appWidgetManager.updateAppWidget(appWidgetId, views)
                   }
@@ -277,9 +302,9 @@ jobs:
 
           widget_info_xml = '''<?xml version="1.0" encoding="utf-8"?>
           <appwidget-provider xmlns:android="http://schemas.android.com/apk/res/android"
-              android:initialLayout="@layout/daily_order_widget_mini"
-              android:minWidth="110dp"
-              android:minHeight="40dp"
+              android:initialLayout="@layout/daily_order_widget_medium"
+              android:minWidth="180dp"
+              android:minHeight="110dp"
               android:minResizeWidth="110dp"
               android:minResizeHeight="40dp"
               android:maxResizeWidth="380dp"
@@ -290,14 +315,48 @@ jobs:
           </appwidget-provider>
           '''
 
+          # Rounded-corner gradient card - replaces the old flat "#1565C0"
+          # rectangle so the widget actually looks like a designed card
+          # instead of a plain block of colour.
+          card_bg_xml = '''<?xml version="1.0" encoding="utf-8"?>
+          <shape xmlns:android="http://schemas.android.com/apk/res/android" android:shape="rectangle">
+              <corners android:radius="18dp" />
+              <gradient
+                  android:angle="135"
+                  android:startColor="#1976D2"
+                  android:endColor="#0D47A1" />
+          </shape>
+          '''
+
+          # Pill-shaped translucent-white button background for the "+ Add
+          # Order" quick-add button.
+          add_btn_bg_xml = '''<?xml version="1.0" encoding="utf-8"?>
+          <shape xmlns:android="http://schemas.android.com/apk/res/android" android:shape="rectangle">
+              <corners android:radius="20dp" />
+              <solid android:color="#33FFFFFF" />
+              <stroke android:width="1dp" android:color="#66FFFFFF" />
+          </shape>
+          '''
+
+          # Small rounded badge behind the pending-item count number.
+          count_badge_bg_xml = '''<?xml version="1.0" encoding="utf-8"?>
+          <shape xmlns:android="http://schemas.android.com/apk/res/android" android:shape="rectangle">
+              <corners android:radius="10dp" />
+              <solid android:color="#FFC107" />
+          </shape>
+          '''
+
           def item_row(idx):
               return (
                   f'    <TextView\n'
                   f'        android:id="@+id/widget_item_{idx}"\n'
                   f'        android:layout_width="match_parent"\n'
                   f'        android:layout_height="wrap_content"\n'
-                  f'        android:textColor="#FFFFFF"\n'
-                  f'        android:textSize="11sp"\n'
+                  f'        android:layout_marginTop="3dp"\n'
+                  f'        android:paddingStart="2dp"\n'
+                  f'        android:gravity="center_vertical"\n'
+                  f'        android:textColor="#F1F8FF"\n'
+                  f'        android:textSize="12sp"\n'
                   f'        android:maxLines="1"\n'
                   f'        android:ellipsize="end"\n'
                   f'        android:visibility="gone" />\n'
@@ -312,27 +371,52 @@ jobs:
                   '    android:layout_width="match_parent"\n'
                   '    android:layout_height="match_parent"\n'
                   '    android:orientation="vertical"\n'
-                  '    android:padding="10dp"\n'
-                  '    android:background="#1565C0">\n'
+                  '    android:padding="12dp"\n'
+                  '    android:background="@drawable/widget_card_bg">\n'
                   '\n'
-                  '    <TextView\n'
-                  '        android:id="@+id/widget_title"\n'
+                  '    <LinearLayout\n'
                   '        android:layout_width="match_parent"\n'
                   '        android:layout_height="wrap_content"\n'
-                  '        android:text="Daily Orders"\n'
-                  '        android:textColor="#FFFFFF"\n'
-                  '        android:textStyle="bold"\n'
-                  '        android:textSize="13sp"\n'
-                  '        android:maxLines="1"\n'
-                  '        android:ellipsize="end" />\n'
+                  '        android:orientation="horizontal"\n'
+                  '        android:gravity="center_vertical">\n'
+                  '\n'
+                  '        <TextView\n'
+                  '            android:id="@+id/widget_title"\n'
+                  '            android:layout_width="0dp"\n'
+                  '            android:layout_height="wrap_content"\n'
+                  '            android:layout_weight="1"\n'
+                  '            android:text="Daily Orders"\n'
+                  '            android:textColor="#FFFFFF"\n'
+                  '            android:textStyle="bold"\n'
+                  '            android:textSize="14sp"\n'
+                  '            android:maxLines="1"\n'
+                  '            android:ellipsize="end" />\n'
+                  '\n'
+                  '        <TextView\n'
+                  '            android:id="@+id/widget_add_btn"\n'
+                  '            android:layout_width="wrap_content"\n'
+                  '            android:layout_height="wrap_content"\n'
+                  '            android:layout_marginStart="6dp"\n'
+                  '            android:paddingHorizontal="10dp"\n'
+                  '            android:paddingVertical="4dp"\n'
+                  '            android:background="@drawable/widget_add_btn_bg"\n'
+                  '            android:text="+ Add"\n'
+                  '            android:textColor="#FFFFFF"\n'
+                  '            android:textStyle="bold"\n'
+                  '            android:textSize="12sp" />\n'
+                  '    </LinearLayout>\n'
                   '\n'
                   '    <TextView\n'
                   '        android:id="@+id/widget_count"\n'
-                  '        android:layout_width="match_parent"\n'
+                  '        android:layout_width="wrap_content"\n'
                   '        android:layout_height="wrap_content"\n'
-                  '        android:layout_marginBottom="4dp"\n'
+                  '        android:layout_marginTop="4dp"\n'
+                  '        android:paddingHorizontal="8dp"\n'
+                  '        android:paddingVertical="1dp"\n'
+                  '        android:background="@drawable/widget_count_badge_bg"\n'
                   '        android:text="No pending items"\n'
-                  '        android:textColor="#E3F2FD"\n'
+                  '        android:textColor="#0D47A1"\n'
+                  '        android:textStyle="bold"\n'
                   '        android:textSize="11sp"\n'
                   '        android:maxLines="1"\n'
                   '        android:ellipsize="end" />\n'
@@ -344,8 +428,11 @@ jobs:
           files = {
               os.path.join(kotlin_dir, "DailyOrderWidgetProvider.kt"): provider_kt,
               os.path.join(xml_dir, "daily_order_widget_info.xml"): widget_info_xml,
-              os.path.join(layout_dir, "daily_order_widget_mini.xml"): widget_layout(0),
-              os.path.join(layout_dir, "daily_order_widget_medium.xml"): widget_layout(3),
+              os.path.join(drawable_dir, "widget_card_bg.xml"): card_bg_xml,
+              os.path.join(drawable_dir, "widget_add_btn_bg.xml"): add_btn_bg_xml,
+              os.path.join(drawable_dir, "widget_count_badge_bg.xml"): count_badge_bg_xml,
+              os.path.join(layout_dir, "daily_order_widget_mini.xml"): widget_layout(2),
+              os.path.join(layout_dir, "daily_order_widget_medium.xml"): widget_layout(4),
               os.path.join(layout_dir, "daily_order_widget_maximum.xml"): widget_layout(8),
           }
 
