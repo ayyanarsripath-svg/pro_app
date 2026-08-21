@@ -63,6 +63,12 @@ dependencies:
   # Admin PIN hashing
   crypto: ^3.0.3
 
+  # Daily Orders home-screen widget (Phase 2) - bridges data from the app's
+  # SQLite database to the native Android widget (see
+  # DailyOrderWidgetService / DailyOrderWidgetProvider.kt). Android-only
+  # widget for now, matching the "phone's home screen widget" request.
+  home_widget: ^0.9.3
+
 dev_dependencies:
   flutter_test:
     sdk: flutter
