@@ -14,6 +14,7 @@ import '../sales/sales_list_screen.dart';
 import '../second_hand/second_hand_list_screen.dart';
 import '../suppliers/supplier_screen.dart';
 import '../suppliers/purchase_list_screen.dart';
+import '../orders/daily_order_screen.dart';
 import '../expenses/expense_screen.dart';
 import '../pnl/pnl_dashboard_screen.dart';
 import '../settings/settings_screen.dart';
@@ -59,6 +60,7 @@ class _AppShellState extends State<AppShell> {
     const _Destination('sales', 'Sales Bills', Icons.receipt_long_rounded, SalesListScreen()),
     const _Destination('second_hand', '2nd Hand Mobile', Icons.phone_iphone_rounded, SecondHandListScreen()),
     const _Destination('suppliers', 'Suppliers', Icons.local_shipping_rounded, SupplierScreen()),
+    const _Destination('daily_orders', 'Daily Orders', Icons.assignment_rounded, DailyOrderScreen()),
     const _Destination('purchases', 'Purchases', Icons.shopping_cart_rounded, PurchaseListScreen()),
     const _Destination('expenses', 'Expenses', Icons.money_off_rounded, ExpenseScreen()),
     const _Destination('pnl', 'Profit & Loss', Icons.bar_chart_rounded, PnlDashboardScreen()),
