@@ -48,7 +48,17 @@ dependencies:
   # open right then - uses Android's WorkManager, which needs no special
   # runtime permission prompt (unlike exact-alarm scheduling). See the
   # backup_service.dart comments for what this can and can't guarantee.
+  # As of this update, the same WorkManager setup (see
+  # core/services/background_tasks.dart) also drives the Daily Orders
+  # reminder below.
   workmanager: ^0.10.7
+
+  # Daily Orders reminder notification (Daily Orders feature) - shows a
+  # local, on-device notification at the shop's chosen order-send time.
+  # No account/server/API key needed, and (like WorkManager above) needs
+  # no special runtime permission prompt on the Android versions this app
+  # targets.
+  flutter_local_notifications: ^17.2.2
 
   # Admin PIN hashing
   crypto: ^3.0.3
