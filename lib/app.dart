@@ -4,11 +4,9 @@ import 'package:provider/provider.dart';
 import 'core/theme/app_theme.dart';
 import 'core/services/auth_service.dart';
 import 'core/services/theme_service.dart';
-import 'core/services/widget_launch_state.dart';
 import 'screens/auth/app_access_gate_screen.dart';
 import 'screens/auth/first_run_setup_screen.dart';
 import 'screens/auth/pin_login_screen.dart';
-import 'screens/orders/quick_add_order_screen.dart';
 import 'screens/shell/app_shell.dart';
 
 class ProfessionalMobilesApp extends StatelessWidget {
@@ -30,11 +28,15 @@ class ProfessionalMobilesApp extends StatelessWidget {
 
 /// Decides which screen owns the app right now:
 /// 0. Shop access password not entered yet on this device -> AppAccessGateScreen.
-/// 1. Opened via the Daily Orders widget's "+ Add" button -> QuickAddOrderScreen,
-///    skipping the PIN screen (see WidgetLaunchState's doc comment for why).
-/// 2. First launch ever -> create the Admin account.
-/// 3. Not logged in for this session -> PIN screen.
-/// 4. Logged in -> the main app shell.
+/// 1. First launch ever -> create the Admin account.
+/// 2. Not logged in for this session -> PIN screen.
+/// 3. Logged in -> the main app shell.
+///
+/// The Daily Orders widget's "+ Add"/card tap no longer passes through
+/// here at all - it launches a completely separate Activity/Flutter
+/// engine (QuickAddActivity, see main.dart's quickAddMain()) that never
+/// starts MainActivity/this app in the first place, so a widget tap can
+/// never end up on this gate (or the PIN screen) by mistake.
 class _RootGate extends StatefulWidget {
   const _RootGate();
 
@@ -64,13 +66,7 @@ class _RootGateState extends State<_RootGate> {
         return Consumer<AuthService>(
           builder: (context, auth, _) {
             if (!auth.appUnlocked) return const AppAccessGateScreen();
-            return ValueListenableBuilder<bool>(
-              valueListenable: WidgetLaunchState.quickAddRequested,
-              builder: (context, quickAddRequested, _) {
-                if (quickAddRequested) return const QuickAddOrderScreen();
-                return const _AccountGate();
-              },
-            );
+            return const _AccountGate();
           },
           );
       },

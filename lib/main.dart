@@ -1,5 +1,4 @@
 import 'package:flutter/material.dart';
-import 'package:home_widget/home_widget.dart';
 import 'package:provider/provider.dart';
 
 import 'core/db/database_helper.dart';
@@ -11,32 +10,13 @@ import 'core/services/logo_service.dart';
 import 'core/services/menu_order_service.dart';
 import 'core/services/order_reminder_service.dart';
 import 'core/services/theme_service.dart';
-import 'core/services/widget_launch_state.dart';
 import 'core/repositories/settings_repository.dart';
+import 'core/theme/app_theme.dart';
+import 'screens/orders/quick_add_order_screen.dart';
 import 'app.dart';
-
-/// homewidgetpro://quickadd - the deep link the widget's native "+ Add"
-/// button launches the app with (see DailyOrderWidgetProvider.kt, injected
-/// by the CI build script). Anything else is a plain tap, handled as a
-/// normal app open.
-bool _isQuickAddUri(Uri? uri) => uri?.host == 'quickadd';
 
 Future<void> main() async {
   WidgetsFlutterBinding.ensureInitialized();
-
-  // Cold start via the widget's "+ Add" button -> skip straight to
-  // QuickAddOrderScreen, no PIN screen (see WidgetLaunchState / app.dart).
-  final initialWidgetUri = await HomeWidget.initiallyLaunchedFromHomeWidget();
-  if (_isQuickAddUri(initialWidgetUri)) {
-    WidgetLaunchState.quickAddRequested.value = true;
-  }
-  // Same deep link, but the app process was already alive (e.g. sitting
-  // in the background) when the button was tapped.
-  HomeWidget.widgetClicked.listen((uri) {
-    if (_isQuickAddUri(uri)) {
-      WidgetLaunchState.quickAddRequested.value = true;
-    }
-  });
 
   // Warms up the offline SQLite database before the UI needs it.
   await DatabaseHelper.instance.database;
@@ -94,4 +74,45 @@ Future<void> main() async {
       child: const ProfessionalMobilesApp(),
     ),
   );
+}
+
+/// Second, minimal Flutter entry point used ONLY by the Daily Orders
+/// home-screen widget's "+ Add"/card tap (see QuickAddActivity.kt and
+/// DailyOrderWidgetProvider.kt, both injected into android/ by the CI
+/// build script since that folder is regenerated fresh every build).
+///
+/// This used to be a homewidgetpro://quickadd deep link that still routed
+/// through MainActivity and this file's main() - which is exactly why the
+/// widget tap kept visibly "opening pro_app" (splash, then jumping past
+/// the PIN screen) no matter how that in-app routing was tuned. Now the
+/// widget launches a completely separate Android Activity/task
+/// (QuickAddActivity) that boots THIS entry point instead of main() - a
+/// fresh, tiny Flutter engine that skips every bit of main()'s other
+/// startup work (backup scheduling, reminder scheduling, theme/menu/logo
+/// services) and shows nothing but QuickAddOrderScreen. MainActivity is
+/// never created, so a widget tap no longer looks or behaves like the app
+/// opening at all - closing this screen (X, back, or after Save) finishes
+/// that entire separate task straight back to the home screen, matching
+/// the standalone ("thaniya") behaviour asked for.
+@pragma('vm:entry-point')
+Future<void> quickAddMain() async {
+  WidgetsFlutterBinding.ensureInitialized();
+  runApp(const _QuickAddApp());
+}
+
+class _QuickAddApp extends StatelessWidget {
+  const _QuickAddApp();
+
+  @override
+  Widget build(BuildContext context) {
+    return MaterialApp(
+      debugShowCheckedModeBanner: false,
+      theme: ThemeData(
+        useMaterial3: true,
+        colorSchemeSeed: AppColors.primaryBlue,
+        brightness: Brightness.light,
+      ),
+      home: const QuickAddOrderScreen(),
+    );
+  }
 }
