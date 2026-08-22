@@ -185,36 +185,36 @@ jobs:
 
           import android.app.PendingIntent
           import android.appwidget.AppWidgetManager
+          import android.appwidget.AppWidgetProvider
           import android.content.Context
           import android.content.Intent
           import android.content.SharedPreferences
           import android.net.Uri
-          import android.os.Bundle
           import android.view.View
           import android.widget.RemoteViews
-          import es.antonborri.home_widget.HomeWidgetPlugin
-          import es.antonborri.home_widget.HomeWidgetProvider
 
           // Renders the Daily Orders home-screen widget from whatever
           // DailyOrderWidgetService (Dart side) last wrote via
-          // HomeWidget.saveWidgetData - see that file for what each key
-          // means. HomeWidgetProvider (from the home_widget plugin) is a
-          // thin AppWidgetProvider subclass that hands onUpdate() the
-          // widget's SharedPreferences directly.
+          // HomeWidget.saveWidgetData. That plugin stores everything in a
+          // plain SharedPreferences file named "HomeWidgetPreferences", read
+          // directly below - a plain AppWidgetProvider (not the home_widget
+          // plugin's own HomeWidgetProvider subclass) so this widget has no
+          // dependency on that plugin's own lifecycle/version behaviour,
+          // only on the SharedPreferences file format it happens to write.
           //
           // Three static layout tiers stand in for one true scrolling list -
           // a real scrolling widget needs a RemoteViewsService list adapter,
           // a much larger native component than this feature warrants.
           // "Maximum" just shows more static rows, not an actually
           // scrollable list - a trade-off called out up front.
-          class DailyOrderWidgetProvider : HomeWidgetProvider() {
+          class DailyOrderWidgetProvider : AppWidgetProvider() {
 
               override fun onUpdate(
                   context: Context,
                   appWidgetManager: AppWidgetManager,
-                  appWidgetIds: IntArray,
-                  widgetData: SharedPreferences
+                  appWidgetIds: IntArray
               ) {
+                  val widgetData = context.getSharedPreferences("HomeWidgetPreferences", Context.MODE_PRIVATE)
                   appWidgetIds.forEach { appWidgetId ->
                       updateAppWidget(context, appWidgetManager, appWidgetId, widgetData)
                   }
@@ -224,9 +224,10 @@ jobs:
                   context: Context,
                   appWidgetManager: AppWidgetManager,
                   appWidgetId: Int,
-                  newOptions: Bundle
+                  newOptions: android.os.Bundle
               ) {
-                  updateAppWidget(context, appWidgetManager, appWidgetId, HomeWidgetPlugin.getData(context))
+                  val widgetData = context.getSharedPreferences("HomeWidgetPreferences", Context.MODE_PRIVATE)
+                  updateAppWidget(context, appWidgetManager, appWidgetId, widgetData)
               }
 
               companion object {
@@ -345,6 +346,7 @@ jobs:
           widget_info_xml = '''<?xml version="1.0" encoding="utf-8"?>
           <appwidget-provider xmlns:android="http://schemas.android.com/apk/res/android"
               android:initialLayout="@layout/daily_order_widget_mini"
+              android:previewImage="@mipmap/ic_launcher"
               android:minWidth="110dp"
               android:minHeight="40dp"
               android:minResizeWidth="110dp"
@@ -469,7 +471,7 @@ jobs:
               print("Widget receiver already registered, nothing to do.")
           else:
               receiver_block = (
-                  '        <receiver android:name=".DailyOrderWidgetProvider" android:exported="true">\n'
+                  '        <receiver android:name=".DailyOrderWidgetProvider" android:exported="true" android:label="Daily Orders">\n'
                   '            <intent-filter>\n'
                   '                <action android:name="android.appwidget.action.APPWIDGET_UPDATE" />\n'
                   '            </intent-filter>\n'
