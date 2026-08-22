@@ -5,9 +5,12 @@ import '../../models/daily_order_item.dart';
 class DailyOrderRepository {
   final _dbHelper = DatabaseHelper.instance;
 
-  /// Adds one row to [orderDate]'s note. S.No is simply "how many rows this
-  /// date already has, plus one" - matches the spec's plain running s.no
-  /// per day.
+  /// Adds one row to [orderDate]'s note. S.No is "how many rows this date's
+  /// current (still-unsent) batch already has, plus one" - counting only
+  /// unsent rows means the numbering restarts at 1 for the next batch as
+  /// soon as the previous batch is marked sent, instead of continuing to
+  /// climb for the rest of the day (e.g. batch one prints 1,2,3; once sent,
+  /// a fresh batch noted later the same day prints 1,2,3 again, not 4,5,6).
   Future<DailyOrderItem> create({
     required String orderDate,
     required String partName,
@@ -16,7 +19,11 @@ class DailyOrderRepository {
     String? phone,
   }) async {
     final db = await _dbHelper.database;
-    final existing = await db.query('daily_order_items', where: 'order_date = ?', whereArgs: [orderDate]);
+    final existing = await db.query(
+      'daily_order_items',
+      where: 'order_date = ? AND sent = 0',
+      whereArgs: [orderDate],
+    );
     final item = DailyOrderItem(
       id: newId(),
       orderDate: orderDate,
