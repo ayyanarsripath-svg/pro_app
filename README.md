@@ -104,21 +104,44 @@ SHA-1 never changes once you've set this up:
    - Package name: `com.example.pro_app` (matches the `--project-name=pro_app`
      the workflow passes to `flutter create` - check
      `android/app/build.gradle`'s `applicationId` after a build if unsure).
-   - SHA-1 fingerprint: `E5:90:16:89:47:1A:FC:46:35:60:03:1E:31:D0:E0:6F:00:DF:5B:33`
+   - SHA-1 fingerprint: `06:96:3D:AB:58:CE:FF:61:A2:58:CE:4B:ED:B3:6D:D7:3C:C7:A9:0E`
      (this is fixed now - no need to regenerate it after future builds,
-     as long as the same `DEBUG_KEYSTORE_BASE64` secret stays in place).
+     as long as the same `DEBUG_KEYSTORE_BASE64` secret stays in place -
+     re-check it any time against the "Print release APK signing SHA-1"
+     step's log on the latest CI build if sign-in ever starts failing
+     again, in case the secret was ever replaced).
 4. Push to `main` (or re-run the workflow) to get a build signed with the
    stable keystore, then use **Settings → Backup & Restore → Connect
    Google Drive** in the app - no code changes needed, `google_sign_in`
    picks up the registered client automatically.
 
-   Status: Google Cloud project `pro-app-drive-backup` is set up - Drive
-   API enabled, OAuth consent screen configured (Testing, with
-   ayyanarsripath@gmail.com as a test user), and the Android OAuth
-   client's SHA-1 above was verified against the actual CI-built APK
-   (`apksigner verify --print-certs` in CI, since an earlier
-   guessed registration was wrong) - Google Drive backup is confirmed
-   working end-to-end on a real device.   
+   **⚠️ Action needed (this is almost certainly why "select account" keeps
+   failing with "sign-in cancelled" / "16: ... reauth failed" every time
+   the app is updated):** two separate things to check in
+   https://console.cloud.google.com for project `pro-app-drive-backup`:
+   1. **APIs & Services → Credentials** - open the Android OAuth 2.0
+      Client ID and confirm its SHA-1 exactly matches the one above
+      (`06:96:3D:AB:...`). A previous version of this doc listed a
+      *different* SHA-1 (`E5:90:16:89:...`) as "verified working" - if the
+      `DEBUG_KEYSTORE_BASE64` secret was ever regenerated since then
+      without also updating this registration, sign-in would fail on
+      every device using a current build, which matches exactly what's
+      being reported. Update it to the current SHA-1 if it doesn't match.
+   2. **APIs & Services → OAuth consent screen → Publishing status** -
+      while this stays in **Testing**, every sign-in Google grants is a
+      *test-user* grant, and Google expires those refresh tokens after
+      **7 days** regardless of anything this app does - which shows up as
+      exactly this "have to sign in again" cycle roughly every week or
+      two. Click **"Publish App"** to move it to **In production**. For
+      an app used only by you (the account is already the project owner/
+      a listed test user), this does not require Google's review or
+      trigger any "unverified app" block for you - it just removes the
+      7-day expiry. This is a one-time, ~30-second fix.
+
+   Status: Drive API enabled. Backups now go to a normal, visible
+   "Professional Mobiles Backups" folder in your own Drive (not the
+   hidden App Data folder), one file per month - see `BackupService` in
+   `lib/core/services/backup_service.dart`.
 
 ### If you build locally on your own machine
 
