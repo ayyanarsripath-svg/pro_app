@@ -189,7 +189,6 @@ jobs:
           import android.content.Context
           import android.content.Intent
           import android.content.SharedPreferences
-          import android.net.Uri
           import android.view.View
           import android.widget.RemoteViews
 
@@ -235,19 +234,6 @@ jobs:
                       R.id.widget_item_0, R.id.widget_item_1, R.id.widget_item_2, R.id.widget_item_3,
                       R.id.widget_item_4, R.id.widget_item_5, R.id.widget_item_6, R.id.widget_item_7
                   )
-
-                  // A launch intent built from getLaunchIntentForPackage() can come
-                  // back null in rare cases (e.g. right after install, before the
-                  // package manager has fully indexed the launcher activity) -
-                  // passing that straight into PendingIntent.getActivity() throws
-                  // a NullPointerException inside the launcher's process, which is
-                  // exactly what shows up on screen as MIUI's "Can't load widget".
-                  // This always falls back to a manually-built ACTION_MAIN intent
-                  // instead of ever passing null onward.
-                  private fun safeLaunchIntent(context: Context): Intent {
-                      return context.packageManager.getLaunchIntentForPackage(context.packageName)
-                          ?: Intent(Intent.ACTION_MAIN).setPackage(context.packageName)
-                  }
 
                   fun updateAppWidget(
                       context: Context,
@@ -298,18 +284,20 @@ jobs:
                           }
 
                           // Tapping anywhere on the widget - the card body or the "+ Add"
-                          // button - jumps straight to quick-add order entry via a
-                          // homewidgetpro://quickadd deep link. The whole point of this
-                          // widget is noting an order item fast, so requiring a precise
-                          // tap on the small "+ Add" button (with the rest of the card
-                          // just reopening the plain app) was more friction than it was
-                          // worth. Flutter's _RootGate (see app.dart) checks for this
-                          // deep link via WidgetLaunchState and jumps straight to
-                          // QuickAddOrderScreen, skipping the staff PIN screen entirely -
-                          // noting one order item should never need a full login.
-                          val addIntent = safeLaunchIntent(context)
-                          addIntent.data = Uri.parse("homewidgetpro://quickadd")
-                          addIntent.flags = Intent.FLAG_ACTIVITY_NEW_TASK or Intent.FLAG_ACTIVITY_CLEAR_TOP
+                          // button - launches QuickAddActivity directly: a separate,
+                          // minimal Flutter engine/activity/task showing ONLY the
+                          // quick-add screen (see QuickAddActivity.kt and
+                          // lib/main.dart's quickAddMain()). This used to be a
+                          // homewidgetpro://quickadd deep link routed through
+                          // MainActivity itself, which is exactly why the tap still
+                          // visibly "opened pro_app" no matter how the in-app routing
+                          // was tuned - going straight to a dedicated Activity that
+                          // never touches MainActivity is the actual fix. Runs in its
+                          // own task, hidden from the recent-apps switcher (see the
+                          // manifest entry below), so it behaves like a lightweight
+                          // standalone popup, not a second app window.
+                          val addIntent = Intent(context, QuickAddActivity::class.java)
+                          addIntent.flags = Intent.FLAG_ACTIVITY_NEW_TASK
                           val addPendingIntent = PendingIntent.getActivity(
                               context, 1, addIntent,
                               PendingIntent.FLAG_UPDATE_CURRENT or PendingIntent.FLAG_IMMUTABLE
@@ -443,8 +431,26 @@ jobs:
                   '</LinearLayout>\n'
               )
 
+          # Standalone Activity the widget's PendingIntent launches directly
+          # (see the click handler in provider_kt above) - a SEPARATE
+          # FlutterActivity + FlutterEngine from MainActivity, running only
+          # the tiny quickAddMain() Dart entry point (lib/main.dart).
+          # MainActivity/the rest of the app is never created, so a widget
+          # tap no longer looks or behaves like "opening pro_app" - the
+          # exact problem repeatedly reported. See the manifest block below
+          # for why this runs in its own task, hidden from recents.
+          quick_add_activity_kt = '''package com.example.pro_app
+
+          import io.flutter.embedding.android.FlutterActivity
+
+          class QuickAddActivity : FlutterActivity() {
+              override fun getDartEntrypointFunctionName(): String = "quickAddMain"
+          }
+          '''
+
           files = {
               os.path.join(kotlin_dir, "DailyOrderWidgetProvider.kt"): provider_kt,
+              os.path.join(kotlin_dir, "QuickAddActivity.kt"): quick_add_activity_kt,
               os.path.join(xml_dir, "daily_order_widget_info.xml"): widget_info_xml,
               os.path.join(drawable_dir, "widget_background.xml"): widget_background_xml,
               os.path.join(drawable_dir, "widget_add_btn_bg.xml"): add_btn_bg_xml,
@@ -461,10 +467,12 @@ jobs:
           with open(manifest_path, "r", encoding="utf-8") as f:
               manifest = f.read()
 
+          blocks_to_add = []
+
           if "DailyOrderWidgetProvider" in manifest:
               print("Widget receiver already registered, nothing to do.")
           else:
-              receiver_block = (
+              blocks_to_add.append(
                   '        <receiver android:name=".DailyOrderWidgetProvider" android:exported="true" android:label="Daily Orders">\n'
                   '            <intent-filter>\n'
                   '                <action android:name="android.appwidget.action.APPWIDGET_UPDATE" />\n'
@@ -472,13 +480,43 @@ jobs:
                   '            <meta-data android:name="android.appwidget.provider" android:resource="@xml/daily_order_widget_info" />\n'
                   '        </receiver>\n'
               )
+
+          # QuickAddActivity (see quick_add_activity_kt above) - deliberately
+          # NOT given an intent-filter (it's only ever launched via an
+          # explicit Intent from the widget's own PendingIntent, never from
+          # the launcher), so it needs no android:exported declaration.
+          # singleTask + its own taskAffinity + excludeFromRecents keep it
+          # fully separate from MainActivity's task - repeated widget taps
+          # bring the same instance to front instead of stacking, it never
+          # shows up as a second app in the recent-apps switcher, and
+          # finishing it (see QuickAddOrderScreen's _closeToHomeScreen)
+          # closes the whole thing straight back to the home screen. Uses a
+          # plain built-in Android theme rather than the app's own
+          # LaunchTheme/NormalTheme so this never shows the branded splash
+          # that would make it look like "the app" opening.
+          if "QuickAddActivity" in manifest:
+              print("QuickAddActivity already registered, nothing to do.")
+          else:
+              blocks_to_add.append(
+                  '        <activity\n'
+                  '            android:name=".QuickAddActivity"\n'
+                  '            android:theme="@android:style/Theme.Material.Light.NoActionBar"\n'
+                  '            android:configChanges="orientation|keyboardHidden|keyboard|screenSize|smallestScreenSize|locale|layoutDirection|fontScale|screenLayout|density|uiMode"\n'
+                  '            android:hardwareAccelerated="true"\n'
+                  '            android:windowSoftInputMode="adjustResize"\n'
+                  '            android:launchMode="singleTask"\n'
+                  '            android:taskAffinity="com.example.pro_app.quickadd"\n'
+                  '            android:excludeFromRecents="true" />\n'
+              )
+
+          if blocks_to_add:
               idx = manifest.rfind("</application>")
               if idx == -1:
                   raise SystemExit(f"Could not find </application> in {manifest_path} - aborting so this doesn't silently produce a broken manifest.")
-              manifest = manifest[:idx] + receiver_block + manifest[idx:]
+              manifest = manifest[:idx] + "".join(blocks_to_add) + manifest[idx:]
               with open(manifest_path, "w", encoding="utf-8") as f:
                   f.write(manifest)
-              print("Registered DailyOrderWidgetProvider receiver.")
+              print(f"Updated AndroidManifest.xml with {len(blocks_to_add)} new block(s).")
           PYEOF
 
       # One-click direct-to-WhatsApp PDF send for Daily Orders (spec: no
