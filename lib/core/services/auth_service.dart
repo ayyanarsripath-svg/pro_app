@@ -1,5 +1,4 @@
 import 'package:flutter/foundation.dart';
-import 'package:home_widget/home_widget.dart';
 import 'package:sqflite/sqflite.dart';
 
 import '../db/database_helper.dart';
@@ -42,44 +41,23 @@ class AuthService extends ChangeNotifier {
     return true;
   }
 
-  // Login session persistence. Previously `_current` only ever lived in
-  // memory, so Android killing the app in the background (which is normal,
-  // e.g. after tapping the Daily Orders widget) meant the PIN screen showed
-  // again every single time even though the shop never "logged out". Stored
-  // via home_widget's own local storage (same key space as the widget
-  // on/off toggle) rather than the settings table, so a logged-in session
-  // stays purely on-device and is never swept into a Google Drive/local
-  // backup - restoring a backup on a new phone should never silently log
-  // someone in.
-  static const _sessionStaffIdKey = 'session_staff_id';
-
+  // NOTE: login session is deliberately NOT persisted across app restarts.
+  // An earlier version tried remembering the last logged-in staff (to
+  // survive Android killing the app in the background) via home_widget's
+  // local storage, but that meant the PIN screen was skipped on every
+  // fresh app open too - not just a quick background/foreground cycle -
+  // which defeats the point of a PIN lock. [_current] now lives only in
+  // memory for the lifetime of the running app process, same as before
+  // that experiment: every fresh open (including right after using the
+  // Daily Orders widget) asks for the PIN again, as expected.
   Staff? _current;
   Staff? get current => _current;
   bool get isLoggedIn => _current != null;
   bool get isAdmin => _current?.isAdmin ?? false;
 
-  /// Restores a previous login (if any) so the PIN screen is skipped.
-  /// Called once on startup, after [hasAnyAccount] confirms an admin
-  /// exists. Safe to call even with no saved session or a since-deleted/
-  /// deactivated staff id - falls through to the normal PIN screen.
-  Future<void> restoreSession() async {
-    if (_current != null) return;
-    final savedId = await HomeWidget.getWidgetData<String>(_sessionStaffIdKey);
-    if (savedId == null || savedId.isEmpty) return;
-    final staff = await _staffRepo.getById(savedId);
-    if (staff != null) {
-      _current = staff;
-      notifyListeners();
-    }
-  }
-
-  Future<void> _saveSession(String staffId) async {
-    try {
-      await HomeWidget.saveWidgetData<String>(_sessionStaffIdKey, staffId);
-    } catch (_) {
-      // Non-fatal - worst case the PIN is asked again next app open.
-    }
-  }
+  /// No-op placeholder kept so app.dart's startup sequence doesn't need to
+  /// change - there is no saved session to restore (see the note above).
+  Future<void> restoreSession() async {}
 
   /// Admin/staff visibility rule used everywhere a bill or screen might
   /// leak internal cost/profit (spec section 28): customer-facing bills
@@ -148,7 +126,6 @@ class AuthService extends ChangeNotifier {
   Future<Staff> setupFirstAdmin({required String name, required String pin, String? phone}) async {
     final admin = await _staffRepo.createAdmin(name: name, pin: pin, phone: phone);
     _current = admin;
-    await _saveSession(admin.id);
     notifyListeners();
     return admin;
   }
@@ -157,14 +134,12 @@ class AuthService extends ChangeNotifier {
     final staff = await _staffRepo.verifyPin(pin);
     if (staff == null) return false;
     _current = staff;
-    await _saveSession(staff.id);
     notifyListeners();
     return true;
   }
 
   Future<void> logout() async {
     _current = null;
-    await _saveSession('');
     notifyListeners();
   }
 }
