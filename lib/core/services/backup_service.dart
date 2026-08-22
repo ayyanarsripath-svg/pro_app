@@ -37,7 +37,18 @@ class BackupService {
   final GoogleSignIn _googleSignIn = GoogleSignIn.instance;
   bool _initialized = false;
 
-  static const _driveScopes = [drive.DriveApi.driveAppdataScope, drive.DriveApi.driveFileScope];
+  // Just driveFileScope now - backups no longer go into Drive's hidden
+  // "app data" folder (driveAppdataScope), which the shop owner could never
+  // actually open or browse from the Drive app/website. See
+  // _findOrCreateBackupFolder below. Anyone who linked Drive before this
+  // change will be asked to reconnect once, since their old authorization
+  // doesn't cover this scope yet - that's expected, not a bug.
+  static const _driveScopes = [drive.DriveApi.driveFileScope];
+
+  /// Name of the regular, visible Google Drive folder backups now live in
+  /// (created once, reused after that) - open it in the Drive app/website
+  /// to see one file per month.
+  static const _backupFolderName = 'Professional Mobiles Backups';
 
   /// Web OAuth client id (NOT the Android client id below it). Android's
   /// Credential Manager - what google_sign_in 7.x uses under the hood on
@@ -200,6 +211,79 @@ class BackupService {
   Future<bool> get isGoogleDriveLinked async =>
       (await _settings.get(SettingsRepository.googleDriveLinked)) == 'true';
 
+  /// Calendar-month label used both as the Drive file name suffix and shown
+  /// to the shop owner - e.g. 2026-08 for August 2026.
+  String _monthLabel(DateTime date) => '${date.year}-${date.month.toString().padLeft(2, '0')}';
+
+  String _monthlyBackupFileName(DateTime date) => 'professional_mobiles_backup_${_monthLabel(date)}.db';
+
+  /// Finds the (already created, regular/visible) "Professional Mobiles
+  /// Backups" folder in the signed-in account's Drive, creating it the
+  /// first time this ever runs. Unlike the old appDataFolder, this folder
+  /// is a completely normal Drive folder - the shop owner can open Drive
+  /// and see it, browse into it, download a file, delete it, whatever they
+  /// want, the same as any folder they created by hand.
+  Future<String> _findOrCreateBackupFolder(drive.DriveApi driveApi) async {
+    final existing = await driveApi.files.list(
+      q: "mimeType='application/vnd.google-apps.folder' and name='$_backupFolderName' and trashed=false",
+      spaces: 'drive',
+    );
+    final files = existing.files;
+    if (files != null && files.isNotEmpty) return files.first.id!;
+
+    final folder = drive.File()
+      ..name = _backupFolderName
+      ..mimeType = 'application/vnd.google-apps.folder';
+    final created = await driveApi.files.create(folder);
+    return created.id!;
+  }
+
+  /// Uploads [localFile] as *this calendar month's* Drive backup (spec:
+  /// "monthly wise pirichi pirichi save aaganum" - split up and saved
+  /// month-wise). If a file for the current month already exists in the
+  /// backup folder, its content is replaced in place (files.update) so
+  /// every month stays exactly ONE file that always holds the latest, fully
+  /// cumulative snapshot of that month's data (every backup here is a full
+  /// database copy, never a partial diff, so today's data is always
+  /// automatically merged with everything noted earlier that month - there
+  /// is nothing separate to "merge"). The moment the calendar month
+  /// changes, the next backup simply doesn't find a match and creates a
+  /// brand new file instead - so a month ago, or three months ago, is still
+  /// sitting there untouched, and the owner just opens the Drive folder and
+  /// picks whichever month's file they need.
+  Future<String> _uploadMonthlySnapshot(drive.DriveApi driveApi, File localFile) async {
+    final folderId = await _findOrCreateBackupFolder(driveApi);
+    final fileName = _monthlyBackupFileName(DateTime.now());
+
+    final existing = await driveApi.files.list(
+      q: "name='$fileName' and '$folderId' in parents and trashed=false",
+      spaces: 'drive',
+    );
+    final media = drive.Media(localFile.openRead(), await localFile.length());
+    final matches = existing.files;
+
+    if (matches != null && matches.isNotEmpty) {
+      final fileId = matches.first.id!;
+      final updated = await driveApi.files.update(drive.File(), fileId, uploadMedia: media);
+      return updated.id ?? fileId;
+    }
+
+    final driveFile = drive.File()
+      ..name = fileName
+      ..parents = [folderId];
+    final created = await driveApi.files.create(driveFile, uploadMedia: media);
+    return created.id!;
+  }
+
+  /// Uploads the current database to this month's Drive backup file. Used
+  /// both by the "Backup to Drive" button and the automatic daily backup
+  /// (see [runDailyGoogleDriveBackupIfDue]) - both write to the exact same
+  /// monthly file, so pressing the button never creates extra clutter.
+  /// Unlike [createManualBackup]/[runWeeklyAutoBackupIfDue], this does NOT
+  /// add anything to the Local Backups list - it works from a throwaway
+  /// temp copy of the database that's deleted right after the upload, so
+  /// backing up to Drive every single day forever never piles up local
+  /// files on the phone itself.
   Future<String?> backupToGoogleDrive() async {
     try {
       await _ensureInitialized();
@@ -223,25 +307,28 @@ class BackupService {
       final client = _GoogleAuthClient(authHeaders);
       final driveApi = drive.DriveApi(client);
 
-      final backupFile = await createManualBackup();
-      final driveFile = drive.File()
-        ..name = p.basename(backupFile.path)
-        ..parents = ['appDataFolder'];
+      final dbFile = await _dbHelper.dbFile();
+      final tempDir = await getTemporaryDirectory();
+      final snapshot = await dbFile.copy(p.join(tempDir.path, 'pms_drive_upload_${DateTime.now().millisecondsSinceEpoch}.db'));
 
-      final media = drive.Media(backupFile.openRead(), await backupFile.length());
-      final uploaded = await driveApi.files.create(driveFile, uploadMedia: media);
+      String uploadedId;
+      try {
+        uploadedId = await _uploadMonthlySnapshot(driveApi, snapshot);
+      } finally {
+        if (await snapshot.exists()) await snapshot.delete();
+      }
 
       final db = await _dbHelper.database;
       await db.insert('backups', {
         'id': newId(),
         'backup_date': DateTime.now().toIso8601String(),
         'type': 'google_drive',
-        'file_path': uploaded.id,
+        'file_path': uploadedId,
         'status': 'success',
-        'notes': 'Uploaded to Google Drive App Data folder',
+        'notes': 'Uploaded to Drive folder "$_backupFolderName" > ${_monthlyBackupFileName(DateTime.now())}',
       });
 
-      return uploaded.id;
+      return uploadedId;
     } on GoogleSignInException catch (e) {
       throw Exception(_friendlyGoogleError(e));
     }

@@ -23,7 +23,12 @@ class OrderReminderService {
 
   static Future<void> ensureInitialized() async {
     if (_pluginInitialized) return;
-    const androidInit = AndroidInitializationSettings('@mipmap/ic_launcher');
+    // A proper flat white-on-transparent icon (see build-apk.yml's "Add
+    // proper notification small-icon" step) - @mipmap/ic_launcher (the
+    // full-colour app icon) used to be passed here, which Android 5.0+
+    // collapses into a blank/unrecognisable white blob in the status bar
+    // since it only ever renders a notification icon's alpha channel.
+    const androidInit = AndroidInitializationSettings('@drawable/ic_notification');
     const settings = InitializationSettings(android: androidInit);
     await _plugin.initialize(settings);
     // Android 13+ requires this one-time runtime "Allow notifications?"

@@ -66,7 +66,12 @@ class WhatsAppSmsService {
   /// Job-card intake intimation - sent automatically the moment a new
   /// service job card is created, using the shop's WhatsApp template.
   /// Opens WhatsApp (via wa.me, no API key) with the message pre-filled;
-  /// the owner just taps Send inside WhatsApp.
+  /// the owner just taps Send inside WhatsApp. Deliberately kept short
+  /// (spec: simplify - just model, problem and the combined amount) -
+  /// full details (IMEI, work/parts breakdown, dates, status) stay
+  /// available inside the app itself, not in the WhatsApp text. Unused
+  /// params (customerPhone, imei, workParts, status, receivedDate,
+  /// expectedDelivery) are kept so every call site stays unchanged.
   String serviceIntimationMessage({
     required String customerName,
     required String customerPhone,
@@ -82,38 +87,20 @@ class WhatsAppSmsService {
   }) {
     final total = serviceCharge + sparePartsCharge;
     String v(String? s) => (s == null || s.trim().isEmpty) ? '-' : s.trim();
-    final work = v(workParts) == '-' ? 'To be updated after inspection' : v(workParts);
-    return '📱 PROFESSIONAL MOBILES\n'
-      '🔧 Mobile Service Intimation\n'
-      'வணக்கம் 🙏 Dear Customer,\n'
-      'உங்கள் mobile service-க்கு பெறப்பட்டுள்ளது.\n'
-      '━━━━━━━━━━━━━━\n'
-      '🧾 SERVICE DETAILS\n'
-      '━━━━━━━━━━━━━━\n'
-      '👤 Customer Name: $customerName\n'
-      '📞 Mobile No: $customerPhone\n'
-      '📱 Mobile Model: ${v(mobileModel)}\n'
-      '🔢 IMEI No: ${v(imei)}\n'
-      '🛠️ Service / Complaint:\n'
-      '${v(complaint)}\n'
-      '🔧 Work / Parts:\n'
-      '$work\n'
-      '💰 Service Charge: ${formatCurrency(serviceCharge)}\n'
-      '🔩 Spare Parts Charge: ${formatCurrency(sparePartsCharge)}\n'
-      '━━━━━━━━━━━━━━\n'
-      '💵 TOTAL AMOUNT: ${formatCurrency(total)}\n'
-      '━━━━━━━━━━━━━━\n'
-      '📌 Service Status: $status\n'
-      '📅 Received Date: ${formatDate(receivedDate)}\n'
-      '📅 Expected Delivery: ${expectedDelivery != null ? formatDate(expectedDelivery) : '-'}\n'
-      '⚠️ Note: Service முடிந்ததும் உங்களுக்கு WhatsApp மூலம் தகவல் தெரிவிக்கப்படும்.\n'
-      '🙏 Thank you for choosing Professional Mobiles.\n'
-      '📱 PROFESSIONAL MOBILES\n'
-      'Trusted Mobile Service Center';
+    return '📱 Mobile Service Received\n'
+      'Dear Customer, உங்கள் mobile service-க்கு கொடுக்கப்பட்டுள்ளது.\n'
+      '🔧 Model: ${v(mobileModel)}\n'
+      '📝 Problem: ${v(complaint)}\n'
+      '💰 spare + service charge Amount: ${formatCurrency(total)}\n'
+      '📞 Service முடிந்ததும் உங்களுக்கு WhatsApp மூலம் தகவல் தெரிவிக்கப்படும். நன்றி! 🙏\n'
+      'professional mobiles trusted service\n'
+      'ma.kunnathur';
   }
 
   /// Delivery confirmation - sent the moment a job is marked Delivered from
   /// the Delivery Status action, once the final amount has been collected.
+  /// Simplified to match serviceIntimationMessage's short style (spec:
+  /// simplify the WhatsApp text) - bill no / status stay in the app itself.
   String deliveryMessage({
     required String customerName,
     required String billNo,
@@ -121,20 +108,14 @@ class WhatsAppSmsService {
     required double totalAmount,
     required double paidAmount,
   }) {
-    return '📱 PROFESSIONAL MOBILES\n'
-      '✅ Delivery Confirmation\n'
-      'வணக்கம் 🙏 Dear $customerName,\n'
-      'Your device has been delivered.\n'
-      '━━━━━━━━━━━━━━\n'
-      '🧾 Bill No: $billNo\n'
-      '📱 Mobile: ${mobileName ?? '-'}\n'
+    return '📱 Mobile Service Delivered\n'
+      'Dear Customer, உங்கள் mobile service முடிந்து ஒப்படைக்கப்பட்டுள்ளது.\n'
+      '🔧 Model: ${mobileName ?? '-'}\n'
       '💰 Total Amount: ${formatCurrency(totalAmount)}\n'
       '✅ Paid: ${formatCurrency(paidAmount)}\n'
-      '━━━━━━━━━━━━━━\n'
-      '📌 Status: DELIVERED\n'
-      '🙏 Thank you for choosing Professional Mobiles.\n'
-      '📱 PROFESSIONAL MOBILES\n'
-      'Trusted Mobile Service Center';
+      '🙏 நன்றி! Thank you for choosing Professional Mobiles.\n'
+      'professional mobiles trusted service\n'
+      'ma.kunnathur';
   }
 
   /// Daily supplier order (Daily Orders feature) - opens WhatsApp with just
