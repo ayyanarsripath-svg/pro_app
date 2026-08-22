@@ -438,7 +438,7 @@ jobs:
                   '        android:maxLines="1"\n'
                   '        android:ellipsize="end" />\n'
                   '\n'
-                  '    <View\n'
+                  '    <TextView\n'
                   '        android:layout_width="match_parent"\n'
                   '        android:layout_height="1dp"\n'
                   '        android:layout_marginTop="6dp"\n'
