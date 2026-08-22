@@ -372,13 +372,19 @@ class _DailyOrderScreenState extends State<DailyOrderScreen> {
         itemCount: pending.length,
       );
 
-      // Two separate hand-offs to Android, one right after the other - a
-      // wa.me link can pre-fill chat text but can't carry a file
-      // attachment, so the itemised PDF has to go out as a second share
-      // step (see whatsapp_sms_service.dart's dailyOrderMessage comment).
-      await _waService.sendWhatsApp(phone: _supplierPhone, message: message);
-      await Future.delayed(const Duration(milliseconds: 600));
-      await Printing.sharePdf(bytes: bytes, filename: fileName);
+      // One-click direct-to-WhatsApp send: opens WhatsApp itself with the
+      // PDF and the short caption attached together in a single share,
+      // skipping Android's "choose an app" chooser (see MainActivity.kt /
+      // WhatsAppSmsService.shareFileToWhatsApp). Falls back to the older
+      // two-step hand-off (a wa.me chat message, then a separate generic
+      // file-share sheet) only if the direct share isn't available - e.g.
+      // WhatsApp isn't installed.
+      final sharedDirect = await _waService.shareFileToWhatsApp(filePath: file.path, text: message);
+      if (!sharedDirect) {
+        await _waService.sendWhatsApp(phone: _supplierPhone, message: message);
+        await Future.delayed(const Duration(milliseconds: 600));
+        await Printing.sharePdf(bytes: bytes, filename: fileName);
+      }
 
       if (!mounted) return;
       final confirmed = await showDialog<bool>(
@@ -386,7 +392,7 @@ class _DailyOrderScreenState extends State<DailyOrderScreen> {
         builder: (dialogContext) => AlertDialog(
           title: const Text('Order Sent?'),
           content: const Text(
-            "WhatsApp was opened with today's order message, and the PDF share sheet was shown. Once you've actually tapped Send inside WhatsApp, mark this order as sent so it stops showing as pending.",
+            "WhatsApp was opened with today's order PDF. Once you've actually tapped Send inside WhatsApp, mark this order as sent so it stops showing as pending.",
           ),
           actions: [
             TextButton(onPressed: () => Navigator.pop(dialogContext, false), child: const Text('Not Yet')),
@@ -459,6 +465,59 @@ class _DailyOrderScreenState extends State<DailyOrderScreen> {
         quantity: qtyCtrl.text.trim(),
         phone: phoneCtrl.text.trim().isEmpty ? null : phoneCtrl.text.trim(),
       );
+      await _load();
+    }
+  }
+
+  Future<void> _editItem(DailyOrderItem item) async {
+    final partCtrl = TextEditingController(text: item.partName);
+    final typeCtrl = TextEditingController(text: item.typeModel ?? '');
+    final qtyCtrl = TextEditingController(text: item.quantity);
+    final phoneCtrl = TextEditingController(text: item.phone ?? '');
+
+    final ok = await showDialog<bool>(
+      context: context,
+      builder: (dialogContext) => AlertDialog(
+        title: const Text('Edit Order Item'),
+        content: SingleChildScrollView(
+          child: Column(
+            mainAxisSize: MainAxisSize.min,
+            children: [
+              TextField(controller: partCtrl, decoration: const InputDecoration(labelText: 'Part / Accessory Name *')),
+              const SizedBox(height: 10),
+              TextField(controller: typeCtrl, decoration: const InputDecoration(labelText: 'Type / Model')),
+              const SizedBox(height: 10),
+              TextField(controller: qtyCtrl, decoration: const InputDecoration(labelText: 'Quantity *')),
+              const SizedBox(height: 10),
+              TextField(
+                controller: phoneCtrl,
+                decoration: const InputDecoration(labelText: 'Phone (optional - for your own reference, tap to call)'),
+                keyboardType: TextInputType.phone,
+              ),
+            ],
+          ),
+        ),
+        actions: [
+          TextButton(onPressed: () => Navigator.pop(dialogContext, false), child: const Text('Cancel')),
+          ElevatedButton(onPressed: () => Navigator.pop(dialogContext, true), child: const Text('Save')),
+        ],
+      ),
+    );
+
+    if (ok == true && partCtrl.text.trim().isNotEmpty && qtyCtrl.text.trim().isNotEmpty) {
+      final updated = DailyOrderItem(
+        id: item.id,
+        orderDate: item.orderDate,
+        sNo: item.sNo,
+        partName: partCtrl.text.trim(),
+        typeModel: typeCtrl.text.trim().isEmpty ? null : typeCtrl.text.trim(),
+        quantity: qtyCtrl.text.trim(),
+        phone: phoneCtrl.text.trim().isEmpty ? null : phoneCtrl.text.trim(),
+        sent: item.sent,
+        sentAt: item.sentAt,
+        createdAt: item.createdAt,
+      );
+      await _repo.update(updated);
       await _load();
     }
   }
@@ -556,6 +615,11 @@ class _DailyOrderScreenState extends State<DailyOrderScreen> {
               icon: const Icon(Icons.call_rounded, size: 20, color: AppColors.primaryBlue),
               tooltip: item.phone,
               onPressed: () => _callPhone(item.phone!),
+            ),
+          if (!item.sent)
+            IconButton(
+              icon: const Icon(Icons.edit_outlined, size: 20, color: AppColors.primaryBlue),
+              onPressed: () => _editItem(item),
             ),
           if (!item.sent)
             IconButton(
