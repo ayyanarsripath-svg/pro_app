@@ -493,7 +493,7 @@ jobs:
       # would ever survive a checkout. Idempotent: MainActivity.kt and
       # file_paths.xml are always rewritten (harmless), the build.gradle
       # dependency and manifest <provider> are only added if missing.
-      - name: Add FileProvider + native one-click WhatsApp PDF share (Task #11)
+      - name: Add FileProvider + native one-click WhatsApp PDF share (Task 11)
         run: |
           python3 - <<'PYEOF'
           import os, re, glob
@@ -651,7 +651,7 @@ jobs:
       # every other android/ edit in this workflow: `flutter create` above
       # regenerates that whole folder fresh on every build. Idempotent:
       # always rewrites the same file (harmless).
-      - name: Add proper notification small-icon (Task: notification icon)
+      - name: Add proper notification small-icon (notification icon task)
         run: |
           python3 - <<'PYEOF'
           import os
