@@ -73,7 +73,7 @@ class _BackupScreenState extends State<BackupScreen> {
                   const SizedBox(height: 8),
                   if (_driveLinked)
                     Text(
-                      "Once connected, all your data (except photos) backs up to Google Drive automatically every day, aimed at around 10 PM - no need to tap anything, and no permission popups. Android doesn't guarantee the exact minute, so as a safety net this also runs the moment you open the app if that day's backup hasn't happened yet. If a day is missed (no internet, phone off, etc.), it's simply included in the next successful backup - nothing is lost.",
+                      "Once connected, all your data (except photos) backs up to Google Drive automatically every day, aimed at around 10 PM - no need to tap anything, and no permission popups. Android doesn't guarantee the exact minute, so as a safety net this also runs the moment you open the app if that day's backup hasn't happened yet. If a day is missed (no internet, phone off, etc.), it's simply included in the next successful backup - nothing is lost.\n\nSaved into a normal, visible \"Professional Mobiles Backups\" folder in your own Google Drive - open the Drive app any time to see it. One file per month, always holding that month's latest complete data (today's data is automatically included with everything noted earlier that month), so you can open whichever month you need.",
                       style: TextStyle(color: AppColors.textSecondaryOf(context), fontSize: 12),
                     ),
                   const SizedBox(height: 10),
