@@ -3,21 +3,23 @@ import 'package:flutter/services.dart';
 
 import '../../core/repositories/daily_order_repository.dart';
 import '../../core/services/daily_order_widget_service.dart';
-import '../../core/services/widget_launch_state.dart';
 import '../../core/theme/app_theme.dart';
 import '../../core/utils/formatters.dart';
 
-/// Reached only by tapping "+ Add" on the Daily Orders home-screen widget
-/// (see WidgetLaunchState / app.dart's _RootGate) - deliberately outside
-/// the normal staff PIN gate, so noting down one part on the way past
-/// never needs a login. Writes straight to the same table DailyOrderScreen
-/// reads from, then refreshes the widget so the new item shows up there
-/// immediately.
+/// Reached ONLY via the Daily Orders home-screen widget's "+ Add"/card tap
+/// - see main.dart's quickAddMain() entry point and QuickAddActivity.kt
+/// (injected into android/ by the CI build script). That tap launches a
+/// completely separate Android Activity running a separate, minimal
+/// Flutter engine that shows nothing but this screen - the main app
+/// (MainActivity, the staff PIN gate, the dashboard) is never started, so
+/// this genuinely never "opens pro_app" the way the app normally opens.
+/// Writes straight to the same table DailyOrderScreen reads from, then
+/// refreshes the widget so the new item shows up there immediately.
 ///
 /// Closing this screen (via the back button, the X, or after saving)
-/// always finishes the whole app back to the home screen, exactly like a
-/// quick widget action - it never drops into the rest of the app, since
-/// nothing past this point should be reachable without the real PIN login.
+/// finishes this whole separate Activity/task straight back to the home
+/// screen - there is no "rest of the app" to drop into from here, since
+/// this runs in its own isolated engine.
 class QuickAddOrderScreen extends StatefulWidget {
   const QuickAddOrderScreen({super.key});
 
@@ -47,9 +49,9 @@ class _QuickAddOrderScreenState extends State<QuickAddOrderScreen> {
   }
 
   void _closeToHomeScreen() {
-    // Consumed - a normal app open after this goes through the regular
-    // PIN gate again, same as before this screen was ever shown.
-    WidgetLaunchState.quickAddRequested.value = false;
+    // This screen runs in its own separate Activity/task (see the class
+    // doc comment) - popping it finishes that whole task straight back to
+    // the home screen, without ever having touched the main app.
     SystemNavigator.pop();
   }
 
