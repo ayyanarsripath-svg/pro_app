@@ -112,7 +112,7 @@ class _SupplierScreenState extends State<SupplierScreen> {
           children: [
             TextField(controller: nameCtrl, decoration: const InputDecoration(labelText: 'Name')),
             const SizedBox(height: 10),
-            TextField(controller: phoneCtrl, decoration: const InputDecoration(labelText: 'Phone')),
+            TextField(controller: phoneCtrl, decoration: const InputDecoration(labelText: 'Phone'), keyboardType: TextInputType.phone),
             const SizedBox(height: 10),
             TextField(controller: addressCtrl, decoration: const InputDecoration(labelText: 'Address')),
           ],
