@@ -297,23 +297,16 @@ jobs:
                               views.setViewVisibility(itemIds[i], if (raw.isEmpty()) View.GONE else View.VISIBLE)
                           }
 
-                          // Tapping anywhere else on the widget opens the app as before.
-                          val launchIntent = safeLaunchIntent(context)
-                          launchIntent.flags = Intent.FLAG_ACTIVITY_NEW_TASK or Intent.FLAG_ACTIVITY_CLEAR_TOP
-                          val pendingIntent = PendingIntent.getActivity(
-                              context, 0, launchIntent,
-                              PendingIntent.FLAG_UPDATE_CURRENT or PendingIntent.FLAG_IMMUTABLE
-                          )
-                          views.setOnClickPendingIntent(R.id.widget_root, pendingIntent)
-
-                          // "+ Add" button opens the app with a homewidgetpro://quickadd
-                          // deep link. Flutter's _RootGate (see app.dart) checks for this
-                          // via WidgetLaunchState and jumps straight to QuickAddOrderScreen,
-                          // skipping the staff PIN screen entirely - noting one order item
-                          // should never need a full login. Uses a different request code
-                          // (1) than the plain-tap PendingIntent above (0) so Android keeps
-                          // them as two distinct PendingIntents instead of overwriting one
-                          // with the other.
+                          // Tapping anywhere on the widget - the card body or the "+ Add"
+                          // button - jumps straight to quick-add order entry via a
+                          // homewidgetpro://quickadd deep link. The whole point of this
+                          // widget is noting an order item fast, so requiring a precise
+                          // tap on the small "+ Add" button (with the rest of the card
+                          // just reopening the plain app) was more friction than it was
+                          // worth. Flutter's _RootGate (see app.dart) checks for this
+                          // deep link via WidgetLaunchState and jumps straight to
+                          // QuickAddOrderScreen, skipping the staff PIN screen entirely -
+                          // noting one order item should never need a full login.
                           val addIntent = safeLaunchIntent(context)
                           addIntent.data = Uri.parse("homewidgetpro://quickadd")
                           addIntent.flags = Intent.FLAG_ACTIVITY_NEW_TASK or Intent.FLAG_ACTIVITY_CLEAR_TOP
@@ -321,6 +314,7 @@ jobs:
                               context, 1, addIntent,
                               PendingIntent.FLAG_UPDATE_CURRENT or PendingIntent.FLAG_IMMUTABLE
                           )
+                          views.setOnClickPendingIntent(R.id.widget_root, addPendingIntent)
                           views.setOnClickPendingIntent(R.id.widget_add_btn, addPendingIntent)
 
                           appWidgetManager.updateAppWidget(appWidgetId, views)
@@ -485,6 +479,163 @@ jobs:
               with open(manifest_path, "w", encoding="utf-8") as f:
                   f.write(manifest)
               print("Registered DailyOrderWidgetProvider receiver.")
+          PYEOF
+
+      # One-click direct-to-WhatsApp PDF send for Daily Orders (spec: no
+      # "which app" chooser, no "which number" prompt - open WhatsApp
+      # itself with the order PDF attached in one hand-off). This needs a
+      # FileProvider (Android forbids sharing a raw file:// path to another
+      # app) plus a custom MainActivity.kt exposing a MethodChannel the
+      # Dart side calls (see WhatsAppSmsService.shareFileToWhatsApp and
+      # DailyOrderScreen._sendOrder). Same reason as every other android/
+      # edit in this workflow: `flutter create` above regenerates that
+      # whole folder fresh on every build, so nothing placed there directly
+      # would ever survive a checkout. Idempotent: MainActivity.kt and
+      # file_paths.xml are always rewritten (harmless), the build.gradle
+      # dependency and manifest <provider> are only added if missing.
+      - name: Add FileProvider + native one-click WhatsApp PDF share (Task #11)
+        run: |
+          python3 - <<'PYEOF'
+          import os, re, glob
+
+          kotlin_dir = "android/app/src/main/kotlin/com/example/pro_app"
+          xml_dir = "android/app/src/main/res/xml"
+          manifest_path = "android/app/src/main/AndroidManifest.xml"
+
+          os.makedirs(kotlin_dir, exist_ok=True)
+          os.makedirs(xml_dir, exist_ok=True)
+
+          # Replaces Flutter's default MainActivity.kt (plain FlutterActivity,
+          # no native code) with one that adds a single "pro_app/whatsapp_share"
+          # MethodChannel. Its shareToWhatsApp handler builds one ACTION_SEND
+          # intent carrying both the PDF (via FileProvider) and the caption
+          # text, targeted directly at com.whatsapp via setPackage() so
+          # Android's own "choose an app" chooser never appears. NOTE:
+          # WhatsApp itself still shows its own contact/chat picker once
+          # opened - Android has no public API to pre-select a specific chat
+          # for a *file* share (only for plain wa.me text links, see
+          # WhatsAppSmsService.sendWhatsApp) - so this isn't fully zero-tap,
+          # but it removes both the app-chooser and the old awkward
+          # two-message hand-off (chat message, then a separate file share).
+          # Falls back to that old flow on the Dart side (see
+          # daily_order_screen.dart) if WhatsApp isn't installed, or if
+          # anything about the direct share fails.
+          main_activity_kt = '''package com.example.pro_app
+
+          import android.content.Intent
+          import android.net.Uri
+          import androidx.core.content.FileProvider
+          import io.flutter.embedding.android.FlutterActivity
+          import io.flutter.embedding.engine.FlutterEngine
+          import io.flutter.plugin.common.MethodChannel
+          import java.io.File
+
+          class MainActivity : FlutterActivity() {
+              private val channelName = "pro_app/whatsapp_share"
+
+              override fun configureFlutterEngine(flutterEngine: FlutterEngine) {
+                  super.configureFlutterEngine(flutterEngine)
+                  MethodChannel(flutterEngine.dartExecutor.binaryMessenger, channelName).setMethodCallHandler { call, result ->
+                      if (call.method == "shareToWhatsApp") {
+                          val filePath = call.argument<String>("filePath")
+                          val text = call.argument<String>("text") ?: ""
+                          try {
+                              if (filePath == null) {
+                                  result.success(false)
+                              } else {
+                                  val file = File(filePath)
+                                  val uri: Uri = FileProvider.getUriForFile(this, "$packageName.wafileprovider", file)
+                                  val intent = Intent(Intent.ACTION_SEND).apply {
+                                      type = "application/pdf"
+                                      putExtra(Intent.EXTRA_STREAM, uri)
+                                      putExtra(Intent.EXTRA_TEXT, text)
+                                      setPackage("com.whatsapp")
+                                      addFlags(Intent.FLAG_GRANT_READ_URI_PERMISSION)
+                                      addFlags(Intent.FLAG_ACTIVITY_NEW_TASK)
+                                  }
+                                  startActivity(intent)
+                                  result.success(true)
+                              }
+                          } catch (e: Exception) {
+                              // WhatsApp not installed, or anything else
+                              // unexpected - let the Dart side fall back to
+                              // the old two-step flow rather than leaving
+                              // the shop owner stuck with no way to send.
+                              result.success(false)
+                          }
+                      } else {
+                          result.notImplemented()
+                      }
+                  }
+              }
+          }
+          '''
+
+          file_paths_xml = '''<?xml version="1.0" encoding="utf-8"?>
+          <paths xmlns:android="http://schemas.android.com/apk/res/android">
+              <cache-path name="daily_order_pdfs" path="." />
+          </paths>
+          '''
+
+          with open(os.path.join(kotlin_dir, "MainActivity.kt"), "w", encoding="utf-8") as f:
+              f.write(main_activity_kt)
+          print("Wrote MainActivity.kt")
+
+          with open(os.path.join(xml_dir, "file_paths.xml"), "w", encoding="utf-8") as f:
+              f.write(file_paths_xml)
+          print("Wrote file_paths.xml")
+
+          # androidx.core.content.FileProvider is very likely already on the
+          # classpath transitively (most Flutter plugins pull in androidx
+          # startup/core), but add it explicitly so the build never depends
+          # on that being true.
+          candidates = glob.glob("android/app/build.gradle.kts") + glob.glob("android/app/build.gradle")
+          if not candidates:
+              raise SystemExit("Could not find android/app/build.gradle(.kts) - aborting so this doesn't silently skip a required fix.")
+          gradle_path = candidates[0]
+          is_kts = gradle_path.endswith(".kts")
+
+          with open(gradle_path, "r", encoding="utf-8") as f:
+              gradle_content = f.read()
+
+          if "androidx.core:core-ktx" not in gradle_content and "androidx.core:core" not in gradle_content:
+              dep_line = '    implementation("androidx.core:core-ktx:1.13.1")' if is_kts else "    implementation 'androidx.core:core-ktx:1.13.1'"
+              deps_match = re.search(r"(?<!android )dependencies\s*\{", gradle_content)
+              if deps_match:
+                  insert_at = deps_match.end()
+                  gradle_content = gradle_content[:insert_at] + "\n" + dep_line + gradle_content[insert_at:]
+              else:
+                  gradle_content = gradle_content.rstrip("\n") + "\n\ndependencies {\n" + dep_line + "\n}\n"
+              with open(gradle_path, "w", encoding="utf-8") as f:
+                  f.write(gradle_content)
+              print(f"Added androidx.core:core-ktx dependency to {gradle_path}")
+          else:
+              print("androidx.core already a dependency, nothing to do.")
+
+          with open(manifest_path, "r", encoding="utf-8") as f:
+              manifest = f.read()
+
+          if "wafileprovider" in manifest:
+              print("FileProvider already registered, nothing to do.")
+          else:
+              provider_block = (
+                  '        <provider\n'
+                  '            android:name="androidx.core.content.FileProvider"\n'
+                  '            android:authorities="${applicationId}.wafileprovider"\n'
+                  '            android:exported="false"\n'
+                  '            android:grantUriPermissions="true">\n'
+                  '            <meta-data\n'
+                  '                android:name="android.support.FILE_PROVIDER_PATHS"\n'
+                  '                android:resource="@xml/file_paths" />\n'
+                  '        </provider>\n'
+              )
+              idx = manifest.rfind("</application>")
+              if idx == -1:
+                  raise SystemExit(f"Could not find </application> in {manifest_path} - aborting so this doesn't silently produce a broken manifest.")
+              manifest = manifest[:idx] + provider_block + manifest[idx:]
+              with open(manifest_path, "w", encoding="utf-8") as f:
+                  f.write(manifest)
+              print("Registered FileProvider.")
           PYEOF
 
       - run: flutter pub get
