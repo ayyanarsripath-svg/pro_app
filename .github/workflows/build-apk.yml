@@ -11,9 +11,24 @@ jobs:
     steps:
       - uses: actions/checkout@v4
 
+      # Pinned to an exact Flutter version instead of floating on
+      # channel: stable alone - this build confirmed the app compiles
+      # cleanly on 3.47.1 (green run, 2026-08-23), and every build here
+      # already prints "WARNING: Your app uses the following plugins that
+      # apply Kotlin Gradle Plugin (KGP): home_widget, workmanager_android
+      # ... Future versions of Flutter will fail to build if your app uses
+      # plugins that apply KGP." With channel-only, the very next push
+      # could silently pick up a newer Flutter release that trips that
+      # warning into a hard failure, with no code change on our side to
+      # explain it. Pinning means CI keeps using this exact
+      # known-good version until someone deliberately bumps it here
+      # (after checking those two plugins' changelogs for Built-in-Kotlin
+      # support - see the migrate-to-built-in-kotlin guide linked in the
+      # build log warning).
       - uses: subosito/flutter-action@v2
         with:
           channel: 'stable'
+          flutter-version: '3.47.1'
 
       - name: Add missing android platform files if needed
         run: |
