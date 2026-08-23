@@ -11,6 +11,7 @@ import '../services/service_list_screen.dart';
 import '../inventory/spare_parts_screen.dart';
 import '../inventory/accessories_screen.dart';
 import '../sales/sales_list_screen.dart';
+import '../../models/second_hand_phone.dart';
 import '../second_hand/second_hand_list_screen.dart';
 import '../suppliers/supplier_screen.dart';
 import '../suppliers/purchase_list_screen.dart';
@@ -54,11 +55,15 @@ class _AppShellState extends State<AppShell> {
   List<_Destination> get _baseDestinations => <_Destination>[
     _Destination('dashboard', 'Dashboard', Icons.dashboard_rounded, DashboardScreen(key: _dashboardKey)),
     const _Destination('customers', 'Customers', Icons.people_alt_rounded, CustomerListScreen()),
-    const _Destination('services', 'Services', Icons.build_rounded, ServiceListScreen()),
+    const _Destination('services', 'Service Bill', Icons.build_rounded, ServiceListScreen()),
     const _Destination('spare_parts', 'Spare Parts', Icons.memory_rounded, SparePartsScreen()),
     const _Destination('accessories', 'Accessories', Icons.headset_rounded, AccessoriesScreen()),
     const _Destination('sales', 'Sales Bills', Icons.receipt_long_rounded, SalesListScreen()),
-    const _Destination('second_hand', '2nd Hand Mobile', Icons.phone_iphone_rounded, SecondHandListScreen()),
+    // "Mobile Sales" (was "2nd Hand Mobile") - now covers both new and 2nd
+    // hand mobile purchase/sell flow. "Laptop Sales" is the same screen and
+    // data model with deviceType filtered to laptop (see DeviceType).
+    const _Destination('second_hand', 'Mobile Sales', Icons.phone_iphone_rounded, SecondHandListScreen(deviceType: DeviceType.mobile)),
+    const _Destination('laptop_sales', 'Laptop Sales', Icons.laptop_rounded, SecondHandListScreen(deviceType: DeviceType.laptop)),
     const _Destination('suppliers', 'Suppliers', Icons.local_shipping_rounded, SupplierScreen()),
     const _Destination('daily_orders', 'Daily Orders', Icons.assignment_rounded, DailyOrderScreen()),
     const _Destination('purchases', 'Purchases', Icons.shopping_cart_rounded, PurchaseListScreen()),
