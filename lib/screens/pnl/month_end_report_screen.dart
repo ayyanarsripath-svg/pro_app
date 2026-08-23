@@ -47,9 +47,17 @@ class _MonthEndReportScreenState extends State<MonthEndReportScreen> {
     final totals = await _pnl.totals(_monthStart, monthEnd);
 
     final db = await _dbHelper.database;
-    final serviceBalances = await db.rawQuery('SELECT COALESCE(SUM(balance),0) as total FROM services WHERE balance > 0');
-    final salesBalances = await db.rawQuery('SELECT COALESCE(SUM(balance),0) as total FROM sales_bills WHERE balance > 0');
-    final shBalances = await db.rawQuery('SELECT COALESCE(SUM(balance),0) as total FROM second_hand_sales WHERE balance > 0');
+    // active = 1 filters keep a deleted service/sales-bill/2nd-hand-phone's
+    // still-pending balance out of this total - otherwise deleting a bill
+    // wouldn't actually remove its balance from Outstanding Customer
+    // Payments, even though it no longer shows anywhere in the app.
+    final serviceBalances = await db.rawQuery('SELECT COALESCE(SUM(balance),0) as total FROM services WHERE balance > 0 AND active = 1');
+    final salesBalances = await db.rawQuery('SELECT COALESCE(SUM(balance),0) as total FROM sales_bills WHERE balance > 0 AND active = 1');
+    final shBalances = await db.rawQuery(
+      'SELECT COALESCE(SUM(s.balance),0) as total FROM second_hand_sales s '
+      'JOIN second_hand_phones p ON p.id = s.phone_id '
+      'WHERE s.balance > 0 AND p.active = 1',
+    );
     final outstanding = (serviceBalances.first['total'] as num).toDouble() +
         (salesBalances.first['total'] as num).toDouble() +
         (shBalances.first['total'] as num).toDouble();
@@ -108,7 +116,7 @@ class _MonthEndReportScreenState extends State<MonthEndReportScreen> {
                   const Divider(),
                   _catBlock('Accessories', _totals!.accessories),
                   const Divider(),
-                  _catBlock('2nd Hand Mobile', _totals!.secondHand),
+                  _catBlock('Mobile Sales', _totals!.secondHand),
                   const Divider(),
                   _catBlock('Other', _totals!.other),
                 ]),
@@ -123,7 +131,7 @@ class _MonthEndReportScreenState extends State<MonthEndReportScreen> {
                 SectionCard(title: 'Balances', icon: Icons.account_balance_wallet_rounded, children: [
                   _line('Outstanding Customer Payments', _outstanding),
                   _line('Inventory Value (Spare Parts + Accessories)', _inventoryValue),
-                  _line('2nd Hand Stock Value', _secondHandStockValue),
+                  _line('Mobile & Laptop Stock Value', _secondHandStockValue),
                 ]),
               ],
             ),

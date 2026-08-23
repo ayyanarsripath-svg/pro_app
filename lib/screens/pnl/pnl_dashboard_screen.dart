@@ -221,7 +221,7 @@ class _PnlDashboardScreenState extends State<PnlDashboardScreen> {
         const SizedBox(height: 10),
         _categoryCard('ACCESSORIES', t.accessories, AppColors.flameOrange, Icons.headset_rounded),
         const SizedBox(height: 10),
-        _categoryCard('2ND HAND MOBILE', t.secondHand, AppColors.accentPurple, Icons.phone_iphone_rounded),
+        _categoryCard('MOBILE SALES', t.secondHand, AppColors.accentPurple, Icons.phone_iphone_rounded),
         const SizedBox(height: 10),
         _categoryCard('OTHER SALES', t.other, AppColors.info, Icons.sell_rounded),
       ],
@@ -312,7 +312,7 @@ class _PnlDashboardScreenState extends State<PnlDashboardScreen> {
     final entries = [
       ('Service', t.service.revenue, AppColors.primaryBlue),
       ('Accessories', t.accessories.revenue, AppColors.flameOrange),
-      ('2nd Hand', t.secondHand.revenue, AppColors.accentPurple),
+      ('Mobile Sales', t.secondHand.revenue, AppColors.accentPurple),
       ('Other', t.other.revenue, AppColors.info),
     ];
     final maxVal = entries.map((e) => e.$2).fold<double>(0, (a, b) => a > b ? a : b);
@@ -382,7 +382,7 @@ class _PnlDashboardScreenState extends State<PnlDashboardScreen> {
             rows: [
               _dataRow('Service', t.service),
               _dataRow('Accessories', t.accessories),
-              _dataRow('2nd Hand', t.secondHand),
+              _dataRow('Mobile Sales', t.secondHand),
               _dataRow('Other Sales', t.other),
               DataRow(cells: [
                 const DataCell(Text('TOTAL', style: TextStyle(fontWeight: FontWeight.w800))),
