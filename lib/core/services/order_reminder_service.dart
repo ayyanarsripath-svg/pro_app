@@ -70,12 +70,25 @@ class OrderReminderService {
       }
 
       await ensureInitialized();
+      // Channel id bumped from 'daily_order_reminder' to
+      // 'daily_order_reminder_v2': on Android 8+, a notification channel's
+      // sound/vibration settings are locked the FIRST time that channel id
+      // is ever created on a device and can never be changed by the app
+      // afterwards, even across app updates - only a full uninstall clears
+      // it. If the original channel ever got created without sound (or a
+      // user/OEM silently muted it), no amount of code changes to this
+      // AndroidNotificationDetails would ever bring sound back on an
+      // existing install. A new channel id guarantees a fresh channel with
+      // these settings (sound + vibration explicitly on) on every device,
+      // old and new installs alike.
       const androidDetails = AndroidNotificationDetails(
-        'daily_order_reminder',
+        'daily_order_reminder_v2',
         'Daily Order Reminder',
         channelDescription: "Reminds you to send today's supplier order",
         importance: Importance.high,
         priority: Priority.high,
+        playSound: true,
+        enableVibration: true,
       );
       await _plugin.show(
         1001,

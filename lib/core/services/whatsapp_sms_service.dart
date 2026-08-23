@@ -25,19 +25,26 @@ class WhatsAppSmsService {
   /// opens WhatsApp itself with [filePath] (the order PDF) and [text] (the
   /// short caption) attached together in a single share, skipping
   /// Android's own "choose an app" chooser entirely (native side targets
-  /// com.whatsapp directly - see MainActivity.kt). WhatsApp still shows its
-  /// own contact/chat picker once opened; Android has no public API to
-  /// pre-select a specific chat for a *file* share (only for plain wa.me
-  /// text links, see [sendWhatsApp] above) - that one remaining tap is a
-  /// WhatsApp/platform limitation, not something this app can remove.
+  /// com.whatsapp directly - see MainActivity.kt).
+  ///
+  /// When [phone] is given, the native side also passes WhatsApp an extra
+  /// ("jid") that opens straight into that specific contact's chat with
+  /// the file already attached - just one tap on Send inside WhatsApp, no
+  /// contact/chat picker. This isn't an official WhatsApp API (there's no
+  /// public one for pre-selecting a chat on a *file* share), but it's a
+  /// long-standing, widely-used technique that works reliably on current
+  /// WhatsApp - if a future WhatsApp update ever stops honouring it,
+  /// WhatsApp simply falls back to its own picker, never worse than
+  /// before.
   /// Returns false (rather than throwing) if WhatsApp isn't installed or
   /// anything about the native share fails, so callers can fall back to
   /// the older two-step [sendWhatsApp] + PDF-share flow.
-  Future<bool> shareFileToWhatsApp({required String filePath, required String text}) async {
+  Future<bool> shareFileToWhatsApp({required String filePath, required String text, String? phone}) async {
     try {
       final ok = await _shareChannel.invokeMethod<bool>('shareToWhatsApp', {
         'filePath': filePath,
         'text': text,
+        'phone': (phone == null || phone.trim().isEmpty) ? null : _sanitizePhone(phone),
       });
       return ok ?? false;
     } catch (_) {
@@ -116,6 +123,29 @@ class WhatsAppSmsService {
       '🙏 நன்றி! Thank you for choosing Professional Mobiles.\n'
       'professional mobiles trusted service\n'
       'ma.kunnathur';
+  }
+
+  /// "Ready for delivery" notice - sent the moment a service job's status
+  /// is changed to Ready (see ServiceStatus.ready / ServiceDetailScreen's
+  /// _changeStatus), distinct from [deliveryMessage] which fires later,
+  /// once the phone is actually handed back. Uses the shop's exact given
+  /// template.
+  String readyForDeliveryMessage({
+    required String customerName,
+    String? mobileName,
+    required double amount,
+    required String billNo,
+  }) {
+    final modelLabel = (mobileName ?? '').trim();
+    return '📱 PROFESSIONAL MOBILES\n'
+      'வணக்கம் $customerName அவர்களே! 👋\n'
+      'உங்களுடைய ${modelLabel.isEmpty ? 'மொபைல்' : modelLabel} மொபைல் service செய்து முடிக்கப்பட்டுவிட்டது. ✅\n'
+      '📦 Mobile Delivery-ku Ready!\n'
+      '💰 Service Amount: ${formatCurrency(amount)}\n'
+      '🧾 Bill No: $billNo\n'
+      'தயவுசெய்து கடைக்கு வந்து உங்கள் mobile-ஐ பெற்றுக்கொள்ளவும்.\n'
+      '🙏 நன்றி\n'
+      'PROFESSIONAL MOBILES';
   }
 
   /// Daily supplier order (Daily Orders feature) - opens WhatsApp with just
