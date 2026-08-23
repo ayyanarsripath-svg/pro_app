@@ -41,8 +41,8 @@ class _SectionInfo {
 
 const List<_SectionInfo> _sections = [
   _SectionInfo('full', 'Full Access', 'Sees every screen (Dashboard, all bills, all inventory, Expenses, Profit & Loss) - only the permissions below limit what they can do.'),
-  _SectionInfo('billing', 'Billing Only', 'Sales Bill, Service Bill (+ adding repair parts used), 2nd Hand Bill and printing - nothing else. No Dashboard, Profit & Loss, Expenses or inventory screens.'),
-  _SectionInfo('inventory', 'Inventory Only', 'Spare Parts, Accessories, 2nd Hand stock, Suppliers and Purchases - add/reduce stock only. No Dashboard, Profit & Loss, Expenses or billing screens.'),
+  _SectionInfo('billing', 'Billing Only', 'Sales Bill, Service Bill (+ adding repair parts used), Mobile Sales, Laptop Sales and printing - nothing else. No Dashboard, Profit & Loss, Expenses or inventory screens.'),
+  _SectionInfo('inventory', 'Inventory Only', 'Spare Parts, Accessories, Mobile Sales stock, Laptop Sales stock, Suppliers and Purchases - add/reduce stock only. No Dashboard, Profit & Loss, Expenses or billing screens.'),
 ];
 
 class StaffScreen extends StatefulWidget {
