@@ -65,8 +65,17 @@ class _CustomerDetailScreenState extends State<CustomerDetailScreen> {
           if (_services.isEmpty) const EmptyState(icon: Icons.build_rounded, message: 'No service history'),
           ..._services.map((s) => Card(
                 child: ListTile(
-                  title: Text('${s.billNo} - ${s.mobileName ?? ''} ${s.model ?? ''}'),
-                  subtitle: Text('${s.complaint ?? '-'}\n${formatDate(s.createdAt)}  •  ${formatCurrency(s.finalAmount)}'),
+                  // Deleted (soft-deleted / active=false) bills stay visible
+                  // here for history, but struck through so it's obvious at
+                  // a glance that they're no longer live.
+                  title: Text(
+                    '${s.billNo} - ${s.mobileName ?? ''} ${s.model ?? ''}',
+                    style: !s.active ? const TextStyle(decoration: TextDecoration.lineThrough) : null,
+                  ),
+                  subtitle: Text(
+                    '${s.complaint ?? '-'}\n${formatDate(s.createdAt)}  •  ${formatCurrency(s.finalAmount)}${!s.active ? '  •  DELETED' : ''}',
+                    style: !s.active ? const TextStyle(decoration: TextDecoration.lineThrough) : null,
+                  ),
                   isThreeLine: true,
                   trailing: StatusBadge(s.status, fontSize: 10),
                   onTap: () async {
