@@ -88,8 +88,11 @@ class AuthService extends ChangeNotifier {
   bool get isInventorySection => _section == 'inventory';
 
   /// Screen ids a "Billing" login is allowed to open (must match the [id]
-  /// values used in AppShell's destination list).
-  static const _billingMenuIds = {'sales', 'services', 'second_hand'};
+  /// values used in AppShell's destination list). 'laptop_sales' is the
+  /// same underlying screen/permission model as 'second_hand' (Mobile
+  /// Sales), just filtered to laptops - see SecondHandListScreen's
+  /// deviceType param.
+  static const _billingMenuIds = {'sales', 'services', 'second_hand', 'laptop_sales'};
 
   /// Screen ids an "Inventory" login is allowed to open. Daily Orders lives
   /// here since it's a supplier-facing, stock-replenishment task, the same
@@ -98,6 +101,7 @@ class AuthService extends ChangeNotifier {
     'spare_parts',
     'accessories',
     'second_hand',
+    'laptop_sales',
     'suppliers',
     'purchases',
     'daily_orders',

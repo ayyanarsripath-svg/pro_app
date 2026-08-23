@@ -331,6 +331,7 @@ class PdfService {
                   required double totalAmount,
                   required double advanceAmount,
                   required double balanceAmount, String? faultBreakdown,
+                  double discountAmount = 0,
                   bool paid = false,
         }) {
                   final box = pw.Container(
@@ -345,6 +346,10 @@ class PdfService {
                                               children: [
                                                             _amountLine('TOTAL AMOUNT', totalAmount), if (faultBreakdown != null) pw.Padding(padding: const pw.EdgeInsets.symmetric(vertical: 1), child: pw.Text(faultBreakdown, style: const pw.TextStyle(fontSize: 7.5, color: PdfColors.grey800), textAlign: pw.TextAlign.center)),
                                                             _amountLine('- ADVANCE AMOUNT', advanceAmount),
+                                                            // Only printed when a bargain/write-off discount was actually
+                                                            // entered - a bill with no discount looks exactly as it did
+                                                            // before this line existed.
+                                                            if (discountAmount > 0) _amountLine('- DISCOUNT', discountAmount),
                                                             pw.Container(
                                                                           margin: const pw.EdgeInsets.symmetric(vertical: 2.5),
                                                                           height: 0.7,
@@ -531,7 +536,8 @@ class PdfService {
                                                   _serviceAmountSummary(
                                                         totalAmount: _billTotal(service),
                                                         advanceAmount: service.paid,
-                                                        balanceAmount: _billTotal(service) - service.paid, faultBreakdown: _faultBreakdownText(service.faultAmounts),
+                                                        balanceAmount: _billTotal(service) - service.paid - service.discount, faultBreakdown: _faultBreakdownText(service.faultAmounts),
+                                                        discountAmount: service.discount,
                                                         // "PAID" round-stamp deliberately removed from the Service Bill
                                                         // per the shop owner's explicit request - the amount box itself
                                                         // (Total - Advance = Balance) already shows the paid/balance
@@ -677,7 +683,7 @@ class PdfService {
                         margin: const pw.EdgeInsets.all(18),
                         build: (context) {
                               return [
-                                          _header(shop, logo, '2ND HAND MOBILE - SALES BILL'), if (warrantyClaimed) _warrantyClaimedStamp(),
+                                          _header(shop, logo, phone.isLaptop ? 'LAPTOP - SALES BILL' : 'MOBILE - SALES BILL'), if (warrantyClaimed) _warrantyClaimedStamp(),
                                           pw.SizedBox(height: 4),
                                           pw.Row(
                                                 mainAxisAlignment: pw.MainAxisAlignment.spaceBetween,
@@ -694,7 +700,7 @@ class PdfService {
                                           _box('DEVICE', [
                                                 _kv('Brand', phone.brand, labelWidth: 75),
                                                 _kv('Model', phone.model, labelWidth: 75),
-                                                _kv('IMEI', phone.imei1, labelWidth: 75),
+                                                _kv(phone.identifierLabel, phone.imei1, labelWidth: 75),
                                                 _kv('RAM / Storage', '${phone.ram ?? '-'} / ${phone.storage ?? '-'}', labelWidth: 75),
                                                 _kv('Condition', phone.conditionGrade, labelWidth: 75),
                                                 _kv('Battery Health', phone.batteryHealth, labelWidth: 75),
@@ -704,9 +710,23 @@ class PdfService {
                                                 if (sale.warranty) _kv('Period', sale.warrantyPeriod, labelWidth: 75),
                                                 ]),
                                           pw.SizedBox(height: 4),
+                                          // Sale Price / Discount breakdown only printed when a bargain
+                                          // discount was actually entered - keeps the bill unchanged for
+                                          // the common no-discount case.
+                                          if (sale.discount > 0)
+                                                pw.Padding(
+                                                      padding: const pw.EdgeInsets.only(bottom: 3),
+                                                      child: pw.Row(
+                                                            mainAxisAlignment: pw.MainAxisAlignment.spaceBetween,
+                                                            children: [
+                                                                  pw.Text('Sale Price: ${formatCurrency(sale.salePrice)}', style: const pw.TextStyle(fontSize: 9)),
+                                                                  pw.Text('Discount: -${formatCurrency(sale.discount)}', style: const pw.TextStyle(fontSize: 9)),
+                                                                  ],
+                                                          ),
+                                                    ),
                                           sale.balance <= 0
-                                              ? _withPaidStamp(_paymentSummary(finalAmount: sale.salePrice, paid: sale.paid, balance: sale.balance))
-                                              : _paymentSummary(finalAmount: sale.salePrice, paid: sale.paid, balance: sale.balance),
+                                              ? _withPaidStamp(_paymentSummary(finalAmount: sale.salePrice - sale.discount, paid: sale.paid, balance: sale.balance))
+                                              : _paymentSummary(finalAmount: sale.salePrice - sale.discount, paid: sale.paid, balance: sale.balance),
                                           pw.SizedBox(height: 4),
                                           pw.Text('Payment Method: ${sale.paymentMethod ?? '-'}', style: const pw.TextStyle(fontSize: 9)),
                                           pw.SizedBox(height: 6),
@@ -769,7 +789,7 @@ class PdfService {
                                                             ),
                                                       row('Service', totals.service),
                                                       row('Accessories', totals.accessories),
-                                                      row('2nd Hand', totals.secondHand),
+                                                      row('Mobile Sales', totals.secondHand),
                                                       row('Other Sales', totals.other),
                                                       pw.TableRow(
                                                             decoration: const pw.BoxDecoration(color: PdfColors.grey200),

@@ -118,7 +118,13 @@ class PnlService {
 
     double revenue = 0, cost = 0;
     for (final row in saleRows) {
-      revenue += (row['sale_price'] as num).toDouble();
+      // Net of any bargained-off discount - sale_price is the pre-discount
+      // asking price, so subtracting discount here keeps this in sync with
+      // the netPrice already used for the ledger revenue entry recorded in
+      // recordSale() (avoids overstating realized revenue/profit).
+      final salePrice = (row['sale_price'] as num).toDouble();
+      final discount = (row['discount'] as num?)?.toDouble() ?? 0;
+      revenue += salePrice - discount;
       final phone = await _secondHand.byId(row['phone_id'] as String);
       if (phone != null) cost += phone.totalInvestment;
     }
@@ -139,7 +145,7 @@ class PnlService {
     );
     final expenses = expenseRows.fold<double>(0, (s, r) => s + (r['amount'] as num).toDouble());
 
-    return CategorySummary(label: '2nd Hand Mobile', revenue: revenue, cost: cost, expenses: expenses);
+    return CategorySummary(label: 'Mobile Sales', revenue: revenue, cost: cost, expenses: expenses);
   }
 
   Future<double> generalExpenses(DateTime from, DateTime to) async {
