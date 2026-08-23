@@ -27,6 +27,8 @@ class PdfService {
         final _settings = SettingsRepository();
         Uint8List? _logoBytes;
         Uint8List? _termsNoteBytes;
+        Uint8List? _termsNoteSecondHandBytes;
+        Uint8List? _termsNoteAccessoriesBytes;
         pw.Font? _fontRegular;
 
         /// Uses the shop's own logo (set from Settings -> App Logo) once
@@ -56,6 +58,21 @@ class PdfService {
         Future<Uint8List> _termsNoteImage() async {
                   _termsNoteBytes ??= (await rootBundle.load('assets/images/terms_note.png')).buffer.asUint8List();
                   return _termsNoteBytes!;
+        }
+
+        /// The 8-point Tamil terms & conditions note for the 2nd Hand Sales
+        /// Bill (same pre-rendered-image approach as [_termsNoteImage], and
+        /// for the same reason - correct Tamil script shaping).
+        Future<Uint8List> _termsNoteSecondHandImage() async {
+                  _termsNoteSecondHandBytes ??= (await rootBundle.load('assets/images/terms_note_secondhand.png')).buffer.asUint8List();
+                  return _termsNoteSecondHandBytes!;
+        }
+
+        /// The 11-point Tamil terms & conditions note for the Accessories
+        /// Sales Bill (same pre-rendered-image approach as [_termsNoteImage]).
+        Future<Uint8List> _termsNoteAccessoriesImage() async {
+                  _termsNoteAccessoriesBytes ??= (await rootBundle.load('assets/images/terms_note_accessories.png')).buffer.asUint8List();
+                  return _termsNoteAccessoriesBytes!;
         }
 
         Future<pw.Font> _regularFont() async {
@@ -169,6 +186,15 @@ class PdfService {
         /// shaping is guaranteed regardless of the PDF text engine's limits.
         Future<pw.Widget> _termsBox() async {
                   final bytes = await _termsNoteImage();
+                  return _termsBoxFromImage(bytes, width: 344, height: 107.3);
+        }
+
+        /// Same boxed-terms-image presentation as [_termsBox], generalised so
+        /// the 2nd Hand Sales Bill and Accessories Sales Bill can each show
+        /// their own terms image (see [_termsNoteSecondHandImage] /
+        /// [_termsNoteAccessoriesImage]) at the width/height that matches
+        /// their own pre-rendered PNG's aspect ratio.
+        pw.Widget _termsBoxFromImage(Uint8List bytes, {required double width, required double height}) {
                   return pw.Container(
                               width: double.infinity,
                               padding: const pw.EdgeInsets.all(4),
@@ -176,8 +202,22 @@ class PdfService {
                                             border: pw.Border.all(color: PdfColors.grey600, width: 0.7),
                                             borderRadius: const pw.BorderRadius.all(pw.Radius.circular(3)),
                                           ),
-                              child: pw.Image(pw.MemoryImage(bytes), width: 344, height: 107.3, fit: pw.BoxFit.fitWidth),
+                              child: pw.Image(pw.MemoryImage(bytes), width: width, height: height, fit: pw.BoxFit.fitWidth),
                             );
+        }
+
+        /// Boxed Tamil terms & conditions for the 2nd Hand Sales Bill (8
+        /// points + intro line - see [_termsNoteSecondHandImage]).
+        Future<pw.Widget> _termsBoxSecondHand() async {
+                  final bytes = await _termsNoteSecondHandImage();
+                  return _termsBoxFromImage(bytes, width: 370, height: 90.67);
+        }
+
+        /// Boxed Tamil terms & conditions for the Accessories Sales Bill (11
+        /// points - see [_termsNoteAccessoriesImage]).
+        Future<pw.Widget> _termsBoxAccessories() async {
+                  final bytes = await _termsNoteAccessoriesImage();
+                  return _termsBoxFromImage(bytes, width: 370, height: 104.1);
         }
 
         pw.Widget _kv(String k, String? v, {double labelWidth = 46}) => pw.Padding(
@@ -492,7 +532,10 @@ class PdfService {
                                                         totalAmount: _billTotal(service),
                                                         advanceAmount: service.paid,
                                                         balanceAmount: _billTotal(service) - service.paid, faultBreakdown: _faultBreakdownText(service.faultAmounts),
-                                                        paid: service.deliveryStatus == 'Delivered' && (_billTotal(service) - service.paid) <= 0,
+                                                        // "PAID" round-stamp deliberately removed from the Service Bill
+                                                        // per the shop owner's explicit request - the amount box itself
+                                                        // (Total - Advance = Balance) already shows the paid/balance
+                                                        // figures clearly, the stamp is no longer stamped on top.
                                                         ),
                                                   pw.SizedBox(height: 3),
                                                   _box('DELIVERY', [
@@ -534,16 +577,15 @@ class PdfService {
       }) async {
             final shop = await _shopInfo();
             final logo = await _logo();
+            final termsWidget = await _termsBoxAccessories();
             final doc = pw.Document(theme: await _theme());
 
             doc.addPage(
-                  pw.Page(
+                  pw.MultiPage(
                         pageFormat: PdfPageFormat.a5,
                         margin: const pw.EdgeInsets.all(18),
                         build: (context) {
-                              return pw.Column(
-                                    crossAxisAlignment: pw.CrossAxisAlignment.start,
-                                    children: [
+                              return [
                                           _header(shop, logo, 'SALES BILL'), if (warrantyClaimed) _warrantyClaimedStamp(),
                                           pw.SizedBox(height: 4),
                                           pw.Row(
@@ -604,10 +646,10 @@ class PdfService {
                                               : _paymentSummary(finalAmount: bill.total, paid: bill.paid, balance: bill.balance),
                                           pw.SizedBox(height: 4),
                                           pw.Text('Payment Method: ${bill.paymentMethod ?? '-'}', style: const pw.TextStyle(fontSize: 9)),
-                                          pw.Spacer(),
+                                          pw.SizedBox(height: 6),
+                                          termsWidget,
                                           _signatures(),
-                                          ],
-                                    );
+                                          ];
                         },
                         ),
                   );
@@ -626,16 +668,15 @@ class PdfService {
       }) async {
             final shop = await _shopInfo();
             final logo = await _logo();
+            final termsWidget = await _termsBoxSecondHand();
             final doc = pw.Document(theme: await _theme());
 
             doc.addPage(
-                  pw.Page(
+                  pw.MultiPage(
                         pageFormat: PdfPageFormat.a5,
                         margin: const pw.EdgeInsets.all(18),
                         build: (context) {
-                              return pw.Column(
-                                    crossAxisAlignment: pw.CrossAxisAlignment.start,
-                                    children: [
+                              return [
                                           _header(shop, logo, '2ND HAND MOBILE - SALES BILL'), if (warrantyClaimed) _warrantyClaimedStamp(),
                                           pw.SizedBox(height: 4),
                                           pw.Row(
@@ -668,10 +709,10 @@ class PdfService {
                                               : _paymentSummary(finalAmount: sale.salePrice, paid: sale.paid, balance: sale.balance),
                                           pw.SizedBox(height: 4),
                                           pw.Text('Payment Method: ${sale.paymentMethod ?? '-'}', style: const pw.TextStyle(fontSize: 9)),
-                                          pw.Spacer(),
+                                          pw.SizedBox(height: 6),
+                                          termsWidget,
                                           _signatures(),
-                                          ],
-                                    );
+                                          ];
                         },
                         ),
                   );
