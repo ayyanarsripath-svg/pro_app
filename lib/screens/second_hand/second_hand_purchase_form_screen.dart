@@ -1,11 +1,16 @@
 import 'package:flutter/material.dart';
 
 import '../../core/repositories/second_hand_repository.dart';
+import '../../models/second_hand_phone.dart';
 import '../../widgets/section_card.dart';
 
 /// Full purchase-entry form covering every field in spec section 6.
 class SecondHandPurchaseFormScreen extends StatefulWidget {
-  const SecondHandPurchaseFormScreen({super.key});
+  /// Which device-type segment is pre-selected when opened - "Mobile Sales"
+  /// opens this pre-set to mobile, "Laptop Sales" pre-sets it to laptop.
+  /// The Device Type toggle stays editable either way.
+  final String initialDeviceType;
+  const SecondHandPurchaseFormScreen({super.key, this.initialDeviceType = DeviceType.mobile});
 
   @override
   State<SecondHandPurchaseFormScreen> createState() => _SecondHandPurchaseFormScreenState();
@@ -37,29 +42,62 @@ class _SecondHandPurchaseFormScreenState extends State<SecondHandPurchaseFormScr
   String _condition = 'Good';
   bool _warranty = false;
   bool _saving = false;
+  String _deviceType = DeviceType.mobile;
+
+  bool get _isLaptop => _deviceType == DeviceType.laptop;
+
+  @override
+  void initState() {
+    super.initState();
+    _deviceType = widget.initialDeviceType;
+  }
 
   @override
   Widget build(BuildContext context) {
     return Scaffold(
-      appBar: AppBar(title: const Text('Purchase 2nd Hand Phone')),
+      appBar: AppBar(title: Text(_isLaptop ? 'Purchase Laptop' : 'Purchase 2nd Hand Phone')),
       body: Form(
         key: _formKey,
         child: ListView(
           padding: const EdgeInsets.all(14),
           children: [
+            SectionCard(title: 'Device Type', icon: Icons.devices_rounded, children: [
+              // Mobile vs Laptop - drives the identifier field below (IMEI
+              // for mobiles, Serial No for laptops, since laptops don't
+              // carry an IMEI) and the bill title/labels when this device
+              // is later sold (see Mobile Sales / buildSecondHandSalesBill).
+              SegmentedButton<String>(
+                segments: const [
+                  ButtonSegment(value: DeviceType.mobile, label: Text('Mobile'), icon: Icon(Icons.smartphone_rounded)),
+                  ButtonSegment(value: DeviceType.laptop, label: Text('Laptop'), icon: Icon(Icons.laptop_rounded)),
+                ],
+                selected: {_deviceType},
+                onSelectionChanged: (s) => setState(() => _deviceType = s.first),
+              ),
+            ]),
             SectionCard(title: 'Seller', icon: Icons.person_rounded, children: [
               TextFormField(controller: _sellerNameCtrl, decoration: const InputDecoration(labelText: 'Seller Name')),
               const SizedBox(height: 10),
               TextFormField(controller: _sellerPhoneCtrl, keyboardType: TextInputType.phone, decoration: const InputDecoration(labelText: 'Seller Phone')),
             ]),
             SectionCard(title: 'Device Details', icon: Icons.phone_iphone_rounded, children: [
-              TextFormField(controller: _brandCtrl, decoration: const InputDecoration(labelText: 'Mobile Brand')),
+              TextFormField(controller: _brandCtrl, decoration: InputDecoration(labelText: _isLaptop ? 'Laptop Brand' : 'Mobile Brand')),
               const SizedBox(height: 10),
               TextFormField(controller: _modelCtrl, decoration: const InputDecoration(labelText: 'Model')),
               const SizedBox(height: 10),
-              TextFormField(controller: _imei1Ctrl, decoration: const InputDecoration(labelText: 'IMEI 1')),
-              const SizedBox(height: 10),
-              TextFormField(controller: _imei2Ctrl, decoration: const InputDecoration(labelText: 'IMEI 2')),
+              // IMEI (mobile) is always 15 numeric digits -> numeric keypad.
+              // Serial No (laptop) mixes letters and numbers (e.g.
+              // "WES/1234") -> normal keyboard. Laptops only carry one
+              // serial number, so IMEI 2 is hidden for them.
+              TextFormField(
+                controller: _imei1Ctrl,
+                keyboardType: _isLaptop ? TextInputType.text : TextInputType.number,
+                decoration: InputDecoration(labelText: _isLaptop ? 'Serial No' : 'IMEI 1'),
+              ),
+              if (!_isLaptop) ...[
+                const SizedBox(height: 10),
+                TextFormField(controller: _imei2Ctrl, keyboardType: TextInputType.number, decoration: const InputDecoration(labelText: 'IMEI 2')),
+              ],
               const SizedBox(height: 10),
               Row(children: [
                 Expanded(child: TextFormField(controller: _ramCtrl, decoration: const InputDecoration(labelText: 'RAM'))),
@@ -104,7 +142,12 @@ class _SecondHandPurchaseFormScreenState extends State<SecondHandPurchaseFormScr
                 value: _warranty,
                 onChanged: (v) => setState(() => _warranty = v),
               ),
-              if (_warranty) TextFormField(controller: _warrantyPeriodCtrl, decoration: const InputDecoration(labelText: 'Warranty Period')),
+              if (_warranty)
+                TextFormField(
+                  controller: _warrantyPeriodCtrl,
+                  keyboardType: TextInputType.number,
+                  decoration: const InputDecoration(labelText: 'Warranty Period (in days)'),
+                ),
             ]),
             SectionCard(title: 'Notes', icon: Icons.notes_rounded, children: [
               TextFormField(controller: _notesCtrl, maxLines: 2, decoration: const InputDecoration(labelText: 'Notes')),
@@ -129,6 +172,7 @@ class _SecondHandPurchaseFormScreenState extends State<SecondHandPurchaseFormScr
 
     await _repo.recordPurchase(
       purchaseDate: DateTime.now(),
+      deviceType: _deviceType,
       sellerName: _sellerNameCtrl.text.trim(),
       sellerPhone: _sellerPhoneCtrl.text.trim(),
       brand: _brandCtrl.text.trim(),

@@ -12,8 +12,13 @@ import '../../widgets/status_badge.dart';
 import 'second_hand_detail_screen.dart';
 import 'second_hand_purchase_form_screen.dart';
 
+/// Shared list screen for both the "Mobile Sales" and "Laptop Sales" menu
+/// entries - same purchase/repair/sell/warranty/P&L machinery underneath
+/// (see the `deviceType` column on SecondHandPhone), filtered by
+/// [deviceType] so each menu entry only shows its own stock.
 class SecondHandListScreen extends StatefulWidget {
-  const SecondHandListScreen({super.key});
+  final String deviceType;
+  const SecondHandListScreen({super.key, this.deviceType = DeviceType.mobile});
 
   @override
   State<SecondHandListScreen> createState() => _SecondHandListScreenState();
@@ -26,6 +31,8 @@ class _SecondHandListScreenState extends State<SecondHandListScreen> {
   bool _loading = true;
   String? _filter;
 
+  bool get _isLaptop => widget.deviceType == DeviceType.laptop;
+
   @override
   void initState() {
     super.initState();
@@ -34,8 +41,8 @@ class _SecondHandListScreenState extends State<SecondHandListScreen> {
 
   Future<void> _load() async {
     setState(() => _loading = true);
-    final phones = await _repo.all(statusFilter: _filter);
-    final stock = await _repo.stockSummary();
+    final phones = await _repo.all(statusFilter: _filter, deviceType: widget.deviceType);
+    final stock = await _repo.stockSummary(deviceType: widget.deviceType);
     setState(() {
       _phones = phones;
       _stock = stock;
@@ -51,6 +58,9 @@ class _SecondHandListScreenState extends State<SecondHandListScreen> {
     // of which menu section (Billing/Inventory/Full) it belongs to.
     final showCost = auth.canSeeCost;
     final showProfit = auth.canSeeProfit;
+    // No AppBar here - AppShell's outer AppBar already shows the current
+    // destination's label ("Mobile Sales" / "Laptop Sales"), same pattern
+    // as every other tab screen.
     return Scaffold(
       body: _loading
           ? const Center(child: CircularProgressIndicator())
@@ -97,7 +107,11 @@ class _SecondHandListScreenState extends State<SecondHandListScreen> {
                     ),
                   ),
                   const SizedBox(height: 10),
-                  if (_phones.isEmpty) const EmptyState(icon: Icons.phone_iphone_rounded, message: 'No 2nd hand phones yet'),
+                  if (_phones.isEmpty)
+                    EmptyState(
+                      icon: _isLaptop ? Icons.laptop_rounded : Icons.phone_iphone_rounded,
+                      message: _isLaptop ? 'No laptops yet' : 'No 2nd hand phones yet',
+                    ),
                   ..._phones.map((phone) => Card(
                         child: ListTile(
                           title: Text('${phone.brand ?? ''} ${phone.model ?? ''} (${phone.purchaseNo})'),
@@ -120,11 +134,14 @@ class _SecondHandListScreenState extends State<SecondHandListScreen> {
       floatingActionButton: auth.canDoInventoryActions
           ? FloatingActionButton.extended(
               onPressed: () async {
-                final created = await Navigator.push<bool>(context, MaterialPageRoute(builder: (_) => const SecondHandPurchaseFormScreen()));
+                final created = await Navigator.push<bool>(
+                  context,
+                  MaterialPageRoute(builder: (_) => SecondHandPurchaseFormScreen(initialDeviceType: widget.deviceType)),
+                );
                 if (created == true) _load();
               },
               icon: const Icon(Icons.add_rounded),
-              label: const Text('Purchase Phone'),
+              label: Text(_isLaptop ? 'Purchase Laptop' : 'Purchase Phone'),
             )
           : null,
     );

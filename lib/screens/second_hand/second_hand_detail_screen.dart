@@ -89,8 +89,8 @@ class _SecondHandDetailScreenState extends State<SecondHandDetailScreen> {
             SectionCard(title: 'Device Details', icon: Icons.phone_iphone_rounded, children: [
               _row('Brand', phone.brand),
               _row('Model', phone.model),
-              _row('IMEI 1', phone.imei1),
-              _row('IMEI 2', phone.imei2),
+              _row(phone.isLaptop ? 'Serial No' : 'IMEI 1', phone.imei1),
+              if (!phone.isLaptop) _row('IMEI 2', phone.imei2),
               _row('RAM / Storage', '${phone.ram ?? '-'} / ${phone.storage ?? '-'}'),
               _row('Colour', phone.colour),
             ]),
@@ -264,6 +264,7 @@ class _SecondHandDetailScreenState extends State<SecondHandDetailScreen> {
     final nameCtrl = TextEditingController();
     final phoneCtrl = TextEditingController();
     final priceCtrl = TextEditingController(text: phone.expectedSellingPrice.toStringAsFixed(0));
+    final discountCtrl = TextEditingController();
     final paidCtrl = TextEditingController(text: phone.expectedSellingPrice.toStringAsFixed(0));
     bool warranty = phone.warranty;
     final warrantyPeriodCtrl = TextEditingController(text: phone.warrantyPeriod ?? '');
@@ -280,6 +281,14 @@ class _SecondHandDetailScreenState extends State<SecondHandDetailScreen> {
                 TextField(controller: nameCtrl, decoration: const InputDecoration(labelText: 'Customer Name')),
                 TextField(controller: phoneCtrl, keyboardType: TextInputType.phone, decoration: const InputDecoration(labelText: 'Customer Phone')),
                 TextField(controller: priceCtrl, keyboardType: TextInputType.number, decoration: const InputDecoration(labelText: 'Sale Price (₹)')),
+                // Bargain discount - e.g. Sale Price 3000, customer bargains
+                // it down by 200 -> final billed amount is 2800. Only
+                // printed on the bill when non-zero.
+                TextField(
+                  controller: discountCtrl,
+                  keyboardType: TextInputType.number,
+                  decoration: const InputDecoration(labelText: 'Discount (₹) - leave blank if none'),
+                ),
                 TextField(controller: paidCtrl, keyboardType: TextInputType.number, decoration: const InputDecoration(labelText: 'Paid (₹)')),
                 SwitchListTile(
                   contentPadding: EdgeInsets.zero,
@@ -287,7 +296,12 @@ class _SecondHandDetailScreenState extends State<SecondHandDetailScreen> {
                   value: warranty,
                   onChanged: (v) => setLocalState(() => warranty = v),
                 ),
-                if (warranty) TextField(controller: warrantyPeriodCtrl, decoration: const InputDecoration(labelText: 'Warranty Period')),
+                if (warranty)
+                  TextField(
+                    controller: warrantyPeriodCtrl,
+                    keyboardType: TextInputType.number,
+                    decoration: const InputDecoration(labelText: 'Warranty Period (in days)'),
+                  ),
               ],
             ),
           ),
@@ -309,6 +323,7 @@ class _SecondHandDetailScreenState extends State<SecondHandDetailScreen> {
         customerId: customer.id,
         saleDate: DateTime.now(),
         salePrice: double.tryParse(priceCtrl.text.trim()) ?? 0,
+        discount: double.tryParse(discountCtrl.text.trim()) ?? 0,
         paymentMethod: 'Cash',
         paid: double.tryParse(paidCtrl.text.trim()) ?? 0,
         warranty: warranty,
@@ -411,7 +426,7 @@ class _SecondHandDetailScreenState extends State<SecondHandDetailScreen> {
       await _warrantyRepo.fileClaim(claimType: 'second_hand', referenceId: widget.phoneId, description: descCtrl.text.trim());
       final customer = sale?.customerId != null ? await _customerRepo.byId(sale!.customerId!) : null;
       if (customer?.phone != null && customer!.phone!.trim().isNotEmpty) {
-        final waMsg = _waService.warrantyClaimMessage(customerName: customer.name, referenceLabel: '2nd Hand ${phone.purchaseNo}', description: descCtrl.text.trim());
+        final waMsg = _waService.warrantyClaimMessage(customerName: customer.name, referenceLabel: '${phone.isLaptop ? 'Laptop' : 'Mobile'} ${phone.purchaseNo}', description: descCtrl.text.trim());
         try { await _waService.sendWhatsApp(phone: customer.phone!, message: waMsg); } catch (_) {}
         try { await _waService.sendSms(phone: customer.phone!, message: waMsg); } catch (_) {}
       }
