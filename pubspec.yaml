@@ -82,6 +82,8 @@ flutter:
     - assets/images/logo_bw.png
     - assets/images/logo_bw_1bit.png
     - assets/images/terms_note.png
+    - assets/images/terms_note_secondhand.png
+    - assets/images/terms_note_accessories.png
   fonts:
     - family: NotoSansTamil
       fonts:
