@@ -11,6 +11,7 @@ class SalesBill {
   final double balance;
   final String? paymentMethod;
   final String? notes;
+  final bool active;
   final DateTime createdAt;
 
   SalesBill({
@@ -26,6 +27,7 @@ class SalesBill {
     this.balance = 0,
     this.paymentMethod,
     this.notes,
+    this.active = true,
     required this.createdAt,
   });
 
@@ -42,6 +44,7 @@ class SalesBill {
         balance: (m['balance'] as num?)?.toDouble() ?? 0,
         paymentMethod: m['payment_method'] as String?,
         notes: m['notes'] as String?,
+        active: (m['active'] as int? ?? 1) == 1,
         createdAt: DateTime.parse(m['created_at'] as String),
       );
 
@@ -58,6 +61,7 @@ class SalesBill {
         'balance': balance,
         'payment_method': paymentMethod,
         'notes': notes,
+        'active': active ? 1 : 0,
         'created_at': createdAt.toIso8601String(),
       };
 }

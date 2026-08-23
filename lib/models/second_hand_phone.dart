@@ -9,10 +9,24 @@ class SecondHandStatus {
   static const all = [purchased, repairing, readyForSale, sold, returned, reserved];
 }
 
+/// Mobile vs Laptop - the shop now sells both 2nd hand mobiles and laptops
+/// through this same purchase/repair/sell flow (Mobile Sales screen), so
+/// one discriminator column tells the two apart instead of duplicating the
+/// whole module. Mobiles are identified by IMEI; laptops don't have one,
+/// so they're tracked by Serial No instead (stored in the [imei1] field -
+/// see SecondHandPhone.serialOrImeiLabel).
+class DeviceType {
+  static const mobile = 'mobile';
+  static const laptop = 'laptop';
+
+  static const all = [mobile, laptop];
+}
+
 class SecondHandPhone {
   final String id;
   final String purchaseNo;
   final DateTime purchaseDate;
+  final String deviceType;
   final String? sellerName;
   final String? sellerPhone;
   final String? brand;
@@ -49,6 +63,7 @@ class SecondHandPhone {
     required this.id,
     required this.purchaseNo,
     required this.purchaseDate,
+    this.deviceType = DeviceType.mobile,
     this.sellerName,
     this.sellerPhone,
     this.brand,
@@ -80,6 +95,12 @@ class SecondHandPhone {
     this.sparePartCost = 0,
   });
 
+  bool get isLaptop => deviceType == DeviceType.laptop;
+
+  /// IMEI (mobile) / Serial No (laptop) label for screens that show one
+  /// generic "identifier" field regardless of device type.
+  String get identifierLabel => isLaptop ? 'Serial No' : 'IMEI';
+
   /// Total Investment = Purchase Price + Repair Cost + Spare Parts + Other Direct Costs
   double get totalInvestment => purchasePrice + repairCost + sparePartCost + otherCost;
 
@@ -98,6 +119,7 @@ class SecondHandPhone {
       id: m['id'] as String,
       purchaseNo: m['purchase_no'] as String,
       purchaseDate: DateTime.parse(m['purchase_date'] as String),
+      deviceType: m['device_type'] as String? ?? DeviceType.mobile,
       sellerName: m['seller_name'] as String?,
       sellerPhone: m['seller_phone'] as String?,
       brand: m['brand'] as String?,
@@ -134,6 +156,7 @@ class SecondHandPhone {
         'id': id,
         'purchase_no': purchaseNo,
         'purchase_date': purchaseDate.toIso8601String(),
+        'device_type': deviceType,
         'seller_name': sellerName,
         'seller_phone': sellerPhone,
         'brand': brand,
@@ -207,6 +230,7 @@ class SecondHandSale {
   final String? customerId;
   final DateTime saleDate;
   final double salePrice;
+  final double discount;
   final String? paymentMethod;
   final double paid;
   final double balance;
@@ -222,6 +246,7 @@ class SecondHandSale {
     this.customerId,
     required this.saleDate,
     required this.salePrice,
+    this.discount = 0,
     this.paymentMethod,
     this.paid = 0,
     this.balance = 0,
@@ -238,6 +263,7 @@ class SecondHandSale {
         customerId: m['customer_id'] as String?,
         saleDate: DateTime.parse(m['sale_date'] as String),
         salePrice: (m['sale_price'] as num).toDouble(),
+        discount: (m['discount'] as num?)?.toDouble() ?? 0,
         paymentMethod: m['payment_method'] as String?,
         paid: (m['paid'] as num?)?.toDouble() ?? 0,
         balance: (m['balance'] as num?)?.toDouble() ?? 0,
@@ -254,6 +280,7 @@ class SecondHandSale {
         'customer_id': customerId,
         'sale_date': saleDate.toIso8601String(),
         'sale_price': salePrice,
+        'discount': discount,
         'payment_method': paymentMethod,
         'paid': paid,
         'balance': balance,

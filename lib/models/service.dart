@@ -43,6 +43,7 @@ class ServiceJob {
   final String? warrantyPeriod;
   final double estimatedAmount;
   final double finalAmount;
+  final double discount;
   final double advance;
   final double paid;
   final double balance;
@@ -77,6 +78,7 @@ class ServiceJob {
     this.warrantyPeriod,
     this.estimatedAmount = 0,
     this.finalAmount = 0,
+    this.discount = 0,
     this.advance = 0,
     this.paid = 0,
     this.balance = 0,
@@ -101,8 +103,10 @@ bool get isPaymentPending => displayBalance > 0;
   double get billTotal => finalAmount > 0 ? finalAmount : estimatedAmount;
 
   /// Balance computed from [billTotal] rather than the possibly-still-₹0
-  /// stored finalAmount.
-  double get displayBalance => billTotal - paid;
+  /// stored finalAmount, with any bargained-off [discount] already
+  /// subtracted - e.g. total 100, customer pays 90, shop writes off the
+  /// remaining 10 as a discount instead of leaving it as a pending due.
+  double get displayBalance => billTotal - paid - discount;
 
   factory ServiceJob.fromMap(Map<String, dynamic> m) => ServiceJob(
         id: m['id'] as String,
@@ -126,6 +130,7 @@ bool get isPaymentPending => displayBalance > 0;
         warrantyPeriod: m['warranty_period'] as String?,
         estimatedAmount: (m['estimated_amount'] as num?)?.toDouble() ?? 0,
         finalAmount: (m['final_amount'] as num?)?.toDouble() ?? 0,
+        discount: (m['discount'] as num?)?.toDouble() ?? 0,
         advance: (m['advance'] as num?)?.toDouble() ?? 0,
         paid: (m['paid'] as num?)?.toDouble() ?? 0,
         balance: (m['balance'] as num?)?.toDouble() ?? 0,
@@ -161,6 +166,7 @@ bool get isPaymentPending => displayBalance > 0;
         'warranty_period': warrantyPeriod,
         'estimated_amount': estimatedAmount,
         'final_amount': finalAmount,
+        'discount': discount,
         'advance': advance,
         'paid': paid,
         'balance': balance,
