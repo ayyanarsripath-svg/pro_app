@@ -1,12 +1,15 @@
 import 'package:flutter/material.dart';
 import 'package:printing/printing.dart';
 import 'package:pdf/pdf.dart';
+import 'package:provider/provider.dart';
 
 import '../../core/repositories/customer_repository.dart';
 import '../../core/repositories/sales_repository.dart';
 import '../../core/repositories/warranty_repository.dart';
+import '../../core/services/auth_service.dart';
 import '../../core/services/pdf_service.dart';
 import '../../core/services/whatsapp_sms_service.dart';
+import '../../core/theme/app_theme.dart';
 import '../../core/utils/formatters.dart';
 import '../../models/sales_bill.dart';
 import '../../widgets/section_card.dart';
@@ -48,6 +51,7 @@ class _SalesListScreenState extends State<SalesListScreen> {
 
   @override
   Widget build(BuildContext context) {
+    final auth = context.watch<AuthService>();
     return Scaffold(
       body: _loading
       ? const Center(child: CircularProgressIndicator())
@@ -71,6 +75,8 @@ class _SalesListScreenState extends State<SalesListScreen> {
                     if (!claimed)
                     IconButton(icon: const Icon(Icons.verified_user_rounded), tooltip: 'Warranty Claim', onPressed: () => _fileWarrantyClaim(b)),
                     IconButton(icon: const Icon(Icons.print_rounded), onPressed: () => _print(b)),
+                    if (auth.canDelete)
+                    IconButton(icon: const Icon(Icons.delete_rounded, color: AppColors.danger), tooltip: 'Delete', onPressed: () => _deleteBill(b)),
                     ],
                   ),
                 ),
@@ -94,6 +100,33 @@ class _SalesListScreenState extends State<SalesListScreen> {
     final customer = bill.customerId != null ? await _customerRepo.byId(bill.customerId!) : null;
     final bytes = await _pdfService.buildSalesBill(bill: bill, items: items, customer: customer, warrantyClaimed: _claimedBillIds.contains(bill.id));
     await Printing.layoutPdf(format: PdfPageFormat.a5, name: 'Sales_${bill.billNo}', onLayout: (format) async => bytes);
+  }
+
+  /// Admin/permission-gated Delete (soft-delete: sets active=0 and clears
+  /// its ledger entries, matching the pattern used for services/2nd-hand).
+  Future<void> _deleteBill(SalesBill bill) async {
+    final ok = await showDialog<bool>(
+      context: context,
+      builder: (context) => AlertDialog(
+        title: const Text('Delete Sales Bill?'),
+        content: Text('${bill.billNo} (${formatCurrency(bill.total)}) will be removed from lists. This cannot be undone from here.'),
+        actions: [
+          TextButton(onPressed: () => Navigator.pop(context, false), child: const Text('Cancel')),
+          ElevatedButton(
+            style: ElevatedButton.styleFrom(backgroundColor: AppColors.danger),
+            onPressed: () => Navigator.pop(context, true),
+            child: const Text('Delete'),
+          ),
+        ],
+      ),
+    );
+    if (ok == true) {
+      await _repo.delete(bill.id);
+      if (mounted) {
+        ScaffoldMessenger.of(context).showSnackBar(const SnackBar(content: Text('Sales bill deleted')));
+      }
+      _load();
+    }
   }
 
   Future<void> _fileWarrantyClaim(SalesBill bill) async {
