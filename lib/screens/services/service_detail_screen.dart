@@ -283,6 +283,15 @@ _amountBlock('FINAL AMOUNT', s.billTotal),
               _amountBlock('BALANCE', s.displayBalance),
               ],
             ),
+          if (s.discount > 0)
+            Padding(
+              padding: const EdgeInsets.only(top: 10),
+              child: Container(
+                padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 5),
+                decoration: BoxDecoration(color: Colors.white.withOpacity(0.18), borderRadius: BorderRadius.circular(20)),
+                child: Text('DISCOUNT APPLIED: ${formatCurrency(s.discount)}', style: const TextStyle(color: Colors.white, fontWeight: FontWeight.w800, fontSize: 11.5)),
+              ),
+            ),
           if (s.displayBalance > 0)
             Padding(
               padding: const EdgeInsets.only(top: 10),
@@ -345,13 +354,15 @@ _amountBlock('FINAL AMOUNT', s.billTotal),
     final finalCtrl = TextEditingController(text: s.finalAmount.toStringAsFixed(0));
     final labourCtrl = TextEditingController(text: s.labourCost.toStringAsFixed(0));
     final expenseCtrl = TextEditingController(text: s.additionalExpense.toStringAsFixed(0));
+    final discountCtrl = TextEditingController(text: s.discount == 0 ? '' : s.discount.toStringAsFixed(0));
     final techCtrl = TextEditingController(text: s.technician ?? '');
 
     final ok = await showDialog<bool>(
       context: context,
       builder: (context) => AlertDialog(
         title: const Text('Edit Service'),
-        content: Column(
+        content: SingleChildScrollView(
+          child: Column(
           mainAxisSize: MainAxisSize.min,
           children: [
             TextField(controller: techCtrl, decoration: const InputDecoration(labelText: 'Technician')),
@@ -361,7 +372,21 @@ _amountBlock('FINAL AMOUNT', s.billTotal),
             TextField(controller: labourCtrl, keyboardType: TextInputType.number, decoration: const InputDecoration(labelText: 'Labour Cost (₹) - Admin only')),
             const SizedBox(height: 10),
             TextField(controller: expenseCtrl, keyboardType: TextInputType.number, decoration: const InputDecoration(labelText: 'Additional Expense (₹)')),
+            const SizedBox(height: 10),
+            // Bargain write-off: e.g. Final Amount 100, customer pays 90 -
+            // enter 10 here and the balance auto-settles to 0 instead of
+            // sitting as a pending due. Only printed on the bill when > 0.
+            TextField(
+              controller: discountCtrl,
+              keyboardType: TextInputType.number,
+              decoration: const InputDecoration(
+                labelText: 'Discount (₹) - leave blank if none',
+                helperText: 'Bargained-off amount. Balance = Final − Paid − Discount.',
+                helperMaxLines: 2,
+              ),
+            ),
           ],
+          ),
         ),
         actions: [
           TextButton(onPressed: () => Navigator.pop(context, false), child: const Text('Cancel')),
@@ -394,6 +419,7 @@ _amountBlock('FINAL AMOUNT', s.billTotal),
         warrantyPeriod: s.warrantyPeriod,
         estimatedAmount: s.estimatedAmount,
         finalAmount: double.tryParse(finalCtrl.text.trim()) ?? s.finalAmount,
+        discount: double.tryParse(discountCtrl.text.trim()) ?? 0,
         advance: s.advance,
         paid: s.paid,
         balance: s.balance,

@@ -41,6 +41,9 @@ class _ServiceFormScreenState extends State<ServiceFormScreen> {
 
     bool _charger = false, _cable = false, _sim = false, _memoryCard = false;
     bool _warranty = false;
+    // IMEI (mobile, numeric keypad) vs Serial No (laptop/other devices,
+    // mixes letters e.g. "WES/1234" -> normal keyboard).
+    bool _imeiIsSerial = false;
     DateTime? _expectedDate;
     Customer? _existingCustomer;
     bool _saving = false;
@@ -163,7 +166,20 @@ class _ServiceFormScreenState extends State<ServiceFormScreen> {
                             const SizedBox(height: 10),
                             TextFormField(controller: _modelCtrl, decoration: const InputDecoration(labelText: 'Model')),
                             const SizedBox(height: 10),
-                            TextFormField(controller: _imeiCtrl, decoration: const InputDecoration(labelText: 'IMEI')),
+                            SegmentedButton<bool>(
+                                segments: const [
+                                    ButtonSegment(value: false, label: Text('IMEI')),
+                                    ButtonSegment(value: true, label: Text('Serial No')),
+                                    ],
+                                selected: {_imeiIsSerial},
+                                onSelectionChanged: (s) => setState(() => _imeiIsSerial = s.first),
+                                ),
+                            const SizedBox(height: 10),
+                            TextFormField(
+                                controller: _imeiCtrl,
+                                keyboardType: _imeiIsSerial ? TextInputType.text : TextInputType.number,
+                                decoration: InputDecoration(labelText: _imeiIsSerial ? 'Serial No' : 'IMEI'),
+                                ),
                             ]),
                         SectionCard(title: 'Complaint', icon: Icons.report_problem_rounded, children: [
                             Wrap(
