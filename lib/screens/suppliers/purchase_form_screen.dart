@@ -26,6 +26,13 @@ class PurchaseFormScreen extends StatefulWidget {
   State<PurchaseFormScreen> createState() => _PurchaseFormScreenState();
 }
 
+/// Sentinel entry appended to the Select Supplier dropdown so a purchase can
+/// be recorded from a one-off/unsaved supplier without first creating them
+/// in Suppliers. Picking it reveals a free-text name field; on submit a new
+/// Supplier record is created from that name (so it's in the saved list for
+/// next time too).
+final _otherSupplier = Supplier(id: '__other__', name: 'Other (not in list)', createdAt: DateTime.now());
+
 class _PurchaseFormScreenState extends State<PurchaseFormScreen> {
   final _supplierRepo = SupplierRepository();
   final _sparePartRepo = SparePartRepository();
@@ -36,6 +43,7 @@ class _PurchaseFormScreenState extends State<PurchaseFormScreen> {
   List<SparePart> _spareParts = [];
   List<Accessory> _accessories = [];
   Supplier? _selectedSupplier;
+  final _otherSupplierNameCtrl = TextEditingController();
   final List<_Line> _lines = [];
   final _paidCtrl = TextEditingController(text: '0');
   bool _saving = false;
@@ -71,9 +79,19 @@ class _PurchaseFormScreenState extends State<PurchaseFormScreen> {
               value: _selectedSupplier,
               isExpanded: true,
               hint: const Text('Select supplier (optional)'),
-              items: _suppliers.map((s) => DropdownMenuItem(value: s, child: Text(s.name))).toList(),
+              items: [
+                ..._suppliers.map((s) => DropdownMenuItem(value: s, child: Text(s.name))),
+                DropdownMenuItem(value: _otherSupplier, child: Text(_otherSupplier.name)),
+              ],
               onChanged: (v) => setState(() => _selectedSupplier = v),
             ),
+            if (_selectedSupplier?.id == _otherSupplier.id) ...[
+              const SizedBox(height: 10),
+              TextField(
+                controller: _otherSupplierNameCtrl,
+                decoration: const InputDecoration(labelText: 'Supplier Name'),
+              ),
+            ],
           ]),
           SectionCard(
             title: 'Items',
@@ -179,8 +197,17 @@ class _PurchaseFormScreenState extends State<PurchaseFormScreen> {
             ? 'accessory'
             : 'other';
 
+    // "Other" supplier: create a real Supplier record from the typed name
+    // (if any) so it's saved for next time; otherwise proceed with no
+    // supplier attached, same as leaving the dropdown blank.
+    String? supplierId = _selectedSupplier?.id;
+    if (_selectedSupplier?.id == _otherSupplier.id) {
+      final name = _otherSupplierNameCtrl.text.trim();
+      supplierId = name.isEmpty ? null : (await _supplierRepo.create(name: name)).id;
+    }
+
     await _purchaseRepo.create(
-      supplierId: _selectedSupplier?.id,
+      supplierId: supplierId,
       purchaseDate: DateTime.now(),
       category: category,
       items: _lines.map((l) => PurchaseLineInput(itemType: l.itemType, itemId: l.itemId, itemName: l.itemName, quantity: l.quantity, unitCost: l.unitCost)).toList(),
