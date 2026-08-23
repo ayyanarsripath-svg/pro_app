@@ -577,6 +577,11 @@ jobs:
                       if (call.method == "shareToWhatsApp") {
                           val filePath = call.argument<String>("filePath")
                           val text = call.argument<String>("text") ?: ""
+                          // Already-sanitised digits-only phone (see
+                          // WhatsAppSmsService._sanitizePhone on the Dart
+                          // side) - null/blank if the caller didn't have a
+                          // number to target.
+                          val phone = call.argument<String>("phone")
                           try {
                               if (filePath == null) {
                                   result.success(false)
@@ -590,6 +595,21 @@ jobs:
                                       setPackage("com.whatsapp")
                                       addFlags(Intent.FLAG_GRANT_READ_URI_PERMISSION)
                                       addFlags(Intent.FLAG_ACTIVITY_NEW_TASK)
+                                      // "jid" is not a documented WhatsApp
+                                      // API, but it's a long-standing,
+                                      // widely-used extra that opens this
+                                      // share directly into the given
+                                      // contact's chat instead of showing
+                                      // WhatsApp's own picker - one tap on
+                                      // Send inside WhatsApp instead of
+                                      // first having to choose who to send
+                                      // to. If a WhatsApp version ever stops
+                                      // honouring it, WhatsApp just falls
+                                      // back to its normal picker - never
+                                      // worse than before this was added.
+                                      if (!phone.isNullOrBlank()) {
+                                          putExtra("jid", "$phone@s.whatsapp.net")
+                                      }
                                   }
                                   startActivity(intent)
                                   result.success(true)
