@@ -13,7 +13,7 @@ class DatabaseHelper {
   static final DatabaseHelper instance = DatabaseHelper._internal();
 
   static Database? _db;
-  static const int dbVersion = 5;
+  static const int dbVersion = 6;
   static const String dbFileName = 'professional_mobiles.db';
 
   Future<Database> get database async {
@@ -71,6 +71,19 @@ class DatabaseHelper {
       ''');
       await db.execute('CREATE INDEX idx_daily_order_items_date ON daily_order_items(order_date)');
       await db.execute('CREATE INDEX idx_daily_order_items_sent ON daily_order_items(sent)');
+    }
+    // Bargain/write-off discount on Service Bills and 2nd Hand Sales
+    // (e.g. total 100, customer pays 90, remaining 10 marked as a
+    // discount instead of sitting as a pending balance) - see
+    // ServiceJob.discount / SecondHandSale.discount. Sales Bill soft
+    // delete (active flag, same pattern as services/second_hand_phones).
+    // device_type on second_hand_phones distinguishes Mobile vs Laptop so
+    // the same purchase/sale/warranty flow serves both (Laptop Sales).
+    if (oldVersion < 6) {
+      await db.execute('ALTER TABLE services ADD COLUMN discount REAL NOT NULL DEFAULT 0');
+      await db.execute('ALTER TABLE second_hand_sales ADD COLUMN discount REAL NOT NULL DEFAULT 0');
+      await db.execute("ALTER TABLE second_hand_phones ADD COLUMN device_type TEXT NOT NULL DEFAULT 'mobile'");
+      await db.execute('ALTER TABLE sales_bills ADD COLUMN active INTEGER NOT NULL DEFAULT 1');
     }
   }
 
@@ -244,6 +257,7 @@ class DatabaseHelper {
         balance REAL NOT NULL DEFAULT 0,
         payment_method TEXT,
         notes TEXT,
+        active INTEGER NOT NULL DEFAULT 1,
         created_at TEXT NOT NULL,
         FOREIGN KEY (customer_id) REFERENCES customers(id)
       )
@@ -289,6 +303,7 @@ class DatabaseHelper {
         warranty_period TEXT,
         estimated_amount REAL NOT NULL DEFAULT 0,
         final_amount REAL NOT NULL DEFAULT 0,
+        discount REAL NOT NULL DEFAULT 0,
         advance REAL NOT NULL DEFAULT 0,
         paid REAL NOT NULL DEFAULT 0,
         balance REAL NOT NULL DEFAULT 0,
@@ -386,6 +401,7 @@ class DatabaseHelper {
         id TEXT PRIMARY KEY,
         purchase_no TEXT NOT NULL,
         purchase_date TEXT NOT NULL,
+        device_type TEXT NOT NULL DEFAULT 'mobile', -- mobile | laptop
         seller_name TEXT,
         seller_phone TEXT,
         brand TEXT,
@@ -438,6 +454,7 @@ class DatabaseHelper {
         customer_id TEXT,
         sale_date TEXT NOT NULL,
         sale_price REAL NOT NULL,
+        discount REAL NOT NULL DEFAULT 0,
         payment_method TEXT,
         paid REAL NOT NULL DEFAULT 0,
         balance REAL NOT NULL DEFAULT 0,
