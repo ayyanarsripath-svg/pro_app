@@ -123,7 +123,7 @@ class _DashboardScreenState extends State<DashboardScreen> {
               ),
               const SizedBox(height: 18),
               SectionCard(
-                title: '2nd Hand Stock',
+                title: 'Mobile & Laptop Stock',
                 icon: Icons.phone_iphone_rounded,
                 children: [
                   Row(
