@@ -160,13 +160,19 @@ class _ExpenseScreenState extends State<ExpenseScreen> {
                   decoration: const InputDecoration(labelText: 'Payment Method'),
                 ),
                 const SizedBox(height: 10),
+                // "2nd Hand Business Expense" is deliberately NOT offered
+                // here: a 2nd-hand phone's purchase cost already hits the
+                // dashboard/P&L total the moment it's added to stock, so
+                // logging it again here would double-count it. The enum
+                // value/label are kept (see _allocationLabel) purely so
+                // any already-recorded historical expenses still display
+                // correctly.
                 DropdownButtonFormField<String>(
                   value: allocation,
                   items: const [
                     DropdownMenuItem(value: ExpenseAllocation.general, child: Text('General Business Expense')),
                     DropdownMenuItem(value: ExpenseAllocation.service, child: Text('Service Expense')),
                     DropdownMenuItem(value: ExpenseAllocation.accessories, child: Text('Accessories Expense')),
-                    DropdownMenuItem(value: ExpenseAllocation.secondHand, child: Text('2nd Hand Business Expense')),
                     DropdownMenuItem(value: ExpenseAllocation.other, child: Text('Other')),
                   ],
                   onChanged: (v) => setLocalState(() => allocation = v ?? allocation),
