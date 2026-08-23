@@ -154,7 +154,11 @@ class _DailyOrderScreenState extends State<DailyOrderScreen> {
           children: [
             Icon(Icons.access_time_rounded, size: 14, color: AppColors.textSecondaryOf(context)),
             const SizedBox(width: 4),
-            Text('Send time: $_sendTime', style: TextStyle(color: AppColors.textSecondaryOf(context), fontSize: 12.5)),
+            // _sendTime is stored as 24-hour "HH:mm" (e.g. "20:09") - shown
+            // here via TimeOfDay.format so it reads as a normal 12-hour
+            // AM/PM time ("8:09 PM"), matching what was actually picked in
+            // the settings dialog instead of the raw stored value.
+            Text('Send time: ${_parseTime(_sendTime).format(context)}', style: TextStyle(color: AppColors.textSecondaryOf(context), fontSize: 12.5)),
             const SizedBox(width: 14),
             Icon(
               _reminderEnabled ? Icons.notifications_active_rounded : Icons.notifications_off_rounded,
@@ -375,11 +379,13 @@ class _DailyOrderScreenState extends State<DailyOrderScreen> {
       // One-click direct-to-WhatsApp send: opens WhatsApp itself with the
       // PDF and the short caption attached together in a single share,
       // skipping Android's "choose an app" chooser (see MainActivity.kt /
-      // WhatsAppSmsService.shareFileToWhatsApp). Falls back to the older
-      // two-step hand-off (a wa.me chat message, then a separate generic
-      // file-share sheet) only if the direct share isn't available - e.g.
-      // WhatsApp isn't installed.
-      final sharedDirect = await _waService.shareFileToWhatsApp(filePath: file.path, text: message);
+      // WhatsAppSmsService.shareFileToWhatsApp). Passing the supplier's
+      // phone also skips WhatsApp's OWN contact/chat picker - it opens
+      // straight into their chat, ready to tap Send. Falls back to the
+      // older two-step hand-off (a wa.me chat message, then a separate
+      // generic file-share sheet) only if the direct share isn't
+      // available - e.g. WhatsApp isn't installed.
+      final sharedDirect = await _waService.shareFileToWhatsApp(filePath: file.path, text: message, phone: _supplierPhone);
       if (!sharedDirect) {
         await _waService.sendWhatsApp(phone: _supplierPhone, message: message);
         await Future.delayed(const Duration(milliseconds: 600));
