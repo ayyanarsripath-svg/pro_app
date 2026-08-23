@@ -30,6 +30,7 @@ class SecondHandRepository {
 
   Future<SecondHandPhone> recordPurchase({
     required DateTime purchaseDate,
+    String deviceType = DeviceType.mobile,
     String? sellerName,
     String? sellerPhone,
     String? brand,
@@ -57,6 +58,7 @@ class SecondHandRepository {
       id: newId(),
       purchaseNo: await nextPurchaseNo(),
       purchaseDate: purchaseDate,
+      deviceType: deviceType,
       sellerName: sellerName,
       sellerPhone: sellerPhone,
       brand: brand,
@@ -180,6 +182,7 @@ class SecondHandRepository {
     required String? customerId,
     required DateTime saleDate,
     required double salePrice,
+    double discount = 0,
     String? paymentMethod,
     double paid = 0,
     bool warranty = false,
@@ -188,6 +191,12 @@ class SecondHandRepository {
   }) async {
     final db = await _dbHelper.database;
     final billNo = await nextSaleBillNo();
+    // netPrice is the actual amount due after any bargained-off discount
+    // (e.g. asking 3000, customer bargains it down by 200 -> 2800 net) -
+    // paid/balance and the ledger revenue are all computed against this,
+    // never the pre-discount salePrice, so P&L never overstates realized
+    // profit by the discounted-away amount.
+    final netPrice = salePrice - discount;
     final sale = SecondHandSale(
       id: newId(),
       phoneId: phoneId,
@@ -195,9 +204,10 @@ class SecondHandRepository {
       customerId: customerId,
       saleDate: saleDate,
       salePrice: salePrice,
+      discount: discount,
       paymentMethod: paymentMethod,
       paid: paid,
-      balance: salePrice - paid,
+      balance: netPrice - paid,
       warranty: warranty,
       warrantyPeriod: warrantyPeriod,
       notes: notes,
@@ -208,7 +218,7 @@ class SecondHandRepository {
       'second_hand_phones',
       {
         'status': SecondHandStatus.sold,
-        'actual_selling_price': salePrice,
+        'actual_selling_price': netPrice,
         'sale_date': saleDate.toIso8601String(),
         'customer_id': customerId,
       },
@@ -222,7 +232,7 @@ class SecondHandRepository {
       txnType: LedgerTxnType.revenue,
       referenceType: 'second_hand_sale',
       referenceId: sale.id,
-      amount: salePrice,
+      amount: netPrice,
       description: '2nd hand sale $billNo',
     );
 
@@ -280,7 +290,7 @@ class SecondHandRepository {
     return SecondHandSale.fromMap(rows.first);
   }
 
-  Future<List<SecondHandPhone>> all({String? statusFilter, bool activeOnly = true}) async {
+  Future<List<SecondHandPhone>> all({String? statusFilter, bool activeOnly = true, String? deviceType}) async {
     final db = await _dbHelper.database;
     final conditions = <String>[];
     final args = <Object?>[];
@@ -288,6 +298,10 @@ class SecondHandRepository {
     if (statusFilter != null) {
       conditions.add('status = ?');
       args.add(statusFilter);
+    }
+    if (deviceType != null) {
+      conditions.add('device_type = ?');
+      args.add(deviceType);
     }
     final rows = await db.query(
       'second_hand_phones',
@@ -316,8 +330,8 @@ class SecondHandRepository {
   }
 
   /// Stock dashboard summary (spec section 8).
-  Future<Map<String, double>> stockSummary() async {
-    final phones = await all();
+  Future<Map<String, double>> stockSummary({String? deviceType}) async {
+    final phones = await all(deviceType: deviceType);
     final unsold = phones.where((p) => p.status != SecondHandStatus.sold && p.status != SecondHandStatus.returned);
     final sold = phones.where((p) => p.status == SecondHandStatus.sold);
 

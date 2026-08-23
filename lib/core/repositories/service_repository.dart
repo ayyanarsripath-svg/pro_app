@@ -103,14 +103,18 @@ class ServiceRepository {
   /// ledger always matches the current record (no double counting).
   Future<void> _syncCoreLedger(ServiceJob service) async {
     await _ledger.clearForReference('service_core', service.id);
-    if (service.finalAmount > 0) {
+    // Net of any bargained-off discount, same as displayBalance - so P&L
+    // never overstates realized service revenue/profit by the discounted
+    // amount (matches the 2nd Hand Sale netPrice convention).
+    final netRevenue = service.finalAmount - service.discount;
+    if (netRevenue > 0) {
       await _ledger.record(
         txnDate: service.createdAt,
         category: LedgerCategory.service,
         txnType: LedgerTxnType.revenue,
         referenceType: 'service_core',
         referenceId: service.id,
-        amount: service.finalAmount,
+        amount: netRevenue,
         description: 'Service revenue ${service.billNo}',
       );
     }
@@ -162,9 +166,10 @@ class ServiceRepository {
       warrantyPeriod: service.warrantyPeriod,
       estimatedAmount: service.estimatedAmount,
       finalAmount: service.finalAmount,
+      discount: service.discount,
       advance: service.advance,
       paid: service.paid,
-      balance: service.finalAmount - service.paid,
+      balance: service.finalAmount - service.paid - service.discount,
       expectedDate: service.expectedDate,
       actualDate: service.actualDate,
       deliveryPerson: service.deliveryPerson,
@@ -245,7 +250,7 @@ class ServiceRepository {
     final newPaid = current.paid + amount;
     await db.update(
       'services',
-      {'paid': newPaid, 'balance': current.finalAmount - newPaid, 'updated_at': now.toIso8601String()},
+      {'paid': newPaid, 'balance': current.finalAmount - newPaid - current.discount, 'updated_at': now.toIso8601String()},
       where: 'id = ?',
       whereArgs: [serviceId],
     );

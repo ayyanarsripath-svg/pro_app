@@ -124,10 +124,24 @@ class SalesRepository {
     return bill;
   }
 
-  Future<List<SalesBill>> all() async {
+  Future<List<SalesBill>> all({bool activeOnly = true}) async {
     final db = await _dbHelper.database;
-    final rows = await db.query('sales_bills', orderBy: 'sale_date DESC');
+    final rows = await db.query(
+      'sales_bills',
+      where: activeOnly ? 'active = 1' : null,
+      orderBy: 'sale_date DESC',
+    );
     return rows.map(SalesBill.fromMap).toList();
+  }
+
+  /// Soft-deletes a Sales Bill (same pattern as ServiceRepository.delete /
+  /// SecondHandRepository.delete) - keeps the row for accounting history
+  /// but clears its ledger entries (revenue + cost of goods sold) so
+  /// dashboard/P&L totals correctly drop the deleted bill's amount.
+  Future<void> delete(String saleId) async {
+    final db = await _dbHelper.database;
+    await _ledger.clearForReference('sales_bill', saleId);
+    await db.update('sales_bills', {'active': 0}, where: 'id = ?', whereArgs: [saleId]);
   }
 
   Future<List<SalesBillItem>> itemsFor(String saleId) async {
