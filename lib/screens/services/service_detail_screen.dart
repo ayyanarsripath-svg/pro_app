@@ -541,6 +541,8 @@ _amountBlock('FINAL AMOUNT', s.billTotal),
   }
 
   Future<void> _addPayment() async {
+    final s = _service!;
+    final balanceDue = s.displayBalance > 0 ? s.displayBalance : 0.0;
     final amountCtrl = TextEditingController();
     String method = 'Cash';
     final ok = await showDialog<bool>(
@@ -550,7 +552,17 @@ _amountBlock('FINAL AMOUNT', s.billTotal),
           title: const Text('Add Payment'),
           content: Column(
             mainAxisSize: MainAxisSize.min,
+            crossAxisAlignment: CrossAxisAlignment.start,
             children: [
+              // Same "already paid / balance due" context as the Delivery
+              // dialog (see _markDelivery) - this is what makes it clear
+              // that an amount recorded here is a NEW payment on top of
+              // what's already paid, not a replacement of it.
+              Text(
+                'Already paid: ${formatCurrency(s.paid)}   •   Balance due: ${formatCurrency(balanceDue)}',
+                style: const TextStyle(fontSize: 12.5, fontWeight: FontWeight.w600),
+              ),
+              const SizedBox(height: 10),
               TextField(controller: amountCtrl, keyboardType: TextInputType.number, decoration: const InputDecoration(labelText: 'Amount (₹)')),
               const SizedBox(height: 10),
               DropdownButtonFormField<String>(
@@ -603,7 +615,28 @@ _amountBlock('FINAL AMOUNT', s.billTotal),
       ),
     );
     if (ok == true) {
+      final wasReady = _service!.status == ServiceStatus.ready;
       await _serviceRepo.changeStatus(widget.serviceId, status);
+
+      // "Mobile ready for delivery" WhatsApp notice (spec: send this the
+      // moment status is set to Ready, using the shop's exact template) -
+      // distinct from deliveryMessage, which fires later at actual pickup.
+      // Only fires on the transition INTO Ready, not every time the
+      // status dialog is re-opened while already Ready, and never blocks
+      // the status change itself if WhatsApp isn't available.
+      if (status == ServiceStatus.ready && !wasReady && _customer?.phone != null && _customer!.phone!.trim().isNotEmpty) {
+        try {
+          final s = _service!;
+          final msg = _waService.readyForDeliveryMessage(
+            customerName: _customer!.name,
+            mobileName: s.model?.trim().isNotEmpty == true ? s.model : s.mobileName,
+            amount: s.billTotal,
+            billNo: s.billNo,
+          );
+          await _waService.sendWhatsApp(phone: _customer!.phone!, message: msg);
+        } catch (_) {}
+      }
+
       _load();
     }
   }
@@ -617,9 +650,12 @@ _amountBlock('FINAL AMOUNT', s.billTotal),
   Future<void> _markDelivery() async {
     final s = _service!;
     final personCtrl = TextEditingController(text: s.deliveryPerson ?? '');
-    final suggestedAmount = s.displayBalance > 0 ? s.displayBalance : 0.0;
+    // displayBalance already reflects every payment recorded so far
+    // (Advance, Add Payment, any earlier Delivery Collection) - it's what
+    // is ACTUALLY still owed right now, not just this dialog's own field.
+    final balanceDue = s.displayBalance > 0 ? s.displayBalance : 0.0;
     final amountCtrl = TextEditingController(
-      text: suggestedAmount > 0 ? suggestedAmount.toStringAsFixed(suggestedAmount == suggestedAmount.roundToDouble() ? 0 : 2) : '',
+      text: balanceDue > 0 ? balanceDue.toStringAsFixed(balanceDue == balanceDue.roundToDouble() ? 0 : 2) : '',
     );
 
     final ok = await showDialog<bool>(
@@ -628,13 +664,32 @@ _amountBlock('FINAL AMOUNT', s.billTotal),
         title: const Text('Delivery'),
         content: Column(
           mainAxisSize: MainAxisSize.min,
+          crossAxisAlignment: CrossAxisAlignment.start,
           children: [
+            // Makes the current money state explicit before the shop types
+            // anything here - this is what was missing before, and why
+            // re-entering an amount already covered by Add Payment quietly
+            // overpaid the bill (showed as balance going negative /
+            // "extra"). Already paid comes from every payment recorded so
+            // far (Advance + any Add Payment entries); Balance due is what
+            // is genuinely still outstanding.
+            Text(
+              'Already paid: ${formatCurrency(s.paid)}   •   Balance due: ${formatCurrency(balanceDue)}',
+              style: const TextStyle(fontSize: 12.5, fontWeight: FontWeight.w600),
+            ),
+            const SizedBox(height: 10),
             TextField(controller: personCtrl, decoration: const InputDecoration(labelText: 'Delivery Person')),
             const SizedBox(height: 10),
             TextField(
               controller: amountCtrl,
               keyboardType: TextInputType.number,
-              decoration: const InputDecoration(labelText: 'Amount Collected (₹)'),
+              decoration: const InputDecoration(
+                labelText: 'Amount Collected Now (₹)',
+                helperText: 'Only what you are collecting AT this delivery. Leave as 0 if the balance was '
+                    'already fully paid earlier via Add Payment - this field always adds a NEW payment, '
+                    'on top of anything already paid.',
+                helperMaxLines: 4,
+              ),
             ),
           ],
         ),
@@ -646,6 +701,32 @@ _amountBlock('FINAL AMOUNT', s.billTotal),
     );
     if (ok == true) {
       final amountCollected = double.tryParse(amountCtrl.text.trim()) ?? 0;
+
+      // Catches exactly the "already paid via Add Payment, then also
+      // entered here" mistake before it silently overpays the bill - e.g.
+      // balance was already ₹0 (fully paid) but the field still had a
+      // suggested/typed amount left in it.
+      if (amountCollected > balanceDue + 0.5) {
+        final overBy = amountCollected - balanceDue;
+        if (!mounted) return;
+        final confirmOverpay = await showDialog<bool>(
+          context: context,
+          builder: (dialogContext) => AlertDialog(
+            title: const Text('More Than the Balance Due?'),
+            content: Text(
+              'Balance due is only ${formatCurrency(balanceDue)}, but ${formatCurrency(amountCollected)} was entered here - '
+              '${formatCurrency(overBy)} more than what is actually pending.\n\n'
+              'If this amount was already recorded earlier via Add Payment, tap Cancel and change this field to 0. '
+              'Only continue if the customer is genuinely paying ${formatCurrency(amountCollected)} extra right now.',
+            ),
+            actions: [
+              TextButton(onPressed: () => Navigator.pop(dialogContext, false), child: const Text('Cancel')),
+              ElevatedButton(onPressed: () => Navigator.pop(dialogContext, true), child: const Text('Yes, Record It')),
+            ],
+          ),
+        );
+        if (confirmOverpay != true) return;
+      }
 
       final updated = ServiceJob(
         id: s.id, billNo: s.billNo, customerId: s.customerId, mobileName: s.mobileName, model: s.model, imei: s.imei,
