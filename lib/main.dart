@@ -46,6 +46,20 @@ Future<void> main() async {
   final reminderHour = int.tryParse(timeParts[0]) ?? 12;
   final reminderMinute = timeParts.length > 1 ? (int.tryParse(timeParts[1]) ?? 30) : 30;
   scheduleDailyOrderReminder(hour: reminderHour, minute: reminderMinute);
+  // Proactively ask for the Android 13+ "Allow notifications?" permission
+  // right here, in the foreground, on every app open - instead of only ever
+  // asking deep inside checkAndNotifyIfDue() (which only runs this the day
+  // pending items actually exist). That mattered because the WorkManager
+  // background trigger below fires from a headless isolate with no Activity
+  // to show a permission dialog from - if the very first time this
+  // permission was ever requested happened to be from that background
+  // isolate, Android has nothing to show the user and the request silently
+  // does nothing, so the reminder notification could stay permanently
+  // blocked without the shop ever seeing a prompt. Requesting it here
+  // guarantees it's asked (and, once answered, remembered by the OS) during
+  // an interactive session, well before any background-timed reminder can
+  // ever fire.
+  await OrderReminderService.ensureInitialized();
   OrderReminderService().checkAndNotifyIfDue();
 
   // Daily Orders home-screen widget (Phase 2) - refreshes on every app
