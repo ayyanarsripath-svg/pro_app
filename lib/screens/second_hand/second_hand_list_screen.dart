@@ -77,7 +77,7 @@ class _SecondHandListScreenState extends State<SecondHandListScreen> {
                     crossAxisSpacing: 10,
                     childAspectRatio: 1.6,
                     children: [
-                      StatCard(label: 'Total Phones', value: _stock['totalPhones'] ?? 0, isCurrency: false, icon: Icons.phone_iphone_rounded),
+                      StatCard(label: _isLaptop ? 'Total Laptops' : 'Total Phones', value: _stock['totalPhones'] ?? 0, isCurrency: false, icon: _isLaptop ? Icons.laptop_rounded : Icons.phone_iphone_rounded),
                       StatCard(label: 'Unsold Stock', value: _stock['unsoldCount'] ?? 0, isCurrency: false, icon: Icons.inventory_rounded, color: AppColors.warning),
                       if (showCost) StatCard(label: 'Current Stock Value', value: _stock['currentStockValue'] ?? 0, icon: Icons.savings_rounded, color: AppColors.info),
                       if (showProfit) StatCard(label: 'Realized Profit', value: _stock['realizedProfit'] ?? 0, icon: Icons.trending_up_rounded, color: AppColors.success),
