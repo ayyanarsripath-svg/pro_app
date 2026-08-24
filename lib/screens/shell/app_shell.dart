@@ -149,14 +149,30 @@ class _AppShellState extends State<AppShell> {
                     // a different shape than the original square logo is
                     // never squeezed down to a sliver - it always displays
                     // as large as the header allows without being cropped.
+                    // Wrapped in a soft rounded/shadowed card for a richer
+                    // look against the gradient header (spec: "rich look
+                    // mathu" for the logo edges/design).
                     SizedBox(
-                      height: 68,
+                      height: 76,
                       width: double.infinity,
                       child: Align(
                         alignment: Alignment.centerLeft,
-                        child: logo.hasCustomLogo
-                            ? Image.file(logo.logoFile!, height: 68, fit: BoxFit.contain)
-                            : Image.asset('assets/images/logo_color.png', height: 68, fit: BoxFit.contain),
+                        child: Container(
+                          padding: const EdgeInsets.all(6),
+                          decoration: BoxDecoration(
+                            color: Colors.white.withOpacity(0.12),
+                            borderRadius: BorderRadius.circular(14),
+                            boxShadow: [
+                              BoxShadow(color: Colors.black.withOpacity(0.15), blurRadius: 8, offset: const Offset(0, 3)),
+                            ],
+                          ),
+                          child: ClipRRect(
+                            borderRadius: BorderRadius.circular(10),
+                            child: logo.hasCustomLogo
+                                ? Image.file(logo.logoFile!, height: 64, fit: BoxFit.contain)
+                                : Image.asset('assets/images/logo_color.png', height: 64, fit: BoxFit.contain),
+                          ),
+                        ),
                       ),
                     ),
                     const SizedBox(height: 10),
