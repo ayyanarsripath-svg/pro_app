@@ -32,6 +32,11 @@ class _SalesBillFormScreenState extends State<SalesBillFormScreen> {
   final _discountCtrl = TextEditingController(text: '0');
   final _paidCtrl = TextEditingController(text: '0');
   String _paymentMethod = 'Cash';
+  // Warranty toggle + period (spec: "warranty option ... warranty period in
+  // days ... on pannalana Nil nu mention pannu") - prints the period on
+  // the bill when on, "Nil" when off (see PdfService.buildSalesBill).
+  bool _warranty = false;
+  final _warrantyPeriodCtrl = TextEditingController();
 
   List<Accessory> _accessories = [];
   final List<_CartLine> _cart = [];
@@ -96,6 +101,23 @@ class _SalesBillFormScreenState extends State<SalesBillFormScreen> {
             ),
             const SizedBox(height: 6),
             _summaryRow('Balance', _balance, bold: true),
+          ]),
+          SectionCard(title: 'Warranty', icon: Icons.verified_user_rounded, children: [
+            SwitchListTile(
+              contentPadding: EdgeInsets.zero,
+              title: const Text('Warranty'),
+              subtitle: Text(_warranty ? 'Warranty period will print on the bill' : 'Bill will print "Nil" for warranty'),
+              value: _warranty,
+              onChanged: (v) => setState(() => _warranty = v),
+            ),
+            if (_warranty) ...[
+              const SizedBox(height: 4),
+              TextField(
+                controller: _warrantyPeriodCtrl,
+                keyboardType: TextInputType.number,
+                decoration: const InputDecoration(labelText: 'Warranty Period (in days)'),
+              ),
+            ],
           ]),
           const SizedBox(height: 10),
           ElevatedButton(
@@ -184,6 +206,8 @@ class _SalesBillFormScreenState extends State<SalesBillFormScreen> {
       discount: _discount,
       paid: _paid,
       paymentMethod: _paymentMethod,
+      warranty: _warranty,
+      warrantyPeriodDays: _warranty ? int.tryParse(_warrantyPeriodCtrl.text.trim()) : null,
     );
 
     if (mounted) Navigator.pop(context, true);

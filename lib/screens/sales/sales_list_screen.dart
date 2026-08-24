@@ -75,8 +75,30 @@ class _SalesListScreenState extends State<SalesListScreen> {
                     if (!claimed)
                     IconButton(icon: const Icon(Icons.verified_user_rounded), tooltip: 'Warranty Claim', onPressed: () => _fileWarrantyClaim(b)),
                     IconButton(icon: const Icon(Icons.print_rounded), onPressed: () => _print(b)),
+                    // Delete moved behind a "more" overflow menu instead of
+                    // sitting as its own icon right next to Print (spec:
+                    // print/delete pakkathula erukku, accident ah delete
+                    // touch pannita) - a stray tap now just opens a small
+                    // menu instead of immediately landing on Delete, and
+                    // the existing confirm dialog is still a second guard
+                    // after that.
                     if (auth.canDelete)
-                    IconButton(icon: const Icon(Icons.delete_rounded, color: AppColors.danger), tooltip: 'Delete', onPressed: () => _deleteBill(b)),
+                    PopupMenuButton<String>(
+                      tooltip: 'More',
+                      onSelected: (v) {
+                        if (v == 'delete') _deleteBill(b);
+                      },
+                      itemBuilder: (context) => const [
+                        PopupMenuItem(
+                          value: 'delete',
+                          child: ListTile(
+                            contentPadding: EdgeInsets.zero,
+                            leading: Icon(Icons.delete_rounded, color: AppColors.danger),
+                            title: Text('Delete'),
+                          ),
+                        ),
+                      ],
+                    ),
                     ],
                   ),
                 ),
