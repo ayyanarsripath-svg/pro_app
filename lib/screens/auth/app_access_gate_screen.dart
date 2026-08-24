@@ -35,16 +35,18 @@ class _AppAccessGateScreenState extends State<AppAccessGateScreen> {
               child: Container(
                 padding: const EdgeInsets.all(24),
                 constraints: const BoxConstraints(maxWidth: 380),
-                decoration: BoxDecoration(color: Colors.white, borderRadius: BorderRadius.circular(20)),
+                // Theme-aware card so this gate screen follows dark mode
+                // instead of staying a fixed white panel with invisible text.
+                decoration: BoxDecoration(color: AppColors.cardOf(context), borderRadius: BorderRadius.circular(20)),
                 child: Column(
                   mainAxisSize: MainAxisSize.min,
                   children: [
                     Image.asset('assets/images/logo_color.png', height: 84),
                     const SizedBox(height: 10),
-                    const Text(
+                    Text(
                       'Enter access password to continue',
                       textAlign: TextAlign.center,
-                      style: TextStyle(fontWeight: FontWeight.w700, fontSize: 15),
+                      style: TextStyle(fontWeight: FontWeight.w700, fontSize: 15, color: AppColors.textPrimaryOf(context)),
                       ),
                     const SizedBox(height: 16),
                     TextField(

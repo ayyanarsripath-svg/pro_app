@@ -28,13 +28,19 @@ class _PinLoginScreenState extends State<PinLoginScreen> {
               child: Container(
                 padding: const EdgeInsets.all(24),
                 constraints: const BoxConstraints(maxWidth: 380),
-                decoration: BoxDecoration(color: Colors.white, borderRadius: BorderRadius.circular(20)),
+                // Theme-aware card so the PIN box actually follows dark
+                // mode instead of staying a fixed white panel (which left
+                // the theme's light text invisible against it).
+                decoration: BoxDecoration(color: AppColors.cardOf(context), borderRadius: BorderRadius.circular(20)),
                 child: Column(
                   mainAxisSize: MainAxisSize.min,
                   children: [
                     Image.asset('assets/images/logo_color.png', height: 84),
                     const SizedBox(height: 10),
-                    const Text('Enter PIN to continue', style: TextStyle(fontWeight: FontWeight.w700, fontSize: 15)),
+                    Text(
+                      'Enter PIN to continue',
+                      style: TextStyle(fontWeight: FontWeight.w700, fontSize: 15, color: AppColors.textPrimaryOf(context)),
+                    ),
                     const SizedBox(height: 16),
                     TextField(
                       controller: _pinCtrl,

@@ -33,7 +33,9 @@ class _FirstRunSetupScreenState extends State<FirstRunSetupScreen> {
               child: Container(
                 padding: const EdgeInsets.all(24),
                 constraints: const BoxConstraints(maxWidth: 420),
-                decoration: BoxDecoration(color: Colors.white, borderRadius: BorderRadius.circular(20)),
+                // Theme-aware card so this setup screen follows dark mode
+                // instead of staying a fixed white panel with invisible text.
+                decoration: BoxDecoration(color: AppColors.cardOf(context), borderRadius: BorderRadius.circular(20)),
                 child: Form(
                   key: _formKey,
                   child: Column(
@@ -42,16 +44,16 @@ class _FirstRunSetupScreenState extends State<FirstRunSetupScreen> {
                     children: [
                       Image.asset('assets/images/logo_color.png', height: 90),
                       const SizedBox(height: 8),
-                      const Text('PROFESSIONAL MOBILES',
+                      Text('PROFESSIONAL MOBILES',
                           textAlign: TextAlign.center,
-                          style: TextStyle(fontWeight: FontWeight.w800, fontSize: 18, letterSpacing: 0.5)),
-                      const Text('& Laptop Service',
-                          textAlign: TextAlign.center, style: TextStyle(color: AppColors.textSecondary)),
+                          style: TextStyle(fontWeight: FontWeight.w800, fontSize: 18, letterSpacing: 0.5, color: AppColors.textPrimaryOf(context))),
+                      Text('& Laptop Service',
+                          textAlign: TextAlign.center, style: TextStyle(color: AppColors.textSecondaryOf(context))),
                       const SizedBox(height: 22),
-                      const Text('Set up your Admin account', style: TextStyle(fontWeight: FontWeight.w700, fontSize: 15)),
+                      Text('Set up your Admin account', style: TextStyle(fontWeight: FontWeight.w700, fontSize: 15, color: AppColors.textPrimaryOf(context))),
                       const SizedBox(height: 4),
-                      const Text('This PIN protects profit, cost & business reports.',
-                          style: TextStyle(color: AppColors.textSecondary, fontSize: 12.5)),
+                      Text('This PIN protects profit, cost & business reports.',
+                          style: TextStyle(color: AppColors.textSecondaryOf(context), fontSize: 12.5)),
                       const SizedBox(height: 16),
                       TextFormField(
                         controller: _nameCtrl,
