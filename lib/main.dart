@@ -59,8 +59,22 @@ Future<void> main() async {
   // guarantees it's asked (and, once answered, remembered by the OS) during
   // an interactive session, well before any background-timed reminder can
   // ever fire.
-  await OrderReminderService.ensureInitialized();
-  OrderReminderService().checkAndNotifyIfDue();
+  //
+  // HOTFIX: wrapped in try/catch (OrderReminderService.ensureInitialized()
+  // now also guards itself internally, belt-and-braces) - previously an
+  // unguarded call here meant any failure inside it (permission-request
+  // exception, plugin init issue on a particular device) threw straight out
+  // of main() BEFORE runApp() below ever ran, so Flutter never got to mount
+  // a single widget and the app opened to a permanently blank white screen
+  // with nothing shown at all, not even an error (spec: "app open panna
+  // thum kamikkama full white color la erukku"). Nothing to do with
+  // reminders should ever be able to stop the app from opening.
+  try {
+    await OrderReminderService.ensureInitialized();
+    OrderReminderService().checkAndNotifyIfDue();
+  } catch (_) {
+    // See HOTFIX note above - reminder setup must never block app startup.
+  }
 
   // Daily Orders home-screen widget (Phase 2) - refreshes on every app
   // startup so the widget reflects carry-forward changes even if the shop
