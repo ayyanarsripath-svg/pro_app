@@ -11,7 +11,18 @@ import 'service_detail_screen.dart';
 import 'service_form_screen.dart';
 
 class ServiceListScreen extends StatefulWidget {
-  const ServiceListScreen({super.key});
+  // When true, shows only jobs that are still pending (not yet Delivered
+  // or Cancelled) - used by the Dashboard's "Pending Services" tap so it
+  // actually opens the matching bills instead of just going to the
+  // Service Bill tab (spec: "pending service click panna entha bill
+  // pending la erukkunu kamikkanum"). This mirrors the Dashboard's own
+  // definition of "pending" (see DashboardScreen._load), which isn't a
+  // single ServiceStatus value, so it can't just reuse the status tabs
+  // below - it's applied as its own client-side filter and this screen is
+  // always pushed as its own route (with its own AppBar) when used this
+  // way, rather than being the Service Bill destination inside the shell.
+  final bool pendingOnly;
+  const ServiceListScreen({super.key, this.pendingOnly = false});
 
   @override
   State<ServiceListScreen> createState() => _ServiceListScreenState();
@@ -29,6 +40,8 @@ class _ServiceListScreenState extends State<ServiceListScreen> {
   final _searchCtrl = TextEditingController();
 
   final _tabs = ['All', ...ServiceStatus.all];
+
+  bool get _pendingOnly => widget.pendingOnly;
 
   @override
   void initState() {
@@ -48,9 +61,13 @@ class _ServiceListScreenState extends State<ServiceListScreen> {
   }
 
   List<ServiceJob> get _filteredServices {
+    var list = _services;
+    if (_pendingOnly) {
+      list = list.where((s) => s.status != ServiceStatus.delivered && s.status != ServiceStatus.cancelled).toList();
+    }
     final q = _query.trim().toLowerCase();
-    if (q.isEmpty) return _services;
-    return _services.where((s) {
+    if (q.isEmpty) return list;
+    return list.where((s) {
       final customer = _customersById[s.customerId];
       final name = customer?.name.toLowerCase() ?? '';
       final phone = customer?.phone?.toLowerCase() ?? '';
@@ -65,6 +82,7 @@ class _ServiceListScreenState extends State<ServiceListScreen> {
   Widget build(BuildContext context) {
     final filtered = _filteredServices;
     return Scaffold(
+      appBar: _pendingOnly ? AppBar(title: const Text('Pending Services')) : null,
       body: Column(
         children: [
           Padding(
@@ -104,6 +122,10 @@ class _ServiceListScreenState extends State<ServiceListScreen> {
                 ],
               ),
             ),
+          // The status tabs pick a single ServiceStatus, but "pending"
+          // spans several statuses (see _filteredServices) - hidden here
+          // so the fixed pending view isn't confused with a normal tab.
+          if (!_pendingOnly)
           SizedBox(
             height: 48,
             child: ListView.builder(
@@ -131,7 +153,7 @@ class _ServiceListScreenState extends State<ServiceListScreen> {
             child: _loading
             ? const Center(child: CircularProgressIndicator())
             : filtered.isEmpty
-            ? const EmptyState(icon: Icons.build_rounded, message: 'No service jobs')
+            ? EmptyState(icon: Icons.build_rounded, message: _pendingOnly ? 'No pending services - all caught up!' : 'No service jobs')
             : RefreshIndicator(
               onRefresh: _load,
               child: ListView.builder(

@@ -9,6 +9,7 @@ import 'package:provider/provider.dart';
 
 import '../../core/repositories/customer_repository.dart';
 import '../../core/repositories/service_repository.dart';
+import '../../core/repositories/settings_repository.dart';
 import 'package:pdf/pdf.dart';
 import '../../core/repositories/spare_part_repository.dart';
 import '../../core/repositories/warranty_repository.dart';
@@ -40,6 +41,7 @@ class _ServiceDetailScreenState extends State<ServiceDetailScreen> {
   final _serviceRepo = ServiceRepository();
   final _customerRepo = CustomerRepository();
   final _sparePartRepo = SparePartRepository();
+  final _settingsRepo = SettingsRepository();
   final _pdfService = PdfService();
   final _waService = WhatsAppSmsService();
   final _warrantyRepo = WarrantyRepository();
@@ -130,9 +132,9 @@ class _ServiceDetailScreenState extends State<ServiceDetailScreen> {
               title: 'Complaint',
               icon: Icons.report_problem_rounded,
               trailing: TextButton.icon(
-                onPressed: _editComplaint,
-                icon: const Icon(Icons.edit_rounded, size: 16),
-                label: const Text('Edit'),
+                onPressed: _addComplaint,
+                icon: const Icon(Icons.add_circle_outline_rounded, size: 16),
+                label: const Text('Add Complaint'),
               ),
               children: [Text(s.complaint ?? '-')],
             ),
@@ -437,68 +439,116 @@ _amountBlock('FINAL AMOUNT', s.billTotal),
     }
   }
 
-  /// Lets the shop correct the Fault / Complaint text at any time - even
-  /// after the job has been booked and the bill already printed, which
-  /// previously had no edit path at all once intake was done.
-  Future<void> _editComplaint() async {
+  /// Lets the shop add a NEW fault/complaint found after intake (e.g. the
+  /// technician discovers a second issue while checking) - either picked
+  /// from the same quick-preset list used at intake or typed manually - and
+  /// its charge is added straight into the bill amount, instead of the old
+  /// "Edit" flow which just silently overwrote the complaint text with no
+  /// way to bill for whatever was added.
+  Future<void> _addComplaint() async {
     final s = _service!;
-    final complaintCtrl = TextEditingController(text: s.complaint ?? '');
+    final presets = await _settingsRepo.getComplaintPresets();
+    String? selectedPreset;
+    final manualCtrl = TextEditingController();
+    final amountCtrl = TextEditingController();
 
     final ok = await showDialog<bool>(
       context: context,
-      builder: (context) => AlertDialog(
-        title: const Text('Edit Fault / Complaint'),
-        content: TextField(
-          controller: complaintCtrl,
-          maxLines: 4,
-          decoration: const InputDecoration(labelText: 'Fault / Complaint'),
+      builder: (context) => StatefulBuilder(
+        builder: (context, setLocalState) => AlertDialog(
+          title: const Text('Add Complaint'),
+          content: SingleChildScrollView(
+            child: Column(
+              mainAxisSize: MainAxisSize.min,
+              crossAxisAlignment: CrossAxisAlignment.start,
+              children: [
+                const Text('Pick one, or write it manually below:', style: TextStyle(fontSize: 12.5)),
+                const SizedBox(height: 8),
+                Wrap(
+                  spacing: 6,
+                  runSpacing: 6,
+                  children: presets
+                      .map((p) => FilterChip(
+                            label: Text(p),
+                            selected: selectedPreset == p,
+                            onSelected: (v) => setLocalState(() => selectedPreset = v ? p : null),
+                          ))
+                      .toList(),
+                ),
+                const SizedBox(height: 10),
+                TextField(
+                  controller: manualCtrl,
+                  decoration: const InputDecoration(labelText: 'Or write manually'),
+                ),
+                const SizedBox(height: 10),
+                TextField(
+                  controller: amountCtrl,
+                  keyboardType: TextInputType.number,
+                  decoration: const InputDecoration(labelText: 'Amount (₹) - added to the bill'),
+                ),
+              ],
+            ),
+          ),
+          actions: [
+            TextButton(onPressed: () => Navigator.pop(context, false), child: const Text('Cancel')),
+            ElevatedButton(onPressed: () => Navigator.pop(context, true), child: const Text('Add')),
+          ],
         ),
-        actions: [
-          TextButton(onPressed: () => Navigator.pop(context, false), child: const Text('Cancel')),
-          ElevatedButton(onPressed: () => Navigator.pop(context, true), child: const Text('Save')),
-        ],
       ),
     );
 
-    if (ok == true) {
-      final updated = ServiceJob(
-        id: s.id,
-        billNo: s.billNo,
-        customerId: s.customerId,
-        mobileName: s.mobileName,
-        model: s.model,
-        imei: s.imei,
-        complaint: complaintCtrl.text.trim(),
-        faultAmounts: s.faultAmounts,
-        deviceCondition: s.deviceCondition,
-        existingDamage: s.existingDamage,
-        accCharger: s.accCharger,
-        accCable: s.accCable,
-        accSim: s.accSim,
-        accMemoryCard: s.accMemoryCard,
-        accOther: s.accOther,
-        technician: s.technician,
-        status: s.status,
-        labourCost: s.labourCost,
-        warranty: s.warranty,
-        warrantyPeriod: s.warrantyPeriod,
-        estimatedAmount: s.estimatedAmount,
-        finalAmount: s.finalAmount,
-        advance: s.advance,
-        paid: s.paid,
-        balance: s.balance,
-        expectedDate: s.expectedDate,
-        actualDate: s.actualDate,
-        deliveryPerson: s.deliveryPerson,
-        deliveryStatus: s.deliveryStatus,
-        additionalExpense: s.additionalExpense,
-        active: s.active,
-        createdAt: s.createdAt,
-        updatedAt: DateTime.now(),
-      );
-      await _serviceRepo.update(updated);
-      _load();
-    }
+    final description = manualCtrl.text.trim().isNotEmpty ? manualCtrl.text.trim() : (selectedPreset ?? '');
+    if (ok != true || description.isEmpty) return;
+
+    final amount = double.tryParse(amountCtrl.text.trim()) ?? 0;
+    final newComplaint = (s.complaint == null || s.complaint!.trim().isEmpty) ? description : '${s.complaint}, $description';
+    final newFaultAmounts = (s.faultAmounts == null || s.faultAmounts!.trim().isEmpty)
+        ? '$description:$amount'
+        : '${s.faultAmounts}|$description:$amount';
+    // The bill total tracks finalAmount once it's been set (post-checking),
+    // otherwise it's still riding on estimatedAmount - add the new charge to
+    // whichever one is currently live so the bill amount always reflects
+    // this addition immediately (see ServiceJob.billTotal).
+    final addToFinal = s.finalAmount > 0;
+
+    final updated = ServiceJob(
+      id: s.id,
+      billNo: s.billNo,
+      customerId: s.customerId,
+      mobileName: s.mobileName,
+      model: s.model,
+      imei: s.imei,
+      complaint: newComplaint,
+      faultAmounts: newFaultAmounts,
+      deviceCondition: s.deviceCondition,
+      existingDamage: s.existingDamage,
+      accCharger: s.accCharger,
+      accCable: s.accCable,
+      accSim: s.accSim,
+      accMemoryCard: s.accMemoryCard,
+      accOther: s.accOther,
+      technician: s.technician,
+      status: s.status,
+      labourCost: s.labourCost,
+      warranty: s.warranty,
+      warrantyPeriod: s.warrantyPeriod,
+      estimatedAmount: addToFinal ? s.estimatedAmount : s.estimatedAmount + amount,
+      finalAmount: addToFinal ? s.finalAmount + amount : s.finalAmount,
+      discount: s.discount,
+      advance: s.advance,
+      paid: s.paid,
+      balance: s.balance,
+      expectedDate: s.expectedDate,
+      actualDate: s.actualDate,
+      deliveryPerson: s.deliveryPerson,
+      deliveryStatus: s.deliveryStatus,
+      additionalExpense: s.additionalExpense,
+      active: s.active,
+      createdAt: s.createdAt,
+      updatedAt: DateTime.now(),
+    );
+    await _serviceRepo.update(updated);
+    _load();
   }
 
   Future<void> _addSparePart() async {
@@ -653,7 +703,7 @@ _amountBlock('FINAL AMOUNT', s.billTotal),
       if (status == ServiceStatus.ready && !wasReady && _customer?.phone != null && _customer!.phone!.trim().isNotEmpty) {
         try {
           final s = _service!;
-          final msg = _waService.readyForDeliveryMessage(
+          final msg = await _waService.readyForDeliveryMessage(
             customerName: _customer!.name,
             mobileName: s.model?.trim().isNotEmpty == true ? s.model : s.mobileName,
             amount: s.billTotal,

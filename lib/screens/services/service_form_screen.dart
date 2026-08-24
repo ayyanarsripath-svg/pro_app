@@ -36,6 +36,7 @@ class _ServiceFormScreenState extends State<ServiceFormScreen> {
     final _technicianCtrl = TextEditingController();
     final _estimatedCtrl = TextEditingController();
     final _advanceCtrl = TextEditingController(text: '0');
+    final _discountCtrl = TextEditingController();
     final _warrantyPeriodCtrl = TextEditingController();
     final Map<String, TextEditingController> _faultAmountCtrls = {};
 
@@ -51,6 +52,11 @@ class _ServiceFormScreenState extends State<ServiceFormScreen> {
     List<String> _presets = [];
     final Set<String> _selectedPresets = {};
 
+    List<String> _conditionPresets = [];
+    final Set<String> _selectedConditions = {};
+    List<String> _damagePresets = [];
+    final Set<String> _selectedDamages = {};
+
     @override
     void initState() {
         super.initState();
@@ -59,7 +65,92 @@ class _ServiceFormScreenState extends State<ServiceFormScreen> {
 
     Future<void> _loadPresets() async {
         final presets = await _settingsRepo.getComplaintPresets();
-        if (mounted) setState(() => _presets = presets);
+        final conditions = await _settingsRepo.getConditionPresets();
+        final damages = await _settingsRepo.getDamagePresets();
+        if (mounted) {
+            setState(() {
+                _presets = presets;
+                _conditionPresets = conditions;
+                _damagePresets = damages;
+            });
+        }
+    }
+
+    /// Quick-pic chip toggle for Device Condition - single state at a time
+    /// (a device is "Dead" OR "Hang on Logo" OR ..., not several at once),
+    /// so picking a new one replaces whatever was selected before, and keeps
+    /// the free-text field in sync so the shop can still type instead.
+    void _toggleCondition(String preset) {
+        setState(() {
+            if (_selectedConditions.contains(preset)) {
+                _selectedConditions.clear();
+            } else {
+                _selectedConditions
+                    ..clear()
+                    ..add(preset);
+            }
+            _conditionCtrl.text = _selectedConditions.join(' + ');
+        });
+    }
+
+    /// Quick-pic chip toggle for Existing Damage - multi-select (a device
+    /// can have more than one kind of physical damage at once), joined into
+    /// the free-text field the same way complaint presets are.
+    void _toggleDamage(String preset) {
+        setState(() {
+            if (_selectedDamages.contains(preset)) {
+                _selectedDamages.remove(preset);
+            } else {
+                _selectedDamages.add(preset);
+            }
+            _damageCtrl.text = _selectedDamages.join(' + ');
+        });
+    }
+
+    Future<void> _addCustomConditionPreset() async {
+        final ctrl = TextEditingController();
+        final ok = await showDialog<bool>(
+            context: context,
+            builder: (context) => AlertDialog(
+                title: const Text('Add Condition Preset'),
+                content: TextField(controller: ctrl, decoration: const InputDecoration(labelText: 'Preset text (e.g. Dead)')),
+                actions: [
+                    TextButton(onPressed: () => Navigator.pop(context, false), child: const Text('Cancel')),
+                    ElevatedButton(onPressed: () => Navigator.pop(context, true), child: const Text('Add')),
+                    ],
+                ),
+            );
+        if (ok == true && ctrl.text.trim().isNotEmpty) {
+            final text = ctrl.text.trim();
+            if (!_conditionPresets.contains(text)) {
+                setState(() => _conditionPresets = [..._conditionPresets, text]);
+                await _settingsRepo.saveConditionPresets(_conditionPresets);
+            }
+            _toggleCondition(text);
+        }
+    }
+
+    Future<void> _addCustomDamagePreset() async {
+        final ctrl = TextEditingController();
+        final ok = await showDialog<bool>(
+            context: context,
+            builder: (context) => AlertDialog(
+                title: const Text('Add Damage Preset'),
+                content: TextField(controller: ctrl, decoration: const InputDecoration(labelText: 'Preset text (e.g. Dent)')),
+                actions: [
+                    TextButton(onPressed: () => Navigator.pop(context, false), child: const Text('Cancel')),
+                    ElevatedButton(onPressed: () => Navigator.pop(context, true), child: const Text('Add')),
+                    ],
+                ),
+            );
+        if (ok == true && ctrl.text.trim().isNotEmpty) {
+            final text = ctrl.text.trim();
+            if (!_damagePresets.contains(text)) {
+                setState(() => _damagePresets = [..._damagePresets, text]);
+                await _settingsRepo.saveDamagePresets(_damagePresets);
+            }
+            _toggleDamage(text);
+        }
     }
 
     /// Toggles a quick-pick complaint chip on/off and keeps the free-text
@@ -218,7 +309,43 @@ class _ServiceFormScreenState extends State<ServiceFormScreen> {
                                 ],
                             ]),
                         SectionCard(title: 'Condition', icon: Icons.fact_check_rounded, children: [
+                            Wrap(
+                                spacing: 6,
+                                runSpacing: 6,
+                                children: [
+                                    for (final preset in _conditionPresets)
+                                    FilterChip(
+                                        label: Text(preset),
+                                        selected: _selectedConditions.contains(preset),
+                                        onSelected: (_) => _toggleCondition(preset),
+                                        ),
+                                    ActionChip(
+                                        avatar: const Icon(Icons.add, size: 16),
+                                        label: const Text('Add More'),
+                                        onPressed: _addCustomConditionPreset,
+                                        ),
+                                    ],
+                                ),
+                            const SizedBox(height: 10),
                             TextFormField(controller: _conditionCtrl, decoration: const InputDecoration(labelText: 'Device Condition')),
+                            const SizedBox(height: 14),
+                            Wrap(
+                                spacing: 6,
+                                runSpacing: 6,
+                                children: [
+                                    for (final preset in _damagePresets)
+                                    FilterChip(
+                                        label: Text(preset),
+                                        selected: _selectedDamages.contains(preset),
+                                        onSelected: (_) => _toggleDamage(preset),
+                                        ),
+                                    ActionChip(
+                                        avatar: const Icon(Icons.add, size: 16),
+                                        label: const Text('Add More'),
+                                        onPressed: _addCustomDamagePreset,
+                                        ),
+                                    ],
+                                ),
                             const SizedBox(height: 10),
                             TextFormField(controller: _damageCtrl, decoration: const InputDecoration(labelText: 'Existing Damage')),
                             ]),
@@ -246,7 +373,11 @@ class _ServiceFormScreenState extends State<ServiceFormScreen> {
                                 onChanged: (v) => setState(() => _warranty = v),
                                 ),
                             if (_warranty)
-                            TextFormField(controller: _warrantyPeriodCtrl, decoration: const InputDecoration(labelText: 'Warranty Period (e.g. 30 days)')),
+                            TextFormField(
+                                controller: _warrantyPeriodCtrl,
+                                keyboardType: TextInputType.number,
+                                decoration: const InputDecoration(labelText: 'Warranty Period (in days)'),
+                                ),
                             ]),
                         SectionCard(title: 'Payment', icon: Icons.payments_rounded, children: [
                             TextFormField(
@@ -259,6 +390,14 @@ class _ServiceFormScreenState extends State<ServiceFormScreen> {
                                 controller: _advanceCtrl,
                                 keyboardType: TextInputType.number,
                                 decoration: const InputDecoration(labelText: 'Advance Paid (₹)'),
+                                ),
+                            const SizedBox(height: 10),
+                            // Bargained-off amount - only printed on the bill when
+                            // non-zero (see PdfService._serviceAmountSummary).
+                            TextFormField(
+                                controller: _discountCtrl,
+                                keyboardType: TextInputType.number,
+                                decoration: const InputDecoration(labelText: 'Discount (₹) - leave blank if none'),
                                 ),
                             ]),
                         SectionCard(title: 'Delivery', icon: Icons.local_shipping_rounded, children: [
@@ -328,6 +467,7 @@ class _ServiceFormScreenState extends State<ServiceFormScreen> {
             warrantyPeriod: _warrantyPeriodCtrl.text.trim(),
             estimatedAmount: double.tryParse(_estimatedCtrl.text.trim()) ?? 0,
             advance: double.tryParse(_advanceCtrl.text.trim()) ?? 0,
+            discount: double.tryParse(_discountCtrl.text.trim()) ?? 0,
             expectedDate: _expectedDate,
             faultAmounts: faultAmounts,
             );
