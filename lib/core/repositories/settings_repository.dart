@@ -54,6 +54,19 @@ class SettingsRepository {
   static const dailyOrderMessageTemplate = 'daily_order_message_template';
   static const dailyOrderPdfNote = 'daily_order_pdf_note';
 
+  // Which installed WhatsApp app customer intimations (Received/Ready/
+  // Delivered/Warranty) should open in, on a phone that has more than one
+  // installed - see Settings -> WhatsApp Sending and
+  // WhatsAppSmsService.sendWhatsApp. A shop replying to customers from
+  // WhatsApp Business was finding intimations silently opening in the
+  // *other*, unwatched WhatsApp app instead, which read as "the message
+  // never went out". 'auto' (default/unset) leaves this exactly as before
+  // - Android's own chooser or previously-set default handler decides.
+  // 'business' / 'regular' explicitly target com.whatsapp.w4b / com.whatsapp,
+  // falling back to the old generic behaviour if that specific app isn't
+  // installed on the phone.
+  static const whatsappSendApp = 'whatsapp_send_app';
+
   // NOTE: the Daily Orders home-screen widget's on/off toggle is
   // deliberately NOT a key in this table. Backups (see BackupService) work
   // by copying the whole SQLite database file, so anything stored here goes
@@ -194,4 +207,9 @@ class SettingsRepository {
   Future<String?> getDailyOrderPdfNote() => get(dailyOrderPdfNote);
 
   Future<void> saveDailyOrderPdfNote(String note) => set(dailyOrderPdfNote, note);
+
+  /// 'auto' (default) | 'business' | 'regular' - see [whatsappSendApp].
+  Future<String> getWhatsAppSendApp() async => (await get(whatsappSendApp)) ?? 'auto';
+
+  Future<void> saveWhatsAppSendApp(String value) => set(whatsappSendApp, value);
 }
