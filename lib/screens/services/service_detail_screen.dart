@@ -829,7 +829,7 @@ _amountBlock('FINAL AMOUNT', s.billTotal),
         try {
           final freshTotal = s.billTotal;
           final freshPaid = s.paid + amountCollected;
-          final msg = _waService.deliveryMessage(
+          final msg = await _waService.deliveryMessage(
             customerName: _customer!.name,
             billNo: s.billNo,
             mobileName: s.mobileName,

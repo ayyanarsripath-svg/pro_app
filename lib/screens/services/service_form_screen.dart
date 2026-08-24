@@ -478,7 +478,7 @@ class _ServiceFormScreenState extends State<ServiceFormScreen> {
         // so no API key or Android SMS permission is ever needed. Failures here
         // should never block saving the job card.
         if (customer.phone != null && customer.phone!.trim().isNotEmpty) {
-            final message = _waService.serviceIntimationMessage(
+            final message = await _waService.serviceIntimationMessage(
                 customerName: customer.name,
                 customerPhone: customer.phone!,
                 mobileModel: _modelCtrl.text.trim().isNotEmpty ? _modelCtrl.text.trim() : _mobileNameCtrl.text.trim(),
