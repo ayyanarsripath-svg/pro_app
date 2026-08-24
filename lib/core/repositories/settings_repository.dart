@@ -14,54 +14,15 @@ class SettingsRepository {
   static const adminPinHash = 'admin_pin_hash';
   static const lastBackupAt = 'last_backup_at';
   static const weeklyAutoBackupEnabled = 'weekly_auto_backup_enabled';
+  // Renamed from the old hardcoded 7-day rule: this now holds the actual
+  // number of days between auto-backups (default 1 = daily, see
+  // BackupService.runAutoBackupIfDue). Kept as a separate key from
+  // weeklyAutoBackupEnabled above (which now just means "auto-backup on/off")
+  // so nothing about existing installs breaks.
+  static const autoBackupFrequencyDays = 'auto_backup_frequency_days';
   static const googleDriveLinked = 'google_drive_linked';
-  static const lastDriveBackupAt = 'last_drive_backup_at';
-  static const dailyDriveAutoBackupEnabled = 'daily_drive_auto_backup_enabled';
-  static const complaintPresets = 'complaint_presets';
-  static const conditionPresets = 'condition_presets';
-  static const damagePresets = 'damage_presets';
-  static const logoPath = 'logo_path';
-  // Shop-editable text template for the WhatsApp intimation sent when a
-  // service job's status is changed to "Ready for Delivery". Supports the
-  // same {customerName}/{mobileName}/{billNo}/{amount}/{shopName} tokens
-  // documented in WhatsAppSmsService.readyForDeliveryMessage's fallback.
-  static const readyIntimationTemplate = 'ready_intimation_template';
-  // Same idea, for the "Received" (job-card intake) and "Delivery" (final
-  // handover) WhatsApp intimations - each independently customizable (spec:
-  // "received kum ready kum aprom delivery kum thani thaniya customise
-  // need"). See WhatsAppSmsService.serviceIntimationMessage /
-  // .deliveryMessage for their token lists and fallback wording.
-  static const receivedIntimationTemplate = 'received_intimation_template';
-  static const deliveryIntimationTemplate = 'delivery_intimation_template';
-
-  // Daily Orders (daily supplier order note - see DailyOrderScreen). One
-  // supplier per day (spec: simpler than per-row supplier splitting), so
-  // the picked supplier's own name/phone are stored directly here rather
-  // than as a foreign key - the shop can change it any day from Settings
-  // without touching the Suppliers list.
-  static const dailyOrderSupplierName = 'daily_order_supplier_name';
-  static const dailyOrderSupplierPhone = 'daily_order_supplier_phone';
-  static const dailyOrderSendTime = 'daily_order_send_time'; // 'HH:mm', e.g. '12:30'
-  static const dailyOrderReminderEnabled = 'daily_order_reminder_enabled';
-  static const lastOrderReminderAt = 'last_order_reminder_at';
-  // Shop-editable WhatsApp caption sent with the Daily Order PDF (spec:
-  // "more pdf and whatsapp app message customize panra option need and
-  // preview kattanum"). Supports {supplierName}/{itemCount}/{dates} tokens
-  // - see WhatsAppSmsService.dailyOrderMessage's fallback for the default
-  // wording. dailyOrderPdfNote is an optional free-text line (e.g. special
-  // instructions to the supplier) printed at the bottom of the PDF itself -
-  // see PdfService.buildDailyOrderPdf.
-  static const dailyOrderMessageTemplate = 'daily_order_message_template';
-  static const dailyOrderPdfNote = 'daily_order_pdf_note';
-
-  // NOTE: the Daily Orders home-screen widget's on/off toggle is
-  // deliberately NOT a key in this table. Backups (see BackupService) work
-  // by copying the whole SQLite database file, so anything stored here goes
-  // into every backup and Google Drive upload. The widget toggle is stored
-  // instead via DailyOrderWidgetService, which uses the home_widget
-  // package's own SharedPreferences-backed storage - a separate file the
-  // backup never touches - matching the requirement that widget settings
-  // stay purely local to the device.
+  static const googleDriveFolderId = 'google_drive_folder_id';
+  static const googleDriveFolderName = 'google_drive_folder_name';
 
   Future<String?> get(String key) async {
     final db = await _dbHelper.database;
@@ -92,106 +53,4 @@ class SettingsRepository {
     await set(sequenceKey, next.toString());
     return next;
   }
-
-  /// Shop-editable quick-pick list of common fault/complaint phrases shown
-  /// as chips on the service intake form (spec: quick-select presets the
-  /// shop can extend themselves). Stored as a simple pipe-separated string
-  /// so no JSON dependency is needed; falls back to a sensible default set
-  /// the first time the app runs.
-  Future<List<String>> getComplaintPresets() async {
-    final raw = await get(complaintPresets);
-    if (raw == null || raw.trim().isEmpty) {
-      return const [
-        'Display',
-        'Battery',
-        'Charging Port',
-        'Speaker',
-        'Mic',
-        'Camera',
-        'Button',
-        'Water Damage',
-        'Software',
-      ];
-    }
-    return raw.split('|').map((s) => s.trim()).where((s) => s.isNotEmpty).toList();
-  }
-
-  Future<void> saveComplaintPresets(List<String> presets) async {
-    await set(complaintPresets, presets.join('|'));
-  }
-
-  /// Shop-editable quick-pick list for the intake form's Device Condition
-  /// chips (spec: quick-pic the overall state instead of typing it every
-  /// time) - same pipe-separated storage/extend pattern as complaint
-  /// presets.
-  Future<List<String>> getConditionPresets() async {
-    final raw = await get(conditionPresets);
-    if (raw == null || raw.trim().isEmpty) {
-      return const [
-        'Dead',
-        'Hang on Logo',
-        'Restart',
-        'Only Charging',
-        'On Condition',
-      ];
-    }
-    return raw.split('|').map((s) => s.trim()).where((s) => s.isNotEmpty).toList();
-  }
-
-  Future<void> saveConditionPresets(List<String> presets) async {
-    await set(conditionPresets, presets.join('|'));
-  }
-
-  /// Shop-editable quick-pick list for the intake form's Existing Damage
-  /// chips - same pipe-separated storage/extend pattern as complaint
-  /// presets.
-  Future<List<String>> getDamagePresets() async {
-    final raw = await get(damagePresets);
-    if (raw == null || raw.trim().isEmpty) {
-      return const [
-        'Dent',
-        'Display Broken',
-        'Back Door Broken',
-        'Camera Glass Broken',
-        'Missing SIM Tray',
-      ];
-    }
-    return raw.split('|').map((s) => s.trim()).where((s) => s.isNotEmpty).toList();
-  }
-
-  Future<void> saveDamagePresets(List<String> presets) async {
-    await set(damagePresets, presets.join('|'));
-  }
-
-  /// The shop-customizable WhatsApp "ready for delivery" intimation text.
-  /// Null/empty means "use the built-in default" (see
-  /// WhatsAppSmsService.readyForDeliveryMessage).
-  Future<String?> getReadyIntimationTemplate() => get(readyIntimationTemplate);
-
-  Future<void> saveReadyIntimationTemplate(String template) => set(readyIntimationTemplate, template);
-
-  /// The shop-customizable WhatsApp "job received" intimation text. Null/
-  /// empty means "use the built-in default" (see
-  /// WhatsAppSmsService.serviceIntimationMessage).
-  Future<String?> getReceivedIntimationTemplate() => get(receivedIntimationTemplate);
-
-  Future<void> saveReceivedIntimationTemplate(String template) => set(receivedIntimationTemplate, template);
-
-  /// The shop-customizable WhatsApp "delivered" intimation text. Null/empty
-  /// means "use the built-in default" (see WhatsAppSmsService.deliveryMessage).
-  Future<String?> getDeliveryIntimationTemplate() => get(deliveryIntimationTemplate);
-
-  Future<void> saveDeliveryIntimationTemplate(String template) => set(deliveryIntimationTemplate, template);
-
-  /// The shop-customizable Daily Order WhatsApp caption. Null/empty means
-  /// "use the built-in default" (see WhatsAppSmsService.dailyOrderMessage).
-  Future<String?> getDailyOrderMessageTemplate() => get(dailyOrderMessageTemplate);
-
-  Future<void> saveDailyOrderMessageTemplate(String template) => set(dailyOrderMessageTemplate, template);
-
-  /// Optional free-text note printed at the bottom of the Daily Order PDF
-  /// (e.g. special instructions to the supplier). Empty means no note line.
-  Future<String?> getDailyOrderPdfNote() => get(dailyOrderPdfNote);
-
-  Future<void> saveDailyOrderPdfNote(String note) => set(dailyOrderPdfNote, note);
 }
