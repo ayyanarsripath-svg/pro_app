@@ -44,6 +44,7 @@ class _PurchaseFormScreenState extends State<PurchaseFormScreen> {
   List<Accessory> _accessories = [];
   Supplier? _selectedSupplier;
   final _otherSupplierNameCtrl = TextEditingController();
+  final _otherSupplierPhoneCtrl = TextEditingController();
   final List<_Line> _lines = [];
   final _paidCtrl = TextEditingController(text: '0');
   bool _saving = false;
@@ -90,6 +91,12 @@ class _PurchaseFormScreenState extends State<PurchaseFormScreen> {
               TextField(
                 controller: _otherSupplierNameCtrl,
                 decoration: const InputDecoration(labelText: 'Supplier Name'),
+              ),
+              const SizedBox(height: 10),
+              TextField(
+                controller: _otherSupplierPhoneCtrl,
+                keyboardType: TextInputType.phone,
+                decoration: const InputDecoration(labelText: 'Supplier Phone (optional)'),
               ),
             ],
           ]),
@@ -203,7 +210,8 @@ class _PurchaseFormScreenState extends State<PurchaseFormScreen> {
     String? supplierId = _selectedSupplier?.id;
     if (_selectedSupplier?.id == _otherSupplier.id) {
       final name = _otherSupplierNameCtrl.text.trim();
-      supplierId = name.isEmpty ? null : (await _supplierRepo.create(name: name)).id;
+      final phone = _otherSupplierPhoneCtrl.text.trim();
+      supplierId = name.isEmpty ? null : (await _supplierRepo.create(name: name, phone: phone.isEmpty ? null : phone)).id;
     }
 
     await _purchaseRepo.create(
