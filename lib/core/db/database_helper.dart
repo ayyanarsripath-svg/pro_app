@@ -13,9 +13,7 @@ class DatabaseHelper {
   static final DatabaseHelper instance = DatabaseHelper._internal();
 
   static Database? _db;
-  // v2 adds `reorder_tasks` (the daily supplier-order / WhatsApp auto-send
-  // reminder feature) - see _upgradeToV2 below.
-  static const int dbVersion = 2;
+  static const int dbVersion = 7;
   static const String dbFileName = 'professional_mobiles.db';
 
   Future<Database> get database async {
@@ -40,29 +38,60 @@ class DatabaseHelper {
   }
 
   Future<void> _onUpgrade(Database db, int oldVersion, int newVersion) async {
-    if (oldVersion < 2) {
-      await _upgradeToV2(db);
+    if (oldVersion < 2) { await db.execute('ALTER TABLE services ADD COLUMN fault_amounts TEXT'); }
+    if (oldVersion < 3) {
+      await db.execute('ALTER TABLE services ADD COLUMN active INTEGER NOT NULL DEFAULT 1');
+      await db.execute('ALTER TABLE second_hand_phones ADD COLUMN active INTEGER NOT NULL DEFAULT 1');
     }
-  }
-
-  Future<void> _upgradeToV2(Database db) async {
-    await db.execute('''
-      CREATE TABLE IF NOT EXISTS reorder_tasks (
-        id TEXT PRIMARY KEY,
-        note TEXT NOT NULL,
-        supplier_id TEXT,
-        supplier_name TEXT NOT NULL,
-        supplier_phone TEXT NOT NULL,
-        scheduled_at TEXT NOT NULL,
-        repeat_daily INTEGER NOT NULL DEFAULT 0,
-        status TEXT NOT NULL DEFAULT 'pending',
-        pdf_path TEXT,
-        notification_id INTEGER NOT NULL,
-        created_at TEXT NOT NULL,
-        FOREIGN KEY (supplier_id) REFERENCES suppliers(id)
-      )
-    ''');
-    await db.execute('CREATE INDEX IF NOT EXISTS idx_reorder_status ON reorder_tasks(status)');
+    // Staff "section" (Billing-only / Inventory-only / Full) - restricts
+    // which menu screens a staff PIN can even see, on top of the existing
+    // per-field permissions. Defaults to 'full' so every staff account
+    // created before this update keeps seeing everything it already could.
+    if (oldVersion < 4) {
+      await db.execute("ALTER TABLE staff ADD COLUMN section TEXT NOT NULL DEFAULT 'full'");
+    }
+    // Daily Orders feature (daily supplier order note - see
+    // DailyOrderScreen / DailyOrderRepository). Phone is stored here for
+    // the shop's own in-app reference (tap to call) only - it must never
+    // be printed/sent outside the app.
+    if (oldVersion < 5) {
+      await db.execute('''
+        CREATE TABLE daily_order_items (
+          id TEXT PRIMARY KEY,
+          order_date TEXT NOT NULL,
+          s_no INTEGER NOT NULL,
+          part_name TEXT NOT NULL,
+          type_model TEXT,
+          quantity TEXT NOT NULL,
+          phone TEXT,
+          sent INTEGER NOT NULL DEFAULT 0,
+          sent_at TEXT,
+          created_at TEXT NOT NULL
+        )
+      ''');
+      await db.execute('CREATE INDEX idx_daily_order_items_date ON daily_order_items(order_date)');
+      await db.execute('CREATE INDEX idx_daily_order_items_sent ON daily_order_items(sent)');
+    }
+    // Bargain/write-off discount on Service Bills and 2nd Hand Sales
+    // (e.g. total 100, customer pays 90, remaining 10 marked as a
+    // discount instead of sitting as a pending balance) - see
+    // ServiceJob.discount / SecondHandSale.discount. Sales Bill soft
+    // delete (active flag, same pattern as services/second_hand_phones).
+    // device_type on second_hand_phones distinguishes Mobile vs Laptop so
+    // the same purchase/sale/warranty flow serves both (Laptop Sales).
+    if (oldVersion < 6) {
+      await db.execute('ALTER TABLE services ADD COLUMN discount REAL NOT NULL DEFAULT 0');
+      await db.execute('ALTER TABLE second_hand_sales ADD COLUMN discount REAL NOT NULL DEFAULT 0');
+      await db.execute("ALTER TABLE second_hand_phones ADD COLUMN device_type TEXT NOT NULL DEFAULT 'mobile'");
+      await db.execute('ALTER TABLE sales_bills ADD COLUMN active INTEGER NOT NULL DEFAULT 1');
+    }
+    // Sales Bill warranty (spec: warranty toggle + "Warranty Period (in
+    // days)" on New Sales Bill - see SalesBill.warranty/warrantyPeriodDays,
+    // prints the period when on, "Nil" when off).
+    if (oldVersion < 7) {
+      await db.execute('ALTER TABLE sales_bills ADD COLUMN warranty INTEGER NOT NULL DEFAULT 0');
+      await db.execute('ALTER TABLE sales_bills ADD COLUMN warranty_period_days INTEGER');
+    }
   }
 
   Future<void> _onCreate(Database db, int version) async {
@@ -85,6 +114,7 @@ class DatabaseHelper {
         phone TEXT,
         pin_hash TEXT NOT NULL,
         role TEXT NOT NULL DEFAULT 'staff', -- admin | staff
+        section TEXT NOT NULL DEFAULT 'full', -- full | billing | inventory
         can_view_profit INTEGER NOT NULL DEFAULT 0,
         can_view_cost INTEGER NOT NULL DEFAULT 0,
         can_edit_prices INTEGER NOT NULL DEFAULT 0,
@@ -152,28 +182,6 @@ class DatabaseHelper {
         FOREIGN KEY (purchase_id) REFERENCES purchases(id) ON DELETE CASCADE
       )
     ''');
-
-    // ---------------------------------------------------------------
-    // Daily supplier order reminders (quick note -> supplier -> timer ->
-    // auto WhatsApp-ready PDF). See ReorderSchedulerService.
-    // ---------------------------------------------------------------
-    batch.execute('''
-      CREATE TABLE reorder_tasks (
-        id TEXT PRIMARY KEY,
-        note TEXT NOT NULL,
-        supplier_id TEXT,
-        supplier_name TEXT NOT NULL,
-        supplier_phone TEXT NOT NULL,
-        scheduled_at TEXT NOT NULL,
-        repeat_daily INTEGER NOT NULL DEFAULT 0,
-        status TEXT NOT NULL DEFAULT 'pending', -- pending | notified | sent | cancelled
-        pdf_path TEXT,
-        notification_id INTEGER NOT NULL,
-        created_at TEXT NOT NULL,
-        FOREIGN KEY (supplier_id) REFERENCES suppliers(id)
-      )
-    ''');
-    batch.execute('CREATE INDEX idx_reorder_status ON reorder_tasks(status)');
 
     // ---------------------------------------------------------------
     // Spare Parts inventory
@@ -256,7 +264,10 @@ class DatabaseHelper {
         balance REAL NOT NULL DEFAULT 0,
         payment_method TEXT,
         notes TEXT,
+        active INTEGER NOT NULL DEFAULT 1,
         created_at TEXT NOT NULL,
+        warranty INTEGER NOT NULL DEFAULT 0,
+        warranty_period_days INTEGER,
         FOREIGN KEY (customer_id) REFERENCES customers(id)
       )
     ''');
@@ -286,7 +297,7 @@ class DatabaseHelper {
         mobile_name TEXT,
         model TEXT,
         imei TEXT,
-        complaint TEXT,
+        complaint TEXT, fault_amounts TEXT,
         device_condition TEXT,
         existing_damage TEXT,
         acc_charger INTEGER NOT NULL DEFAULT 0,
@@ -301,6 +312,7 @@ class DatabaseHelper {
         warranty_period TEXT,
         estimated_amount REAL NOT NULL DEFAULT 0,
         final_amount REAL NOT NULL DEFAULT 0,
+        discount REAL NOT NULL DEFAULT 0,
         advance REAL NOT NULL DEFAULT 0,
         paid REAL NOT NULL DEFAULT 0,
         balance REAL NOT NULL DEFAULT 0,
@@ -309,6 +321,7 @@ class DatabaseHelper {
         delivery_person TEXT,
         delivery_status TEXT NOT NULL DEFAULT 'Pending',
         additional_expense REAL NOT NULL DEFAULT 0,
+        active INTEGER NOT NULL DEFAULT 1,
         created_at TEXT NOT NULL,
         updated_at TEXT NOT NULL,
         FOREIGN KEY (customer_id) REFERENCES customers(id)
@@ -397,6 +410,7 @@ class DatabaseHelper {
         id TEXT PRIMARY KEY,
         purchase_no TEXT NOT NULL,
         purchase_date TEXT NOT NULL,
+        device_type TEXT NOT NULL DEFAULT 'mobile', -- mobile | laptop
         seller_name TEXT,
         seller_phone TEXT,
         brand TEXT,
@@ -422,6 +436,7 @@ class DatabaseHelper {
         notes TEXT,
         photo_path TEXT,
         status TEXT NOT NULL DEFAULT 'Purchased', -- Purchased|Repairing|Ready for Sale|Sold|Returned|Reserved
+        active INTEGER NOT NULL DEFAULT 1,
         created_at TEXT NOT NULL,
         FOREIGN KEY (customer_id) REFERENCES customers(id)
       )
@@ -448,6 +463,7 @@ class DatabaseHelper {
         customer_id TEXT,
         sale_date TEXT NOT NULL,
         sale_price REAL NOT NULL,
+        discount REAL NOT NULL DEFAULT 0,
         payment_method TEXT,
         paid REAL NOT NULL DEFAULT 0,
         balance REAL NOT NULL DEFAULT 0,
@@ -525,12 +541,32 @@ class DatabaseHelper {
       CREATE TABLE backups (
         id TEXT PRIMARY KEY,
         backup_date TEXT NOT NULL,
-        type TEXT NOT NULL, -- manual | auto | google_drive
+        type TEXT NOT NULL, -- manual | weekly_auto | google_drive
         file_path TEXT,
         status TEXT NOT NULL DEFAULT 'success',
         notes TEXT
       )
     ''');
+
+    // ---------------------------------------------------------------
+    // Daily Orders (daily supplier order note - see DailyOrderScreen)
+    // ---------------------------------------------------------------
+    batch.execute('''
+      CREATE TABLE daily_order_items (
+        id TEXT PRIMARY KEY,
+        order_date TEXT NOT NULL,
+        s_no INTEGER NOT NULL,
+        part_name TEXT NOT NULL,
+        type_model TEXT,
+        quantity TEXT NOT NULL,
+        phone TEXT,
+        sent INTEGER NOT NULL DEFAULT 0,
+        sent_at TEXT,
+        created_at TEXT NOT NULL
+      )
+    ''');
+    batch.execute('CREATE INDEX idx_daily_order_items_date ON daily_order_items(order_date)');
+    batch.execute('CREATE INDEX idx_daily_order_items_sent ON daily_order_items(sent)');
 
     await batch.commit(noResult: true);
   }
@@ -544,6 +580,6 @@ class DatabaseHelper {
   }
 
   /// Full path to the live database file - used by BackupService for
-  /// manual export / Google Drive upload / auto-backup.
+  /// manual export / Google Drive upload / weekly auto-backup.
   Future<File> dbFile() async => File(await databaseFilePath());
 }
