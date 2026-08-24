@@ -180,9 +180,32 @@ class _DailyOrderScreenState extends State<DailyOrderScreen> {
     return TimeOfDay(hour: h, minute: m);
   }
 
+  // Starting point shown in the WhatsApp caption field when the shop hasn't
+  // customized it yet - richer than the plain 'Professional Mobiles Daily
+  // Order' fallback WhatsAppSmsService.dailyOrderMessage uses when the field
+  // is truly empty, so the shop can see the available tokens right away
+  // (spec: "more ... whatspp app message customize panra option need and
+  // preview kattanum").
+  static const _dailyOrderMessageDefault =
+      '{shopName}\nDaily Order - {itemCount} item(s)\nDates: {dates}\nTo: {supplierName}';
+
+  String _dailyOrderMessagePreview(String template, String supplierName) {
+    var preview = template;
+    preview = preview.replaceAll('{supplierName}', supplierName.isEmpty ? 'Supplier' : supplierName);
+    preview = preview.replaceAll('{itemCount}', '3');
+    preview = preview.replaceAll('{dates}', formatDate(DateTime.now()));
+    preview = preview.replaceAll('{shopName}', 'PROFESSIONAL MOBILES');
+    return preview;
+  }
+
   Future<void> _openSettings() async {
     final nameCtrl = TextEditingController(text: _supplierName);
     final phoneCtrl = TextEditingController(text: _supplierPhone);
+    final savedMessageTemplate = await _settingsRepo.getDailyOrderMessageTemplate();
+    final messageCtrl = TextEditingController(
+      text: (savedMessageTemplate == null || savedMessageTemplate.trim().isEmpty) ? _dailyOrderMessageDefault : savedMessageTemplate,
+    );
+    final pdfNoteCtrl = TextEditingController(text: await _settingsRepo.getDailyOrderPdfNote() ?? '');
     // Enter/Done on the keyboard moves focus to the next field instead of
     // just closing the keyboard (spec: field full pannittu enter azhuthina
     // aditha tabku poganum) - see the matching pattern in _addItem/_editItem.
@@ -192,6 +215,7 @@ class _DailyOrderScreenState extends State<DailyOrderScreen> {
     var reminderOn = _reminderEnabled;
     var widgetOn = _widgetEnabled;
 
+    if (!mounted) return;
     final saved = await showDialog<bool>(
       context: context,
       builder: (dialogContext) => StatefulBuilder(
@@ -247,7 +271,10 @@ class _DailyOrderScreenState extends State<DailyOrderScreen> {
                 SwitchListTile(
                   contentPadding: EdgeInsets.zero,
                   title: const Text('Daily Reminder'),
-                  subtitle: const Text('Notify me at send time if an order is still pending'),
+                  subtitle: const Text(
+                    'Notify me at send time if an order is still pending. Note: WhatsApp cannot be sent silently by any app - '
+                    'this only shows a phone notification; tapping "Send Order" still opens WhatsApp for you to tap Send.',
+                  ),
                   value: reminderOn,
                   onChanged: (v) => setDialogState(() => reminderOn = v),
                 ),
@@ -257,6 +284,43 @@ class _DailyOrderScreenState extends State<DailyOrderScreen> {
                   subtitle: const Text("Show pending items on your phone's home screen"),
                   value: widgetOn,
                   onChanged: (v) => setDialogState(() => widgetOn = v),
+                ),
+                const Divider(height: 20),
+                const Text('WhatsApp Message & PDF', style: TextStyle(fontWeight: FontWeight.w700)),
+                const SizedBox(height: 4),
+                Text(
+                  'Customize the WhatsApp caption sent with the order PDF, and an optional note printed on the PDF itself. '
+                  'Tokens: {supplierName} {itemCount} {dates} {shopName}',
+                  style: TextStyle(color: AppColors.textSecondaryOf(dialogContext), fontSize: 11.5),
+                ),
+                const SizedBox(height: 8),
+                TextField(
+                  controller: messageCtrl,
+                  maxLines: 4,
+                  decoration: const InputDecoration(labelText: 'WhatsApp Message', border: OutlineInputBorder()),
+                  onChanged: (_) => setDialogState(() {}),
+                ),
+                const SizedBox(height: 10),
+                TextField(
+                  controller: pdfNoteCtrl,
+                  maxLines: 2,
+                  decoration: const InputDecoration(labelText: 'PDF Note (optional)', border: OutlineInputBorder()),
+                ),
+                const SizedBox(height: 10),
+                Align(alignment: Alignment.centerLeft, child: Text('Preview', style: TextStyle(color: AppColors.textSecondaryOf(dialogContext), fontSize: 11.5, fontWeight: FontWeight.w700))),
+                const SizedBox(height: 4),
+                Container(
+                  width: double.infinity,
+                  padding: const EdgeInsets.all(10),
+                  decoration: BoxDecoration(
+                    color: AppColors.bgOf(dialogContext),
+                    borderRadius: BorderRadius.circular(8),
+                    border: Border.all(color: AppColors.borderOf(dialogContext)),
+                  ),
+                  child: Text(
+                    _dailyOrderMessagePreview(messageCtrl.text, nameCtrl.text),
+                    style: TextStyle(color: AppColors.textPrimaryOf(dialogContext), fontSize: 12.5),
+                  ),
                 ),
               ],
             ),
@@ -275,6 +339,8 @@ class _DailyOrderScreenState extends State<DailyOrderScreen> {
       await _settingsRepo.set(SettingsRepository.dailyOrderSupplierPhone, phoneCtrl.text.trim());
       await _settingsRepo.set(SettingsRepository.dailyOrderSendTime, timeStr);
       await _settingsRepo.set(SettingsRepository.dailyOrderReminderEnabled, reminderOn ? 'true' : 'false');
+      await _settingsRepo.saveDailyOrderMessageTemplate(messageCtrl.text.trim());
+      await _settingsRepo.saveDailyOrderPdfNote(pdfNoteCtrl.text.trim());
       // Deliberately not via _settingsRepo - see DailyOrderWidgetService.setEnabled.
       await _widgetService.setEnabled(widgetOn);
 
@@ -373,9 +439,11 @@ class _DailyOrderScreenState extends State<DailyOrderScreen> {
 
     setState(() => _sending = true);
     try {
+      final pdfNote = await _settingsRepo.getDailyOrderPdfNote();
       final bytes = await _pdfService.buildDailyOrderPdf(
         supplierName: _supplierName.isEmpty ? 'Supplier' : _supplierName,
         items: pending,
+        note: pdfNote,
       );
 
       final dir = await getTemporaryDirectory();
@@ -384,7 +452,7 @@ class _DailyOrderScreenState extends State<DailyOrderScreen> {
       await file.writeAsBytes(bytes);
 
       final dateLabels = pending.map((i) => formatDate(DateTime.parse(i.orderDate))).toSet().toList();
-      final message = _waService.dailyOrderMessage(
+      final message = await _waService.dailyOrderMessage(
         supplierName: _supplierName.isEmpty ? 'Supplier' : _supplierName,
         orderDateLabels: dateLabels,
         itemCount: pending.length,
