@@ -1,5 +1,6 @@
 import 'package:flutter/services.dart';
 import 'package:url_launcher/url_launcher.dart';
+import '../repositories/settings_repository.dart';
 import '../utils/formatters.dart';
 
 /// Optional WhatsApp / SMS notifications (spec: "Optional WhatsApp,
@@ -8,6 +9,7 @@ import '../utils/formatters.dart';
 /// offline-first and this is purely a convenience the shop owner can ignore.
 class WhatsAppSmsService {
   static const _shareChannel = MethodChannel('pro_app/whatsapp_share');
+  final _settingsRepo = SettingsRepository();
 
     String _sanitizePhone(String phone) {
       var digits = phone.replaceAll(RegExp(r'[^0-9]'), '');
@@ -128,15 +130,30 @@ class WhatsAppSmsService {
   /// "Ready for delivery" notice - sent the moment a service job's status
   /// is changed to Ready (see ServiceStatus.ready / ServiceDetailScreen's
   /// _changeStatus), distinct from [deliveryMessage] which fires later,
-  /// once the phone is actually handed back. Uses the shop's exact given
-  /// template.
-  String readyForDeliveryMessage({
+  /// once the phone is actually handed back. Uses the shop's own saved
+  /// template (see WhatsAppTemplateScreen / SettingsRepository) when one has
+  /// been customized, substituting {customerName}/{mobileName}/{amount}/
+  /// {billNo}/{shopName} tokens - falls back to the original built-in
+  /// wording when no custom template is saved yet.
+  Future<String> readyForDeliveryMessage({
     required String customerName,
     String? mobileName,
     required double amount,
     required String billNo,
-  }) {
+  }) async {
     final modelLabel = (mobileName ?? '').trim();
+    final shopName = (await _settingsRepo.get(SettingsRepository.shopName))?.trim();
+    final resolvedShopName = (shopName == null || shopName.isEmpty) ? 'PROFESSIONAL MOBILES' : shopName;
+    final custom = await _settingsRepo.getReadyIntimationTemplate();
+    if (custom != null && custom.trim().isNotEmpty) {
+      var text = custom;
+      text = text.replaceAll('{customerName}', customerName);
+      text = text.replaceAll('{mobileName}', modelLabel.isEmpty ? 'மொபைல்' : modelLabel);
+      text = text.replaceAll('{amount}', formatCurrency(amount));
+      text = text.replaceAll('{billNo}', billNo);
+      text = text.replaceAll('{shopName}', resolvedShopName);
+      return text;
+    }
     return '📱 PROFESSIONAL MOBILES\n'
       'வணக்கம் $customerName அவர்களே! 👋\n'
       'உங்களுடைய ${modelLabel.isEmpty ? 'மொபைல்' : modelLabel} மொபைல் service செய்து முடிக்கப்பட்டுவிட்டது. ✅\n'

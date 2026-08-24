@@ -498,7 +498,9 @@ class PdfService {
                                                             _box('CUSTOMER & DEVICE DETAILS', [
                                                                               _kv2('Name', customer.name, 'Phone', customer.phone),
                                                                               _kv2('Mobile', service.mobileName, 'Model', service.model),
-                                                                              _kv('IMEI', service.imei),
+                                                                              // Printed as "Nil" (not the usual "-") when left blank at
+                                                                              // intake, per shop convention for this field specifically.
+                                                                              _kv('IMEI', (service.imei == null || service.imei!.trim().isEmpty) ? 'Nil' : service.imei),
                                                                             ]),
                                                             _box('ISSUE DETAILS', [
                                                                               _kv('Fault / Complaint', service.complaint, labelWidth: 78),
@@ -652,6 +654,12 @@ class PdfService {
                                               : _paymentSummary(finalAmount: bill.total, paid: bill.paid, balance: bill.balance),
                                           pw.SizedBox(height: 4),
                                           pw.Text('Payment Method: ${bill.paymentMethod ?? '-'}', style: const pw.TextStyle(fontSize: 9)),
+                                          // Warranty (spec: prints the period when on, "Nil" when off -
+                                          // see SalesBill.warranty/warrantyPeriodDays).
+                                          pw.Text(
+                                                'Warranty: ${bill.warranty && bill.warrantyPeriodDays != null ? '${bill.warrantyPeriodDays} days' : 'Nil'}',
+                                                style: const pw.TextStyle(fontSize: 9),
+                                                ),
                                           pw.SizedBox(height: 6),
                                           termsWidget,
                                           _signatures(),
