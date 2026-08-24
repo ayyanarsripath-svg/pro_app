@@ -21,26 +21,47 @@ class OrderReminderService {
   static final FlutterLocalNotificationsPlugin _plugin = FlutterLocalNotificationsPlugin();
   static bool _pluginInitialized = false;
 
+  // HOTFIX: this used to have no try/catch of its own at all, relying on
+  // every caller to wrap it - which was true right up until main.dart
+  // started calling this directly and unguarded on every app startup (to
+  // request the notification permission proactively - see main.dart's
+  // comment). If _plugin.initialize() or requestNotificationsPermission()
+  // ever threw on a particular device/Android version (a missing/renamed
+  // notification icon resource, a manifest merge quirk, anything), that
+  // exception propagated straight out of main() BEFORE runApp() was ever
+  // reached - Flutter never got the chance to mount a single widget, so the
+  // app opened to a permanently blank white screen with no error shown at
+  // all (spec: "app open panna thum kamikkama full white color la erukku").
+  // Wrapping the whole body here guarantees this can never happen again,
+  // regardless of which caller reaches it or whether that caller remembers
+  // to guard it too - reminder setup failing must never be able to stop the
+  // app from opening.
   static Future<void> ensureInitialized() async {
     if (_pluginInitialized) return;
-    // A proper flat white-on-transparent icon (see build-apk.yml's "Add
-    // proper notification small-icon" step) - @mipmap/ic_launcher (the
-    // full-colour app icon) used to be passed here, which Android 5.0+
-    // collapses into a blank/unrecognisable white blob in the status bar
-    // since it only ever renders a notification icon's alpha channel.
-    const androidInit = AndroidInitializationSettings('@drawable/ic_notification');
-    const settings = InitializationSettings(android: androidInit);
-    await _plugin.initialize(settings);
-    // Android 13+ requires this one-time runtime "Allow notifications?"
-    // permission before ANY notification (including this reminder) can
-    // actually be shown - unlike the WorkManager background scheduling in
-    // background_tasks.dart, there's no silent alternative for
-    // notifications specifically. Shown once; the OS remembers the
-    // answer after that.
-    await _plugin
-        .resolvePlatformSpecificImplementation<AndroidFlutterLocalNotificationsPlugin>()
-        ?.requestNotificationsPermission();
-    _pluginInitialized = true;
+    try {
+      // A proper flat white-on-transparent icon (see build-apk.yml's "Add
+      // proper notification small-icon" step) - @mipmap/ic_launcher (the
+      // full-colour app icon) used to be passed here, which Android 5.0+
+      // collapses into a blank/unrecognisable white blob in the status bar
+      // since it only ever renders a notification icon's alpha channel.
+      const androidInit = AndroidInitializationSettings('@drawable/ic_notification');
+      const settings = InitializationSettings(android: androidInit);
+      await _plugin.initialize(settings);
+      // Android 13+ requires this one-time runtime "Allow notifications?"
+      // permission before ANY notification (including this reminder) can
+      // actually be shown - unlike the WorkManager background scheduling in
+      // background_tasks.dart, there's no silent alternative for
+      // notifications specifically. Shown once; the OS remembers the
+      // answer after that.
+      await _plugin
+          .resolvePlatformSpecificImplementation<AndroidFlutterLocalNotificationsPlugin>()
+          ?.requestNotificationsPermission();
+      _pluginInitialized = true;
+    } catch (_) {
+      // Never let reminder setup failing block app startup - see the
+      // HOTFIX note above. Leaves _pluginInitialized false so a later call
+      // (e.g. the next app open) gets to try again.
+    }
   }
 
   /// Called both from the WorkManager background task (once daily, timed
