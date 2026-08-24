@@ -290,24 +290,60 @@ class _SparePartsScreenState extends State<SparePartsScreen> {
   }
 
   Future<void> _adjustStock(SparePart part) async {
-    final qtyCtrl = TextEditingController();
+    final qtyCtrl = TextEditingController(text: '0');
     final notesCtrl = TextEditingController();
+
+    // Signed quantity typed directly is still supported, but a +/- stepper
+    // is offered alongside it - tapping + increases the number, tapping -
+    // decreases it, so it's obvious at a glance which direction stock is
+    // moving instead of having to remember to type a leading minus sign.
+    void bump(void Function(void Function()) setLocalState, int delta) {
+      final current = double.tryParse(qtyCtrl.text.trim()) ?? 0;
+      setLocalState(() => qtyCtrl.text = (current + delta).toStringAsFixed(current % 1 == 0 ? 0 : 2));
+    }
+
     final ok = await showDialog<bool>(
       context: context,
-      builder: (context) => AlertDialog(
-        title: Text('Adjust Stock: ${part.name}'),
-        content: Column(
-          mainAxisSize: MainAxisSize.min,
-          children: [
-            TextField(controller: qtyCtrl, keyboardType: const TextInputType.numberWithOptions(signed: true), decoration: const InputDecoration(labelText: 'Quantity (+ / -)')),
-            const SizedBox(height: 10),
-            TextField(controller: notesCtrl, decoration: const InputDecoration(labelText: 'Reason')),
+      builder: (context) => StatefulBuilder(
+        builder: (context, setLocalState) => AlertDialog(
+          title: Text('Adjust Stock: ${part.name}'),
+          content: Column(
+            mainAxisSize: MainAxisSize.min,
+            children: [
+              Row(
+                mainAxisAlignment: MainAxisAlignment.center,
+                children: [
+                  IconButton(
+                    icon: const Icon(Icons.remove_circle_outline_rounded, size: 32, color: AppColors.danger),
+                    tooltip: 'Decrease',
+                    onPressed: () => bump(setLocalState, -1),
+                  ),
+                  SizedBox(
+                    width: 100,
+                    child: TextField(
+                      controller: qtyCtrl,
+                      textAlign: TextAlign.center,
+                      keyboardType: const TextInputType.numberWithOptions(signed: true, decimal: true),
+                      style: const TextStyle(fontWeight: FontWeight.w800, fontSize: 18),
+                      decoration: const InputDecoration(labelText: 'Quantity (+ / -)'),
+                    ),
+                  ),
+                  IconButton(
+                    icon: const Icon(Icons.add_circle_outline_rounded, size: 32, color: AppColors.success),
+                    tooltip: 'Increase',
+                    onPressed: () => bump(setLocalState, 1),
+                  ),
+                ],
+              ),
+              const SizedBox(height: 10),
+              TextField(controller: notesCtrl, decoration: const InputDecoration(labelText: 'Reason')),
+            ],
+          ),
+          actions: [
+            TextButton(onPressed: () => Navigator.pop(context, false), child: const Text('Cancel')),
+            ElevatedButton(onPressed: () => Navigator.pop(context, true), child: const Text('Apply')),
           ],
         ),
-        actions: [
-          TextButton(onPressed: () => Navigator.pop(context, false), child: const Text('Cancel')),
-          ElevatedButton(onPressed: () => Navigator.pop(context, true), child: const Text('Apply')),
-        ],
       ),
     );
     if (ok == true) {
