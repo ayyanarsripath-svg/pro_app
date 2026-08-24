@@ -120,12 +120,22 @@ class _AppShellState extends State<AppShell> {
                   label: Row(
                     mainAxisSize: MainAxisSize.min,
                     children: [
-                      Text(auth.current?.name ?? '', style: const TextStyle(color: Colors.white, fontSize: 12)),
+                      Text(auth.current?.name ?? '', style: const TextStyle(color: Colors.white, fontSize: 12, fontWeight: FontWeight.w600)),
                       const SizedBox(width: 4),
                       const Icon(Icons.swap_horiz_rounded, size: 14, color: Colors.white70),
                     ],
                   ),
-                  backgroundColor: Colors.white.withOpacity(0.15),
+                  // A FULLY OPAQUE solid navy (not a translucent white
+                  // overlay) - previously this blended with whatever the
+                  // AppBar was actually rendering underneath, and in light
+                  // theme that background could come through pale/white,
+                  // washing the white "Switch User" text out to invisible.
+                  // An opaque color always paints over whatever is behind
+                  // it, so contrast against the white text/icons here no
+                  // longer depends on app_theme.dart's AppBar tint behaving
+                  // as expected at runtime (spec: "white color erukkumpothu
+                  // switch user text kamikkala").
+                  backgroundColor: const Color(0xFF0A1B54),
                   side: BorderSide.none,
                 ),
               ),
