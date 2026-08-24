@@ -13,6 +13,7 @@ import '../../widgets/section_card.dart';
 import 'backup_screen.dart';
 import 'menu_order_screen.dart';
 import 'staff_screen.dart';
+import 'whatsapp_template_screen.dart';
 
 class SettingsScreen extends StatefulWidget {
   const SettingsScreen({super.key});
@@ -97,18 +98,29 @@ class _SettingsScreenState extends State<SettingsScreen> {
           const SizedBox(height: 10),
           Row(
             children: [
+              // A generous, rectangular (not squared-off) preview box so a
+              // wide or tall shop photo is never squeezed into a tiny
+              // square - BoxFit.contain always shows the full image, this
+              // box just gives it room to actually be seen at a decent
+              // size. Rounded corners + soft shadow for a richer look.
               Container(
-                width: 64,
-                height: 64,
-                padding: const EdgeInsets.all(6),
+                width: 130,
+                height: 84,
+                padding: const EdgeInsets.all(8),
                 decoration: BoxDecoration(
                   color: AppColors.bgOf(context),
-                  borderRadius: BorderRadius.circular(12),
+                  borderRadius: BorderRadius.circular(16),
                   border: Border.all(color: AppColors.borderOf(context)),
+                  boxShadow: [
+                    BoxShadow(color: Colors.black.withOpacity(0.08), blurRadius: 8, offset: const Offset(0, 3)),
+                  ],
                 ),
-                child: logo.hasCustomLogo
-                    ? Image.file(logo.logoFile!, fit: BoxFit.contain)
-                    : Image.asset('assets/images/logo_color.png', fit: BoxFit.contain),
+                child: ClipRRect(
+                  borderRadius: BorderRadius.circular(10),
+                  child: logo.hasCustomLogo
+                      ? Image.file(logo.logoFile!, fit: BoxFit.contain)
+                      : Image.asset('assets/images/logo_color.png', fit: BoxFit.contain),
+                ),
               ),
               const SizedBox(width: 14),
               Expanded(
@@ -147,6 +159,15 @@ class _SettingsScreenState extends State<SettingsScreen> {
             subtitle: const Text('Reorder the drawer menu - move what you use most to the top'),
             trailing: const Icon(Icons.chevron_right),
             onTap: () => Navigator.push(context, MaterialPageRoute(builder: (_) => const MenuOrderScreen())),
+          ),
+        ),
+        Card(
+          child: ListTile(
+            leading: const Icon(Icons.chat_rounded, color: AppColors.primaryBlue),
+            title: const Text('WhatsApp Message Template'),
+            subtitle: const Text('Customize the "Ready for Delivery" intimation text sent to customers'),
+            trailing: const Icon(Icons.chevron_right),
+            onTap: () => Navigator.push(context, MaterialPageRoute(builder: (_) => const WhatsAppTemplateScreen())),
           ),
         ),
         Card(
