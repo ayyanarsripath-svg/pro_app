@@ -18,7 +18,14 @@ class SettingsRepository {
   static const lastDriveBackupAt = 'last_drive_backup_at';
   static const dailyDriveAutoBackupEnabled = 'daily_drive_auto_backup_enabled';
   static const complaintPresets = 'complaint_presets';
+  static const conditionPresets = 'condition_presets';
+  static const damagePresets = 'damage_presets';
   static const logoPath = 'logo_path';
+  // Shop-editable text template for the WhatsApp intimation sent when a
+  // service job's status is changed to "Ready for Delivery". Supports the
+  // same {customerName}/{mobileName}/{billNo}/{amount}/{shopName} tokens
+  // documented in WhatsAppSmsService.readyForDeliveryMessage's fallback.
+  static const readyIntimationTemplate = 'ready_intimation_template';
 
   // Daily Orders (daily supplier order note - see DailyOrderScreen). One
   // supplier per day (spec: simpler than per-row supplier splitting), so
@@ -96,4 +103,54 @@ class SettingsRepository {
   Future<void> saveComplaintPresets(List<String> presets) async {
     await set(complaintPresets, presets.join('|'));
   }
+
+  /// Shop-editable quick-pick list for the intake form's Device Condition
+  /// chips (spec: quick-pic the overall state instead of typing it every
+  /// time) - same pipe-separated storage/extend pattern as complaint
+  /// presets.
+  Future<List<String>> getConditionPresets() async {
+    final raw = await get(conditionPresets);
+    if (raw == null || raw.trim().isEmpty) {
+      return const [
+        'Dead',
+        'Hang on Logo',
+        'Restart',
+        'Only Charging',
+        'On Condition',
+      ];
+    }
+    return raw.split('|').map((s) => s.trim()).where((s) => s.isNotEmpty).toList();
+  }
+
+  Future<void> saveConditionPresets(List<String> presets) async {
+    await set(conditionPresets, presets.join('|'));
+  }
+
+  /// Shop-editable quick-pick list for the intake form's Existing Damage
+  /// chips - same pipe-separated storage/extend pattern as complaint
+  /// presets.
+  Future<List<String>> getDamagePresets() async {
+    final raw = await get(damagePresets);
+    if (raw == null || raw.trim().isEmpty) {
+      return const [
+        'Dent',
+        'Display Broken',
+        'Back Door Broken',
+        'Camera Glass Broken',
+        'Missing SIM Tray',
+      ];
+    }
+    return raw.split('|').map((s) => s.trim()).where((s) => s.isNotEmpty).toList();
+  }
+
+  Future<void> saveDamagePresets(List<String> presets) async {
+    await set(damagePresets, presets.join('|'));
+  }
+
+  /// The shop-customizable WhatsApp "ready for delivery" intimation text.
+  /// Null/empty means "use the built-in default" (see
+  /// WhatsAppSmsService.readyForDeliveryMessage).
+  Future<String?> getReadyIntimationTemplate() => get(readyIntimationTemplate);
+
+  Future<void> saveReadyIntimationTemplate(String template) => set(readyIntimationTemplate, template);
 }

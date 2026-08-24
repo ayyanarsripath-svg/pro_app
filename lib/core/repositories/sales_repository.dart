@@ -50,6 +50,8 @@ class SalesRepository {
     double paid = 0,
     String? paymentMethod,
     String? notes,
+    bool warranty = false,
+    int? warrantyPeriodDays,
   }) async {
     final db = await _dbHelper.database;
     final subtotal = items.fold<double>(0, (sum, i) => sum + i.total);
@@ -71,6 +73,8 @@ class SalesRepository {
       paymentMethod: paymentMethod,
       notes: notes,
       createdAt: DateTime.now(),
+      warranty: warranty,
+      warrantyPeriodDays: warranty ? warrantyPeriodDays : null,
     );
 
     await db.insert('sales_bills', bill.toMap());
