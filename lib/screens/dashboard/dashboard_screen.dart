@@ -14,6 +14,7 @@ import '../../widgets/stat_card.dart';
 import '../../widgets/status_badge.dart';
 import '../../widgets/section_card.dart';
 import '../pnl/pnl_dashboard_screen.dart';
+import '../services/service_list_screen.dart';
 
 class DashboardScreen extends StatefulWidget {
   const DashboardScreen({super.key});
@@ -103,11 +104,22 @@ class _DashboardScreenState extends State<DashboardScreen> {
               Row(
                 children: [
                   Expanded(
-                    child: _QuickStat(
-                      title: 'Pending Services',
-                      value: data.pendingServiceCount.toString(),
-                      icon: Icons.build_circle_rounded,
-                      color: AppColors.flameOrange,
+                    // Tappable - opens exactly which bills are still
+                    // pending instead of just showing a count (spec:
+                    // "pending service click panna entha bill pending la
+                    // erukkunu kamikkanum").
+                    child: InkWell(
+                      borderRadius: BorderRadius.circular(14),
+                      onTap: () => Navigator.push(
+                        context,
+                        MaterialPageRoute(builder: (_) => const ServiceListScreen(pendingOnly: true)),
+                      ),
+                      child: _QuickStat(
+                        title: 'Pending Services',
+                        value: data.pendingServiceCount.toString(),
+                        icon: Icons.build_circle_rounded,
+                        color: AppColors.flameOrange,
+                      ),
                     ),
                   ),
                   const SizedBox(width: 10),
@@ -128,7 +140,7 @@ class _DashboardScreenState extends State<DashboardScreen> {
                 children: [
                   Row(
                     children: [
-                      _miniStat('Total Phones', data.secondHandStock['totalPhones'] ?? 0, isCurrency: false),
+                      _miniStat('Total Devices', data.secondHandStock['totalPhones'] ?? 0, isCurrency: false),
                       _miniStat('Unsold', data.secondHandStock['unsoldCount'] ?? 0, isCurrency: false),
                     ],
                   ),
