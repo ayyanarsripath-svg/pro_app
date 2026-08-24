@@ -26,6 +26,13 @@ class SettingsRepository {
   // same {customerName}/{mobileName}/{billNo}/{amount}/{shopName} tokens
   // documented in WhatsAppSmsService.readyForDeliveryMessage's fallback.
   static const readyIntimationTemplate = 'ready_intimation_template';
+  // Same idea, for the "Received" (job-card intake) and "Delivery" (final
+  // handover) WhatsApp intimations - each independently customizable (spec:
+  // "received kum ready kum aprom delivery kum thani thaniya customise
+  // need"). See WhatsAppSmsService.serviceIntimationMessage /
+  // .deliveryMessage for their token lists and fallback wording.
+  static const receivedIntimationTemplate = 'received_intimation_template';
+  static const deliveryIntimationTemplate = 'delivery_intimation_template';
 
   // Daily Orders (daily supplier order note - see DailyOrderScreen). One
   // supplier per day (spec: simpler than per-row supplier splitting), so
@@ -37,6 +44,15 @@ class SettingsRepository {
   static const dailyOrderSendTime = 'daily_order_send_time'; // 'HH:mm', e.g. '12:30'
   static const dailyOrderReminderEnabled = 'daily_order_reminder_enabled';
   static const lastOrderReminderAt = 'last_order_reminder_at';
+  // Shop-editable WhatsApp caption sent with the Daily Order PDF (spec:
+  // "more pdf and whatsapp app message customize panra option need and
+  // preview kattanum"). Supports {supplierName}/{itemCount}/{dates} tokens
+  // - see WhatsAppSmsService.dailyOrderMessage's fallback for the default
+  // wording. dailyOrderPdfNote is an optional free-text line (e.g. special
+  // instructions to the supplier) printed at the bottom of the PDF itself -
+  // see PdfService.buildDailyOrderPdf.
+  static const dailyOrderMessageTemplate = 'daily_order_message_template';
+  static const dailyOrderPdfNote = 'daily_order_pdf_note';
 
   // NOTE: the Daily Orders home-screen widget's on/off toggle is
   // deliberately NOT a key in this table. Backups (see BackupService) work
@@ -153,4 +169,29 @@ class SettingsRepository {
   Future<String?> getReadyIntimationTemplate() => get(readyIntimationTemplate);
 
   Future<void> saveReadyIntimationTemplate(String template) => set(readyIntimationTemplate, template);
+
+  /// The shop-customizable WhatsApp "job received" intimation text. Null/
+  /// empty means "use the built-in default" (see
+  /// WhatsAppSmsService.serviceIntimationMessage).
+  Future<String?> getReceivedIntimationTemplate() => get(receivedIntimationTemplate);
+
+  Future<void> saveReceivedIntimationTemplate(String template) => set(receivedIntimationTemplate, template);
+
+  /// The shop-customizable WhatsApp "delivered" intimation text. Null/empty
+  /// means "use the built-in default" (see WhatsAppSmsService.deliveryMessage).
+  Future<String?> getDeliveryIntimationTemplate() => get(deliveryIntimationTemplate);
+
+  Future<void> saveDeliveryIntimationTemplate(String template) => set(deliveryIntimationTemplate, template);
+
+  /// The shop-customizable Daily Order WhatsApp caption. Null/empty means
+  /// "use the built-in default" (see WhatsAppSmsService.dailyOrderMessage).
+  Future<String?> getDailyOrderMessageTemplate() => get(dailyOrderMessageTemplate);
+
+  Future<void> saveDailyOrderMessageTemplate(String template) => set(dailyOrderMessageTemplate, template);
+
+  /// Optional free-text note printed at the bottom of the Daily Order PDF
+  /// (e.g. special instructions to the supplier). Empty means no note line.
+  Future<String?> getDailyOrderPdfNote() => get(dailyOrderPdfNote);
+
+  Future<void> saveDailyOrderPdfNote(String note) => set(dailyOrderPdfNote, note);
 }
