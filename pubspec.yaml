@@ -24,7 +24,7 @@ dependencies:
   uuid: ^4.4.0
   intl: ^0.19.0
 
-  # PDF generation + printing (A5 bills)
+  # PDF generation + printing (A5 bills, supplier order note)
   pdf: ^3.11.1
   printing: ^5.13.1
 
@@ -36,38 +36,28 @@ dependencies:
 
   # WhatsApp / SMS share (opens native share sheet or wa.me / sms: links)
   url_launcher: ^6.3.0
+  share_plus: ^10.0.2
+
+  # Daily supplier-order reminder (exact-time alarm + notification) that
+  # drives the "auto WhatsApp-ready PDF" flow.
+  flutter_local_notifications: ^17.2.3
+  timezone: ^0.9.4
+  permission_handler: ^11.3.1
+
+  # Lets the owner pick a real, visible folder to save a manual backup into
+  # (Android Storage Access Framework) instead of the app's hidden private
+  # storage - see BackupService/BackupScreen.
+  file_picker: ^8.1.2
 
   # Optional Google Drive backup (requires the shop owner's own Google Cloud
   # OAuth client id - see README "Google Drive Backup Setup")
-  google_sign_in: ^7.2.0
+  google_sign_in: ^6.2.1
   googleapis: ^13.2.0
   googleapis_auth: ^1.6.0
   http: ^1.2.1
 
-  # Daily automatic Google Drive backup (~10 PM) even when the app isn't
-  # open right then - uses Android's WorkManager, which needs no special
-  # runtime permission prompt (unlike exact-alarm scheduling). See the
-  # backup_service.dart comments for what this can and can't guarantee.
-  # As of this update, the same WorkManager setup (see
-  # core/services/background_tasks.dart) also drives the Daily Orders
-  # reminder below.
-  workmanager: ^0.10.7
-
-  # Daily Orders reminder notification (Daily Orders feature) - shows a
-  # local, on-device notification at the shop's chosen order-send time.
-  # No account/server/API key needed, and (like WorkManager above) needs
-  # no special runtime permission prompt on the Android versions this app
-  # targets.
-  flutter_local_notifications: ^17.2.2
-
   # Admin PIN hashing
   crypto: ^3.0.3
-
-  # Daily Orders home-screen widget (Phase 2) - bridges data from the app's
-  # SQLite database to the native Android widget (see
-  # DailyOrderWidgetService / DailyOrderWidgetProvider.kt). Android-only
-  # widget for now, matching the "phone's home screen widget" request.
-  home_widget: ^0.9.3
 
 dev_dependencies:
   flutter_test:
@@ -81,16 +71,9 @@ flutter:
     - assets/images/logo_color.png
     - assets/images/logo_bw.png
     - assets/images/logo_bw_1bit.png
-    - assets/images/terms_note.png
-    - assets/images/terms_note_secondhand.png
-    - assets/images/terms_note_accessories.png
-  fonts:
-    - family: NotoSansTamil
-      fonts:
-        - asset: assets/fonts/NotoSansTamil-Regular.ttf
 
 flutter_launcher_icons:
   android: true
   ios: false
-  image_path: "assets/images/logo_color.png"
+  image_path: "assets/images/app_icon.png"
   min_sdk_android: 21
