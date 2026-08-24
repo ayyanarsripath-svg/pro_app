@@ -13,6 +13,11 @@ class SalesBill {
   final String? notes;
   final bool active;
   final DateTime createdAt;
+  // Optional warranty on the sold accessory/item (spec: a warranty toggle +
+  // period-in-days on Sales Bill creation - prints the period on the bill
+  // when on, "Nil" when off - see PdfService.buildSalesBill).
+  final bool warranty;
+  final int? warrantyPeriodDays;
 
   SalesBill({
     required this.id,
@@ -29,6 +34,8 @@ class SalesBill {
     this.notes,
     this.active = true,
     required this.createdAt,
+    this.warranty = false,
+    this.warrantyPeriodDays,
   });
 
   factory SalesBill.fromMap(Map<String, dynamic> m) => SalesBill(
@@ -46,6 +53,8 @@ class SalesBill {
         notes: m['notes'] as String?,
         active: (m['active'] as int? ?? 1) == 1,
         createdAt: DateTime.parse(m['created_at'] as String),
+        warranty: (m['warranty'] as int? ?? 0) == 1,
+        warrantyPeriodDays: (m['warranty_period_days'] as num?)?.toInt(),
       );
 
   Map<String, dynamic> toMap() => {
@@ -63,6 +72,8 @@ class SalesBill {
         'notes': notes,
         'active': active ? 1 : 0,
         'created_at': createdAt.toIso8601String(),
+        'warranty': warranty ? 1 : 0,
+        'warranty_period_days': warrantyPeriodDays,
       };
 }
 
