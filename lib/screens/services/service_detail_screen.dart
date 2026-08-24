@@ -6,6 +6,7 @@ import 'package:path/path.dart' as p;
 import 'package:path_provider/path_provider.dart';
 import 'package:printing/printing.dart';
 import 'package:provider/provider.dart';
+import 'package:url_launcher/url_launcher.dart';
 
 import '../../core/repositories/customer_repository.dart';
 import '../../core/repositories/service_repository.dart';
@@ -231,6 +232,7 @@ class _ServiceDetailScreenState extends State<ServiceDetailScreen> {
       _QuickAction('Add Payment', Icons.payments_rounded, _addPayment),
       _QuickAction('Change Status', Icons.sync_alt_rounded, _changeStatus),
       _QuickAction('Print', Icons.print_rounded, _printBill),
+      _QuickAction('Call', Icons.call_rounded, _callCustomer),
       _QuickAction('WhatsApp', Icons.chat_rounded, _sendWhatsApp),
       _QuickAction('SMS', Icons.sms_rounded, _sendSms),
       _QuickAction('Delivery', Icons.local_shipping_rounded, _markDelivery),
@@ -280,11 +282,11 @@ class _ServiceDetailScreenState extends State<ServiceDetailScreen> {
           Row(
             mainAxisAlignment: MainAxisAlignment.spaceBetween,
             children: [
-_amountBlock('FINAL AMOUNT', s.billTotal),
+              _amountBlock('FINAL AMOUNT', s.billTotal),
               _amountBlock('PAID', s.paid),
               _amountBlock('BALANCE', s.displayBalance),
-              ],
-            ),
+            ],
+          ),
           if (s.discount > 0)
             Padding(
               padding: const EdgeInsets.only(top: 10),
@@ -365,29 +367,29 @@ _amountBlock('FINAL AMOUNT', s.billTotal),
         title: const Text('Edit Service'),
         content: SingleChildScrollView(
           child: Column(
-          mainAxisSize: MainAxisSize.min,
-          children: [
-            TextField(controller: techCtrl, decoration: const InputDecoration(labelText: 'Technician')),
-            const SizedBox(height: 10),
-            TextField(controller: finalCtrl, keyboardType: TextInputType.number, decoration: const InputDecoration(labelText: 'Final Amount (₹)')),
-            const SizedBox(height: 10),
-            TextField(controller: labourCtrl, keyboardType: TextInputType.number, decoration: const InputDecoration(labelText: 'Labour Cost (₹) - Admin only')),
-            const SizedBox(height: 10),
-            TextField(controller: expenseCtrl, keyboardType: TextInputType.number, decoration: const InputDecoration(labelText: 'Additional Expense (₹)')),
-            const SizedBox(height: 10),
-            // Bargain write-off: e.g. Final Amount 100, customer pays 90 -
-            // enter 10 here and the balance auto-settles to 0 instead of
-            // sitting as a pending due. Only printed on the bill when > 0.
-            TextField(
-              controller: discountCtrl,
-              keyboardType: TextInputType.number,
-              decoration: const InputDecoration(
-                labelText: 'Discount (₹) - leave blank if none',
-                helperText: 'Bargained-off amount. Balance = Final − Paid − Discount.',
-                helperMaxLines: 2,
+            mainAxisSize: MainAxisSize.min,
+            children: [
+              TextField(controller: techCtrl, decoration: const InputDecoration(labelText: 'Technician')),
+              const SizedBox(height: 10),
+              TextField(controller: finalCtrl, keyboardType: TextInputType.number, decoration: const InputDecoration(labelText: 'Final Amount (₹)')),
+              const SizedBox(height: 10),
+              TextField(controller: labourCtrl, keyboardType: TextInputType.number, decoration: const InputDecoration(labelText: 'Labour Cost (₹) - Admin only')),
+              const SizedBox(height: 10),
+              TextField(controller: expenseCtrl, keyboardType: TextInputType.number, decoration: const InputDecoration(labelText: 'Additional Expense (₹)')),
+              const SizedBox(height: 10),
+              // Bargain write-off: e.g. Final Amount 100, customer pays 90 -
+              // enter 10 here and the balance auto-settles to 0 instead of
+              // sitting as a pending due. Only printed on the bill when > 0.
+              TextField(
+                controller: discountCtrl,
+                keyboardType: TextInputType.number,
+                decoration: const InputDecoration(
+                  labelText: 'Discount (₹) - leave blank if none',
+                  helperText: 'Bargained-off amount. Balance = Final − Paid − Discount.',
+                  helperMaxLines: 2,
+                ),
               ),
-            ),
-          ],
+            ],
           ),
         ),
         actions: [
@@ -635,7 +637,7 @@ _amountBlock('FINAL AMOUNT', s.billTotal),
               // that an amount recorded here is a NEW payment on top of
               // what's already paid, not a replacement of it.
               Text(
-                'Already paid: ${formatCurrency(s.paid)}   •   Balance due: ${formatCurrency(balanceDue)}',
+                'Already paid: ${formatCurrency(s.paid)} • Balance due: ${formatCurrency(balanceDue)}',
                 style: const TextStyle(fontSize: 12.5, fontWeight: FontWeight.w600),
               ),
               const SizedBox(height: 10),
@@ -750,7 +752,7 @@ _amountBlock('FINAL AMOUNT', s.billTotal),
             // far (Advance + any Add Payment entries); Balance due is what
             // is genuinely still outstanding.
             Text(
-              'Already paid: ${formatCurrency(s.paid)}   •   Balance due: ${formatCurrency(balanceDue)}',
+              'Already paid: ${formatCurrency(s.paid)} • Balance due: ${formatCurrency(balanceDue)}',
               style: const TextStyle(fontSize: 12.5, fontWeight: FontWeight.w600),
             ),
             const SizedBox(height: 10),
@@ -892,6 +894,32 @@ _amountBlock('FINAL AMOUNT', s.billTotal),
     if (_customer == null || _service == null) return;
     final bytes = await _pdfService.buildServiceBill(service: _service!, customer: _customer!, partsUsed: _usages, warrantyClaimed: _warrantyClaimed);
     await Printing.layoutPdf(format: PdfPageFormat.a5, name: 'Service_${_service!.billNo}', onLayout: (format) async => bytes);
+  }
+
+  /// Opens the phone's own dialer with the customer's saved number already
+  /// filled in - a quick way to call and tell them the job is ready,
+  /// without leaving the service screen to look the number up. Never
+  /// throws into the UI: shows a plain snackbar instead if there's no
+  /// saved number, or if the dialer can't be opened for any reason.
+  Future<void> _callCustomer() async {
+    final phone = _customer?.phone?.trim();
+    if (phone == null || phone.isEmpty) {
+      if (mounted) {
+        ScaffoldMessenger.of(context).showSnackBar(
+          const SnackBar(content: Text('No phone number saved for this customer')),
+        );
+      }
+      return;
+    }
+    try {
+      await launchUrl(Uri(scheme: 'tel', path: phone));
+    } catch (_) {
+      if (mounted) {
+        ScaffoldMessenger.of(context).showSnackBar(
+          const SnackBar(content: Text('Could not open the dialer')),
+        );
+      }
+    }
   }
 
   Future<void> _sendWhatsApp() async {
