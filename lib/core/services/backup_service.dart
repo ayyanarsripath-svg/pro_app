@@ -78,6 +78,16 @@ class BackupService {
     return dir;
   }
 
+  /// Absolute path to the folder local backups are stored in - shown in
+  /// Settings -> Backup & Restore. This lives inside the app's own private
+  /// storage (Android's scoped-storage rules), which is exactly why it
+  /// never shows up in the phone's own Files app on its own - the Share
+  /// button next to each backup (see BackupScreen) is the actual way to
+  /// get a copy out, by handing the file to WhatsApp/Drive/email/a file
+  /// manager's own "Save a copy" action instead of trying to write into
+  /// public storage directly.
+  Future<String> backupDirPath() async => (await _backupDir()).path;
+
   /// Copies the live SQLite file into /backups/<timestamp>.db. Safe to call
   /// any time - sqflite keeps the file consistent, and the app continues
   /// running against the original connection.
@@ -162,17 +172,96 @@ class BackupService {
   /// caught, so the "Connect Google Drive" button just looked frozen after
   /// tapping an account: no error, no snackbar, nothing. It now always
   /// resolves, and throws a plain-English [Exception] the screen can show.
+  ///
+  /// Separately, some phones hit a distinct failure that Android reports as
+  /// a plain "cancelled" but with an extra detail attached, most commonly
+  /// "[16] Account reauth failed" - this is Google Play Services rejecting
+  /// a stale/broken cached sign-in state on THAT phone, not a real tap on
+  /// Cancel and not a problem with this app's own OAuth setup. Rather than
+  /// showing that raw error immediately, this now clears the broken local
+  /// state with [GoogleSignIn.disconnect] and retries once automatically -
+  /// which fixes it silently for most shops. Only if the retry also fails
+  /// does the shop see an error, and it's a plain-English one instead of
+  /// the raw Android string.
   Future<bool> signInToGoogleDrive() async {
+    await _ensureInitialized();
     try {
-      await _ensureInitialized();
-      final account = await _googleSignIn.authenticate();
-      await account.authorizationClient.authorizeScopes(_driveScopes);
-      await _settings.set(SettingsRepository.googleDriveLinked, 'true');
-      return true;
+      return await _authenticateAndLink();
     } on GoogleSignInException catch (e) {
-      if (e.code == GoogleSignInExceptionCode.canceled) return (e.description != null && e.description!.trim().isNotEmpty) ? (throw Exception('Sign-in reported "cancelled", but Android included this extra detail: ${e.description}')) : false; // diagnostic: surface e.description instead of assuming a real user cancel
+      if (e.code == GoogleSignInExceptionCode.canceled) {
+        final hasExtraDetail = e.description != null && e.description!.trim().isNotEmpty;
+        if (!hasExtraDetail) return false; // a genuine tap on Cancel - nothing to show
+
+        try {
+          await _googleSignIn.disconnect();
+        } catch (_) {
+          // nothing was linked yet on this phone to disconnect - fine,
+          // fall through to the retry below regardless.
+        }
+        try {
+          return await _authenticateAndLink();
+        } on GoogleSignInException catch (retryError) {
+          if (retryError.code == GoogleSignInExceptionCode.canceled &&
+              !(retryError.description != null && retryError.description!.trim().isNotEmpty)) {
+            return false; // the retry itself was a genuine user cancel
+          }
+          throw Exception(_reauthFailedMessage(retryError));
+        }
+      }
       throw Exception(_friendlyGoogleError(e));
     }
+  }
+
+  Future<bool> _authenticateAndLink() async {
+    final account = await _googleSignIn.authenticate();
+    await account.authorizationClient.authorizeScopes(_driveScopes);
+    await _settings.set(SettingsRepository.googleDriveLinked, 'true');
+    return true;
+  }
+
+  /// Fully forgets whatever Google account is currently linked (if any) -
+  /// revoking this app's access via [GoogleSignIn.disconnect], not just a
+  /// local sign-out - and opens the account picker fresh, so the shop can
+  /// either link a *different* Google account, or get past a stuck
+  /// "Account reauth failed" error without leaving the app. Exposed as its
+  /// own "Change Google Account" button in Settings -> Backup & Restore,
+  /// separate from the automatic one-time retry inside
+  /// [signInToGoogleDrive] above.
+  Future<bool> reconnectGoogleDrive() async {
+    await _ensureInitialized();
+    try {
+      await _googleSignIn.disconnect();
+    } catch (_) {
+      // nothing was linked yet - fine, still proceed to a fresh sign-in.
+    }
+    await _settings.set(SettingsRepository.googleDriveLinked, 'false');
+    try {
+      return await _authenticateAndLink();
+    } on GoogleSignInException catch (e) {
+      if (e.code == GoogleSignInExceptionCode.canceled) return false;
+      throw Exception(_friendlyGoogleError(e));
+    }
+  }
+
+  /// The specific, actionable message shown when even the automatic
+  /// disconnect-and-retry inside [signInToGoogleDrive] couldn't get past a
+  /// "cancelled (with extra detail)" error such as "[16] Account reauth
+  /// failed". Distinct from [_friendlyGoogleError] (which handles the
+  /// other, more standard [GoogleSignInException] codes) because this one
+  /// needs to explain a phone-side stuck state, not an app configuration
+  /// problem.
+  String _reauthFailedMessage(GoogleSignInException e) {
+    return 'Google could not confirm your account on this phone (it reported '
+        '"${e.description ?? e.code.name}"). This is almost always a stuck '
+        'sign-in on the phone itself, not a problem with the app or your '
+        'internet.\n\n'
+        'Please try:\n'
+        '1. Tap "Connect Google Drive" again - it often works the 2nd time.\n'
+        '2. If it keeps failing, use "Change Google Account" below, or open '
+        'the Google Account app on this phone -> your account -> Security '
+        '-> "Apps with access to your account", remove Professional '
+        'Mobiles there, then connect again from here.\n'
+        '3. Make sure this phone has an active internet connection.';
   }
 
   /// Translates the raw Google sign-in error codes into something a shop
@@ -284,7 +373,17 @@ class BackupService {
   /// temp copy of the database that's deleted right after the upload, so
   /// backing up to Drive every single day forever never piles up local
   /// files on the phone itself.
-  Future<String?> backupToGoogleDrive() async {
+  ///
+  /// [allowInteractiveSignIn] controls what happens if the silent/lightweight
+  /// sign-in fails (token expired, access revoked from the Google Account
+  /// side, etc.): when true (the default, used by the foreground "Backup to
+  /// Drive" button) this opens the account picker right here and
+  /// re-authorizes automatically, so a stale connection quietly repairs
+  /// itself instead of just failing. When false (used by the background
+  /// daily auto-backup below) it never tries to show UI from a background
+  /// isolate - it simply throws, gets caught by the caller, and that day
+  /// stays "due" for the next successful attempt instead.
+  Future<String?> backupToGoogleDrive({bool allowInteractiveSignIn = true}) async {
     try {
       await _ensureInitialized();
 
@@ -292,9 +391,17 @@ class BackupService {
       // just resolve to a null account) when lightweight auth isn't
       // possible right now - both cases mean "not silently signed in".
       final lightweight = _googleSignIn.attemptLightweightAuthentication();
-      final account = lightweight != null ? await lightweight : null;
+      GoogleSignInAccount? account = lightweight != null ? await lightweight : null;
       if (account == null) {
-        throw Exception('Not signed in to Google Drive - use "Connect Google Drive" first.');
+        if (!allowInteractiveSignIn) {
+          throw Exception('Not signed in to Google Drive - use "Connect Google Drive" first.');
+        }
+        // Silent sign-in didn't work any more (expired/revoked token) -
+        // re-open the account flow right here instead of failing outright,
+        // satisfying "reconnect automatically" without a separate trip to
+        // Settings first.
+        account = await _googleSignIn.authenticate();
+        await _settings.set(SettingsRepository.googleDriveLinked, 'true');
       }
 
       // Reuse a previously granted authorization silently if we still have
@@ -366,7 +473,12 @@ class BackupService {
         if (sameDay) return false;
       }
 
-      await backupToGoogleDrive();
+      // allowInteractiveSignIn: false - this can run from a background
+      // WorkManager isolate with no foreground Activity to show an account
+      // picker in, so it must only ever use a silent/already-authorized
+      // connection, never try to pop UI. See backupToGoogleDrive's doc
+      // comment.
+      await backupToGoogleDrive(allowInteractiveSignIn: false);
       await _settings.set(SettingsRepository.lastDriveBackupAt, now.toIso8601String());
       return true;
     } catch (_) {

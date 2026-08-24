@@ -1,3 +1,6 @@
+import 'dart:io';
+
+import 'package:android_intent_plus/android_intent.dart';
 import 'package:flutter/services.dart';
 import 'package:url_launcher/url_launcher.dart';
 import '../repositories/settings_repository.dart';
@@ -11,15 +14,45 @@ class WhatsAppSmsService {
   static const _shareChannel = MethodChannel('pro_app/whatsapp_share');
   final _settingsRepo = SettingsRepository();
 
-    String _sanitizePhone(String phone) {
-      var digits = phone.replaceAll(RegExp(r'[^0-9]'), '');
-      if (digits.length == 10) digits = '91$digits'; // default to India country code
-      return digits;
-    }
+  // Android package names for the two WhatsApp variants - see
+  // Settings -> WhatsApp Sending / SettingsRepository.whatsappSendApp.
+  static const _businessPackage = 'com.whatsapp.w4b';
+  static const _regularPackage = 'com.whatsapp';
+
+  String _sanitizePhone(String phone) {
+    var digits = phone.replaceAll(RegExp(r'[^0-9]'), '');
+    if (digits.length == 10) digits = '91$digits'; // default to India country code
+    return digits;
+  }
 
   Future<bool> sendWhatsApp({required String phone, required String message}) async {
     final number = _sanitizePhone(phone);
-    final uri = Uri.parse('https://wa.me/$number?text=${Uri.encodeComponent(message)}');
+    final url = 'https://wa.me/$number?text=${Uri.encodeComponent(message)}';
+
+    // A shop that replies to customers from WhatsApp Business (not the
+    // regular consumer WhatsApp app) was finding intimations quietly
+    // opening in whichever app Android/the phone's "open by default"
+    // setting happened to pick - often the *other* one, which they don't
+    // watch, so it read as "the message never went out" even though it
+    // technically opened somewhere. When the shop has explicitly chosen
+    // an app in Settings -> WhatsApp Sending, target it directly here;
+    // 'auto' (the default, unset) falls through to the exact previous
+    // behaviour, unchanged.
+    final preferred = await _settingsRepo.getWhatsAppSendApp();
+    if (Platform.isAndroid && preferred != 'auto') {
+      final targetPackage = preferred == 'business' ? _businessPackage : _regularPackage;
+      try {
+        final intent = AndroidIntent(action: 'action_view', data: url, package: targetPackage);
+        await intent.launch();
+        return true;
+      } catch (_) {
+        // That specific app isn't installed on this phone, or launching it
+        // failed for any other reason - fall through to the plain generic
+        // link below instead of leaving the shop with nothing sent.
+      }
+    }
+
+    final uri = Uri.parse(url);
     return launchUrl(uri, mode: LaunchMode.externalApplication);
   }
 
@@ -59,7 +92,7 @@ class WhatsAppSmsService {
       scheme: 'sms',
       path: phone,
       queryParameters: {'body': message},
-      );
+    );
     return launchUrl(uri);
   }
 
@@ -114,13 +147,13 @@ class WhatsAppSmsService {
       return text;
     }
     return '📱 Mobile Service Received\n'
-      'Dear Customer, உங்கள் mobile service-க்கு கொடுக்கப்பட்டுள்ளது.\n'
-      '🔧 Model: ${v(mobileModel)}\n'
-      '📝 Problem: ${v(complaint)}\n'
-      '💰 spare + service charge Amount: ${formatCurrency(total)}\n'
-      '📞 Service முடிந்ததும் உங்களுக்கு WhatsApp மூலம் தகவல் தெரிவிக்கப்படும். நன்றி! 🙏\n'
-      'professional mobiles trusted service\n'
-      'ma.kunnathur';
+        'Dear Customer, உங்கள் mobile service-க்கு கொடுக்கப்பட்டுள்ளது.\n'
+        '🔧 Model: ${v(mobileModel)}\n'
+        '📝 Problem: ${v(complaint)}\n'
+        '💰 spare + service charge Amount: ${formatCurrency(total)}\n'
+        '📞 Service முடிந்ததும் உங்களுக்கு WhatsApp மூலம் தகவல் தெரிவிக்கப்படும். நன்றி! 🙏\n'
+        'professional mobiles trusted service\n'
+        'ma.kunnathur';
   }
 
   /// Delivery confirmation - sent the moment a job is marked Delivered from
@@ -153,13 +186,13 @@ class WhatsAppSmsService {
       return text;
     }
     return '📱 Mobile Service Delivered\n'
-      'Dear Customer, உங்கள் mobile service முடிந்து ஒப்படைக்கப்பட்டுள்ளது.\n'
-      '🔧 Model: ${mobileName ?? '-'}\n'
-      '💰 Total Amount: ${formatCurrency(totalAmount)}\n'
-      '✅ Paid: ${formatCurrency(paidAmount)}\n'
-      '🙏 நன்றி! Thank you for choosing Professional Mobiles.\n'
-      'professional mobiles trusted service\n'
-      'ma.kunnathur';
+        'Dear Customer, உங்கள் mobile service முடிந்து ஒப்படைக்கப்பட்டுள்ளது.\n'
+        '🔧 Model: ${mobileName ?? '-'}\n'
+        '💰 Total Amount: ${formatCurrency(totalAmount)}\n'
+        '✅ Paid: ${formatCurrency(paidAmount)}\n'
+        '🙏 நன்றி! Thank you for choosing Professional Mobiles.\n'
+        'professional mobiles trusted service\n'
+        'ma.kunnathur';
   }
 
   /// "Ready for delivery" notice - sent the moment a service job's status
@@ -190,14 +223,14 @@ class WhatsAppSmsService {
       return text;
     }
     return '📱 PROFESSIONAL MOBILES\n'
-      'வணக்கம் $customerName அவர்களே! 👋\n'
-      'உங்களுடைய ${modelLabel.isEmpty ? 'மொபைல்' : modelLabel} மொபைல் service செய்து முடிக்கப்பட்டுவிட்டது. ✅\n'
-      '📦 Mobile Delivery-ku Ready!\n'
-      '💰 Service Amount: ${formatCurrency(amount)}\n'
-      '🧾 Bill No: $billNo\n'
-      'தயவுசெய்து கடைக்கு வந்து உங்கள் mobile-ஐ பெற்றுக்கொள்ளவும்.\n'
-      '🙏 நன்றி\n'
-      'PROFESSIONAL MOBILES';
+        'வணக்கம் $customerName அவர்களே! 👋\n'
+        'உங்களுடைய ${modelLabel.isEmpty ? 'மொபைல்' : modelLabel} மொபைல் service செய்து முடிக்கப்பட்டுவிட்டது. ✅\n'
+        '📦 Mobile Delivery-ku Ready!\n'
+        '💰 Service Amount: ${formatCurrency(amount)}\n'
+        '🧾 Bill No: $billNo\n'
+        'தயவுசெய்து கடைக்கு வந்து உங்கள் mobile-ஐ பெற்றுக்கொள்ளவும்.\n'
+        '🙏 நன்றி\n'
+        'PROFESSIONAL MOBILES';
   }
 
   /// Daily supplier order (Daily Orders feature) - opens WhatsApp with just
@@ -236,19 +269,19 @@ class WhatsAppSmsService {
   }
 
   String warrantyClaimMessage({required String customerName, required String referenceLabel, required String description}) { return '''
-      📱 PROFESSIONAL MOBILES
-      🛡️ Warranty Claim Confirmation
-      வணக்கம் 🙏 Dear Customer,
-      Your warranty claim has been recorded.
-      ━━━━━━━━━━━━━━
-      👤 Customer Name: $customerName
-      🧾 Reference: $referenceLabel
-      📝 Issue: $description
-      ━━━━━━━━━━━━━━
-      ✅ Status: WARRANTY CLAIMED
-      Our team will get in touch with you shortly regarding this claim.
-      🙏 Thank you for choosing Professional Mobiles.
-      📱 PROFESSIONAL MOBILES
-      Trusted Mobile Service Center''';
+📱 PROFESSIONAL MOBILES
+🛡️ Warranty Claim Confirmation
+வணக்கம் 🙏 Dear Customer,
+Your warranty claim has been recorded.
+━━━━━━━━━━━━━━
+👤 Customer Name: $customerName
+🧾 Reference: $referenceLabel
+📝 Issue: $description
+━━━━━━━━━━━━━━
+✅ Status: WARRANTY CLAIMED
+Our team will get in touch with you shortly regarding this claim.
+🙏 Thank you for choosing Professional Mobiles.
+📱 PROFESSIONAL MOBILES
+Trusted Mobile Service Center''';
   }
 }
