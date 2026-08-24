@@ -18,8 +18,11 @@ class BackupScreen extends StatefulWidget {
 class _BackupScreenState extends State<BackupScreen> {
   final _backupService = BackupService();
   List<File> _backups = [];
+  String _backupDirPath = '';
+  int _frequencyDays = 1;
   bool _loading = true;
   bool _driveLinked = false;
+  String? _driveFolderName;
   bool _working = false;
 
   @override
@@ -32,9 +35,15 @@ class _BackupScreenState extends State<BackupScreen> {
     setState(() => _loading = true);
     final backups = await _backupService.listLocalBackups();
     final linked = await _backupService.isGoogleDriveLinked;
+    final dirPath = await _backupService.backupDirPath();
+    final freq = await _backupService.autoBackupFrequencyDays;
+    final folderName = linked ? await _backupService.backupFolderName : null;
     setState(() {
       _backups = backups;
       _driveLinked = linked;
+      _backupDirPath = dirPath;
+      _frequencyDays = freq;
+      _driveFolderName = folderName;
       _loading = false;
     });
   }
@@ -49,46 +58,100 @@ class _BackupScreenState extends State<BackupScreen> {
               padding: const EdgeInsets.all(14),
               children: [
                 SectionCard(title: 'Manual Backup', icon: Icons.save_rounded, children: [
-                  Text('Creates a local copy of your entire database right now.', style: TextStyle(color: AppColors.textSecondaryOf(context), fontSize: 12.5)),
+                  const Text('Creates a local copy of your entire database right now.', style: TextStyle(color: AppColors.textSecondary, fontSize: 12.5)),
                   const SizedBox(height: 10),
-                  ElevatedButton.icon(
-                    onPressed: _working ? null : _createBackup,
-                    icon: const Icon(Icons.backup_rounded),
-                    label: const Text('Backup Now'),
+                  Row(children: [
+                    Expanded(
+                      child: OutlinedButton.icon(
+                        onPressed: _working ? null : _createBackup,
+                        icon: const Icon(Icons.backup_rounded),
+                        label: const Text('Backup Now'),
+                      ),
+                    ),
+                    const SizedBox(width: 8),
+                    Expanded(
+                      child: ElevatedButton.icon(
+                        onPressed: _working ? null : _exportBackup,
+                        icon: const Icon(Icons.folder_open_rounded),
+                        label: const Text('Save Backup To...'),
+                      ),
+                    ),
+                  ]),
+                  const SizedBox(height: 10),
+                  Container(
+                    padding: const EdgeInsets.all(10),
+                    decoration: BoxDecoration(
+                      color: AppColors.bg,
+                      borderRadius: BorderRadius.circular(8),
+                      border: Border.all(color: AppColors.border),
+                    ),
+                    child: Column(
+                      crossAxisAlignment: CrossAxisAlignment.start,
+                      children: [
+                        const Text('"Backup Now" is saved app-privately at:', style: TextStyle(fontSize: 11, fontWeight: FontWeight.w700)),
+                        const SizedBox(height: 3),
+                        SelectableText(_backupDirPath, style: const TextStyle(fontSize: 11, fontFamily: 'monospace')),
+                        const SizedBox(height: 6),
+                        const Text(
+                          'This folder is private to the app - Android hides it from the Files app on every phone, by design, so searching for "backup" there will never find it. Use "Save Backup To..." instead to put a copy somewhere you can see and reach it (Downloads, an SD card, etc.) - that\'s the reliable offline manual backup.',
+                          style: TextStyle(fontSize: 11.5, color: AppColors.textSecondary),
+                        ),
+                      ],
+                    ),
                   ),
                 ]),
-                SectionCard(title: 'Weekly Automatic Backup', icon: Icons.auto_mode_rounded, children: [
+                SectionCard(title: 'Automatic Backup', icon: Icons.auto_mode_rounded, children: [
                   Text(
-                    'A local backup is taken automatically whenever the app is opened and more than 7 days have passed since the last one.',
-                    style: TextStyle(color: AppColors.textSecondaryOf(context), fontSize: 12.5),
+                    'A local backup is taken automatically whenever the app is opened and more than $_frequencyDays day${_frequencyDays == 1 ? '' : 's'} have passed since the last one.',
+                    style: const TextStyle(color: AppColors.textSecondary, fontSize: 12.5),
                   ),
+                  const SizedBox(height: 4),
+                  const Text(
+                    'Note: this checks only when you open the app (there\'s no separate background service) - so it fires the first time you open the app on or after the due day.',
+                    style: TextStyle(color: AppColors.textSecondary, fontSize: 11),
+                  ),
+                  const SizedBox(height: 10),
+                  Row(children: [
+                    const Text('Frequency:', style: TextStyle(fontWeight: FontWeight.w600)),
+                    const SizedBox(width: 10),
+                    ChoiceChip(
+                      label: const Text('Daily'),
+                      selected: _frequencyDays == 1,
+                      onSelected: (_) => _setFrequency(1),
+                    ),
+                    const SizedBox(width: 8),
+                    ChoiceChip(
+                      label: const Text('Weekly'),
+                      selected: _frequencyDays == 7,
+                      onSelected: (_) => _setFrequency(7),
+                    ),
+                  ]),
                 ]),
                 SectionCard(title: 'Google Drive Backup (Optional)', icon: Icons.cloud_rounded, children: [
                   Text(_driveLinked ? 'Linked to Google Drive.' : 'Not linked yet.', style: const TextStyle(fontWeight: FontWeight.w600)),
+                  if (_driveLinked) ...[
+                    const SizedBox(height: 4),
+                    Text('Saving to Drive folder: ${_driveFolderName ?? 'Professional Mobiles Backups (default)'}',
+                        style: const TextStyle(fontSize: 12, color: AppColors.textSecondary)),
+                  ],
                   const SizedBox(height: 8),
-                  Text(
+                  const Text(
                     'Requires internet + your own Google Cloud OAuth client (see README "Google Drive Backup Setup"). Everything else in this app works fully offline without this.',
-                    style: TextStyle(color: AppColors.textSecondaryOf(context), fontSize: 12),
+                    style: TextStyle(color: AppColors.textSecondary, fontSize: 12),
                   ),
-                  const SizedBox(height: 8),
-                  if (_driveLinked)
-                    Text(
-                      "Once connected, all your data (except photos) backs up to Google Drive automatically every day, aimed at around 10 PM - no need to tap anything, and no permission popups. Android doesn't guarantee the exact minute, so as a safety net this also runs the moment you open the app if that day's backup hasn't happened yet. If a day is missed (no internet, phone off, etc.), it's simply included in the next successful backup - nothing is lost.\n\nSaved into a normal, visible \"Professional Mobiles Backups\" folder in your own Google Drive - open the Drive app any time to see it. One file per month, always holding that month's latest complete data (today's data is automatically included with everything noted earlier that month), so you can open whichever month you need.",
-                      style: TextStyle(color: AppColors.textSecondaryOf(context), fontSize: 12),
-                    ),
                   const SizedBox(height: 10),
-                  Row(children: [
+                  Wrap(spacing: 8, runSpacing: 8, children: [
                     if (!_driveLinked)
                       ElevatedButton.icon(onPressed: _working ? null : _linkDrive, icon: const Icon(Icons.login_rounded), label: const Text('Connect Google Drive')),
                     if (_driveLinked) ...[
                       ElevatedButton.icon(onPressed: _working ? null : _backupToDrive, icon: const Icon(Icons.cloud_upload_rounded), label: const Text('Backup to Drive')),
-                      const SizedBox(width: 8),
+                      OutlinedButton.icon(onPressed: _working ? null : _chooseDriveFolder, icon: const Icon(Icons.folder_rounded), label: const Text('Choose Folder')),
                       OutlinedButton(onPressed: _working ? null : _unlinkDrive, child: const Text('Disconnect')),
                     ],
                   ]),
                 ]),
                 SectionCard(title: 'Local Backups (${_backups.length})', icon: Icons.folder_zip_rounded, children: [
-                  if (_backups.isEmpty) Text('No backups yet.', style: TextStyle(color: AppColors.textSecondaryOf(context))),
+                  if (_backups.isEmpty) const Text('No backups yet.', style: TextStyle(color: AppColors.textSecondary)),
                   ..._backups.map((f) => ListTile(
                         contentPadding: EdgeInsets.zero,
                         leading: const Icon(Icons.description_rounded),
@@ -102,82 +165,116 @@ class _BackupScreenState extends State<BackupScreen> {
     );
   }
 
-  /// Shows an error in a dialog (not just a snackbar) so a long "why this
-  /// failed" message - e.g. the Google OAuth setup explanation - is fully
-  /// readable instead of getting clipped at the bottom of the screen.
-  void _showError(String title, Object error) {
-    if (!mounted) return;
-    final message = error.toString().replaceFirst('Exception: ', '');
-    showDialog(
-      context: context,
-      builder: (context) => AlertDialog(
-        title: Text(title),
-        content: Text(message),
-        actions: [TextButton(onPressed: () => Navigator.pop(context), child: const Text('OK'))],
-      ),
-    );
-  }
-
   Future<void> _createBackup() async {
     setState(() => _working = true);
-    try {
-      await _backupService.createManualBackup();
-      if (mounted) ScaffoldMessenger.of(context).showSnackBar(const SnackBar(content: Text('Backup created')));
-    } catch (e) {
-      _showError('Backup failed', e);
-    } finally {
-      if (mounted) setState(() => _working = false);
-    }
+    await _backupService.createManualBackup();
+    if (mounted) ScaffoldMessenger.of(context).showSnackBar(const SnackBar(content: Text('Backup created')));
+    setState(() => _working = false);
     _load();
   }
 
-  // Previously this called signInToGoogleDrive() with no try/catch: an
-  // unconfigured/mismatched Google OAuth client throws instead of
-  // returning, so the button just sat on "working" forever with no error
-  // shown - exactly the "click பண்ணா entha responsum illa" symptom. Now
-  // every outcome (success / cancel / real error) always clears _working
-  // and, on a real error, shows why.
+  Future<void> _exportBackup() async {
+    setState(() => _working = true);
+    final path = await _backupService.exportBackupToFolder();
+    if (mounted) {
+      ScaffoldMessenger.of(context).showSnackBar(
+        SnackBar(content: Text(path != null ? 'Saved to: $path' : 'Save cancelled')),
+      );
+    }
+    setState(() => _working = false);
+    _load();
+  }
+
+  Future<void> _setFrequency(int days) async {
+    await _backupService.setAutoBackupFrequencyDays(days);
+    _load();
+  }
+
   Future<void> _linkDrive() async {
     setState(() => _working = true);
-    try {
-      final ok = await _backupService.signInToGoogleDrive();
-      if (mounted && !ok) {
-        ScaffoldMessenger.of(context).showSnackBar(const SnackBar(content: Text('Google sign-in was cancelled')));
-      }
-    } catch (e) {
-      _showError('Google Drive connection failed', e);
-    } finally {
-      if (mounted) setState(() => _working = false);
+    final result = await _backupService.signInToGoogleDrive();
+    if (mounted && !result.success) {
+      showDialog(
+        context: context,
+        builder: (context) => AlertDialog(
+          title: const Text('Google sign-in failed'),
+          content: Text(result.message ?? 'Unknown error'),
+          actions: [ElevatedButton(onPressed: () => Navigator.pop(context), child: const Text('OK'))],
+        ),
+      );
     }
+    setState(() => _working = false);
     _load();
   }
 
   Future<void> _unlinkDrive() async {
     setState(() => _working = true);
-    try {
-      await _backupService.signOutOfGoogleDrive();
-    } catch (e) {
-      _showError('Could not disconnect', e);
-    } finally {
-      if (mounted) setState(() => _working = false);
-    }
+    await _backupService.signOutOfGoogleDrive();
+    setState(() => _working = false);
     _load();
   }
 
   Future<void> _backupToDrive() async {
     setState(() => _working = true);
-    try {
-      final id = await _backupService.backupToGoogleDrive();
-      if (mounted) {
-        ScaffoldMessenger.of(context).showSnackBar(
-          SnackBar(content: Text(id != null ? 'Uploaded to Google Drive' : 'Google Drive backup failed')),
-        );
-      }
-    } catch (e) {
-      _showError('Google Drive backup failed', e);
-    } finally {
-      if (mounted) setState(() => _working = false);
+    final id = await _backupService.backupToGoogleDrive();
+    if (mounted) {
+      ScaffoldMessenger.of(context).showSnackBar(
+        SnackBar(content: Text(id != null ? 'Uploaded to Google Drive' : 'Google Drive backup failed')),
+      );
     }
+    setState(() => _working = false);
+    _load();
+  }
+
+  Future<void> _chooseDriveFolder() async {
+    setState(() => _working = true);
+    final folders = await _backupService.listDriveFolders();
+    setState(() => _working = false);
+    if (!mounted) return;
+
+    final choice = await showModalBottomSheet<Map<String, String>>(
+      context: context,
+      isScrollControlled: true,
+      builder: (context) => SafeArea(
+        child: Padding(
+          padding: const EdgeInsets.all(16),
+          child: Column(
+            mainAxisSize: MainAxisSize.min,
+            crossAxisAlignment: CrossAxisAlignment.start,
+            children: [
+              const Text('Choose a Drive folder for backups', style: TextStyle(fontWeight: FontWeight.w800, fontSize: 15)),
+              const SizedBox(height: 10),
+              if (folders.isEmpty) const Text('No folders found in your Drive root yet.', style: TextStyle(color: AppColors.textSecondary)),
+              ...folders.map((f) => ListTile(
+                    contentPadding: EdgeInsets.zero,
+                    leading: const Icon(Icons.folder_rounded, color: AppColors.warning),
+                    title: Text(f.name ?? 'Untitled'),
+                    onTap: () => Navigator.pop(context, {'id': f.id ?? '', 'name': f.name ?? 'Untitled'}),
+                  )),
+              const Divider(),
+              ListTile(
+                contentPadding: EdgeInsets.zero,
+                leading: const Icon(Icons.create_new_folder_rounded, color: AppColors.primaryBlue),
+                title: const Text('Create new folder "Professional Mobiles Backups"'),
+                onTap: () => Navigator.pop(context, {'id': '__create__', 'name': 'Professional Mobiles Backups'}),
+              ),
+            ],
+          ),
+        ),
+      ),
+    );
+
+    if (choice == null) return;
+    setState(() => _working = true);
+    if (choice['id'] == '__create__') {
+      final created = await _backupService.createDriveFolder(choice['name']!);
+      if (created.id != null) {
+        await _backupService.setBackupFolder(created.id!, choice['name']!);
+      }
+    } else {
+      await _backupService.setBackupFolder(choice['id']!, choice['name']!);
+    }
+    setState(() => _working = false);
     _load();
   }
 
@@ -195,16 +292,11 @@ class _BackupScreenState extends State<BackupScreen> {
     );
     if (confirm == true) {
       setState(() => _working = true);
-      try {
-        await _backupService.restoreFrom(file);
-        if (mounted) {
-          ScaffoldMessenger.of(context).showSnackBar(const SnackBar(content: Text('Restored. Please close and reopen the app.')));
-        }
-      } catch (e) {
-        _showError('Restore failed', e);
-      } finally {
-        if (mounted) setState(() => _working = false);
+      await _backupService.restoreFrom(file);
+      if (mounted) {
+        ScaffoldMessenger.of(context).showSnackBar(const SnackBar(content: Text('Restored. Please close and reopen the app.')));
       }
+      setState(() => _working = false);
     }
   }
 }
