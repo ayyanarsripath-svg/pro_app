@@ -164,8 +164,8 @@ class _SettingsScreenState extends State<SettingsScreen> {
         Card(
           child: ListTile(
             leading: const Icon(Icons.chat_rounded, color: AppColors.primaryBlue),
-            title: const Text('WhatsApp Message Template'),
-            subtitle: const Text('Customize the "Ready for Delivery" intimation text sent to customers'),
+            title: const Text('WhatsApp Message Templates'),
+            subtitle: const Text('Customize the Received, Ready, and Delivery intimation texts sent to customers'),
             trailing: const Icon(Icons.chevron_right),
             onTap: () => Navigator.push(context, MaterialPageRoute(builder: (_) => const WhatsAppTemplateScreen())),
           ),
