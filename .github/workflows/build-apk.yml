@@ -59,14 +59,18 @@ jobs:
             echo "Restored stable debug.keystore."
           fi
 
-      # README step 3: CAMERA (service / 2nd-hand phone photos) and
-      # INTERNET (Google Drive backup - without this, every network call
-      # google_sign_in/googleapis makes fails outright) permissions.
-      # Previously this was a manual, easy-to-forget step, and since
-      # android/ is regenerated fresh by `flutter create` above on every
-      # build that has never run before on this repo, a one-time manual
-      # edit would never survive anyway. Idempotent: skips any permission
-      # already present.
+      # README step 3: CAMERA (service / 2nd-hand phone photos), INTERNET
+      # (Google Drive backup - without this, every network call
+      # google_sign_in/googleapis makes fails outright), and
+      # POST_NOTIFICATIONS (Android 13+ requires this manifest declaration
+      # before OrderReminderService can even ask the user for the runtime
+      # "Allow notifications?" permission - flutter_local_notifications does
+      # NOT add this to the manifest automatically, the app must declare it
+      # itself) permissions. Previously this was a manual, easy-to-forget
+      # step, and since android/ is regenerated fresh by `flutter create`
+      # above on every build that has never run before on this repo, a
+      # one-time manual edit would never survive anyway. Idempotent: skips
+      # any permission already present.
       - name: Add required Android permissions
         run: |
           python3 - <<'PYEOF'
@@ -79,6 +83,7 @@ jobs:
           needed = [
               '    <uses-permission android:name="android.permission.CAMERA"/>',
               '    <uses-permission android:name="android.permission.INTERNET"/>',
+              '    <uses-permission android:name="android.permission.POST_NOTIFICATIONS"/>',
           ]
           to_add = [line for line in needed if line.split('"')[1] not in content]
 
