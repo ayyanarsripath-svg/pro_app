@@ -183,6 +183,11 @@ class _DailyOrderScreenState extends State<DailyOrderScreen> {
   Future<void> _openSettings() async {
     final nameCtrl = TextEditingController(text: _supplierName);
     final phoneCtrl = TextEditingController(text: _supplierPhone);
+    // Enter/Done on the keyboard moves focus to the next field instead of
+    // just closing the keyboard (spec: field full pannittu enter azhuthina
+    // aditha tabku poganum) - see the matching pattern in _addItem/_editItem.
+    final nameFocus = FocusNode();
+    final phoneFocus = FocusNode();
     var pickedTime = _parseTime(_sendTime);
     var reminderOn = _reminderEnabled;
     var widgetOn = _widgetEnabled;
@@ -197,12 +202,21 @@ class _DailyOrderScreenState extends State<DailyOrderScreen> {
               mainAxisSize: MainAxisSize.min,
               crossAxisAlignment: CrossAxisAlignment.start,
               children: [
-                TextField(controller: nameCtrl, decoration: const InputDecoration(labelText: 'Supplier Name')),
+                TextField(
+                  controller: nameCtrl,
+                  focusNode: nameFocus,
+                  decoration: const InputDecoration(labelText: 'Supplier Name'),
+                  textInputAction: TextInputAction.next,
+                  onSubmitted: (_) => FocusScope.of(dialogContext).requestFocus(phoneFocus),
+                ),
                 const SizedBox(height: 10),
                 TextField(
                   controller: phoneCtrl,
+                  focusNode: phoneFocus,
                   decoration: const InputDecoration(labelText: 'Supplier Phone'),
                   keyboardType: TextInputType.phone,
+                  textInputAction: TextInputAction.done,
+                  onSubmitted: (_) => FocusScope.of(dialogContext).unfocus(),
                 ),
                 const SizedBox(height: 4),
                 Align(
@@ -432,6 +446,13 @@ class _DailyOrderScreenState extends State<DailyOrderScreen> {
     final typeCtrl = TextEditingController();
     final qtyCtrl = TextEditingController();
     final phoneCtrl = TextEditingController();
+    // Enter/Done moves focus to the next field instead of just closing the
+    // keyboard (spec: field full pannittu enter azhuthina aditha tabku
+    // poganum).
+    final partFocus = FocusNode();
+    final typeFocus = FocusNode();
+    final qtyFocus = FocusNode();
+    final phoneFocus = FocusNode();
 
     final ok = await showDialog<bool>(
       context: context,
@@ -441,16 +462,37 @@ class _DailyOrderScreenState extends State<DailyOrderScreen> {
           child: Column(
             mainAxisSize: MainAxisSize.min,
             children: [
-              TextField(controller: partCtrl, decoration: const InputDecoration(labelText: 'Part / Accessory Name *')),
+              TextField(
+                controller: partCtrl,
+                focusNode: partFocus,
+                decoration: const InputDecoration(labelText: 'Part / Accessory Name *'),
+                textInputAction: TextInputAction.next,
+                onSubmitted: (_) => FocusScope.of(dialogContext).requestFocus(typeFocus),
+              ),
               const SizedBox(height: 10),
-              TextField(controller: typeCtrl, decoration: const InputDecoration(labelText: 'Type / Model')),
+              TextField(
+                controller: typeCtrl,
+                focusNode: typeFocus,
+                decoration: const InputDecoration(labelText: 'Type / Model'),
+                textInputAction: TextInputAction.next,
+                onSubmitted: (_) => FocusScope.of(dialogContext).requestFocus(qtyFocus),
+              ),
               const SizedBox(height: 10),
-              TextField(controller: qtyCtrl, decoration: const InputDecoration(labelText: 'Quantity *')),
+              TextField(
+                controller: qtyCtrl,
+                focusNode: qtyFocus,
+                decoration: const InputDecoration(labelText: 'Quantity *'),
+                textInputAction: TextInputAction.next,
+                onSubmitted: (_) => FocusScope.of(dialogContext).requestFocus(phoneFocus),
+              ),
               const SizedBox(height: 10),
               TextField(
                 controller: phoneCtrl,
+                focusNode: phoneFocus,
                 decoration: const InputDecoration(labelText: 'Phone (optional - for your own reference, tap to call)'),
                 keyboardType: TextInputType.phone,
+                textInputAction: TextInputAction.done,
+                onSubmitted: (_) => FocusScope.of(dialogContext).unfocus(),
               ),
             ],
           ),
@@ -480,6 +522,13 @@ class _DailyOrderScreenState extends State<DailyOrderScreen> {
     final typeCtrl = TextEditingController(text: item.typeModel ?? '');
     final qtyCtrl = TextEditingController(text: item.quantity);
     final phoneCtrl = TextEditingController(text: item.phone ?? '');
+    // Enter/Done moves focus to the next field instead of just closing the
+    // keyboard (spec: field full pannittu enter azhuthina aditha tabku
+    // poganum).
+    final partFocus = FocusNode();
+    final typeFocus = FocusNode();
+    final qtyFocus = FocusNode();
+    final phoneFocus = FocusNode();
 
     final ok = await showDialog<bool>(
       context: context,
@@ -489,16 +538,37 @@ class _DailyOrderScreenState extends State<DailyOrderScreen> {
           child: Column(
             mainAxisSize: MainAxisSize.min,
             children: [
-              TextField(controller: partCtrl, decoration: const InputDecoration(labelText: 'Part / Accessory Name *')),
+              TextField(
+                controller: partCtrl,
+                focusNode: partFocus,
+                decoration: const InputDecoration(labelText: 'Part / Accessory Name *'),
+                textInputAction: TextInputAction.next,
+                onSubmitted: (_) => FocusScope.of(dialogContext).requestFocus(typeFocus),
+              ),
               const SizedBox(height: 10),
-              TextField(controller: typeCtrl, decoration: const InputDecoration(labelText: 'Type / Model')),
+              TextField(
+                controller: typeCtrl,
+                focusNode: typeFocus,
+                decoration: const InputDecoration(labelText: 'Type / Model'),
+                textInputAction: TextInputAction.next,
+                onSubmitted: (_) => FocusScope.of(dialogContext).requestFocus(qtyFocus),
+              ),
               const SizedBox(height: 10),
-              TextField(controller: qtyCtrl, decoration: const InputDecoration(labelText: 'Quantity *')),
+              TextField(
+                controller: qtyCtrl,
+                focusNode: qtyFocus,
+                decoration: const InputDecoration(labelText: 'Quantity *'),
+                textInputAction: TextInputAction.next,
+                onSubmitted: (_) => FocusScope.of(dialogContext).requestFocus(phoneFocus),
+              ),
               const SizedBox(height: 10),
               TextField(
                 controller: phoneCtrl,
+                focusNode: phoneFocus,
                 decoration: const InputDecoration(labelText: 'Phone (optional - for your own reference, tap to call)'),
                 keyboardType: TextInputType.phone,
+                textInputAction: TextInputAction.done,
+                onSubmitted: (_) => FocusScope.of(dialogContext).unfocus(),
               ),
             ],
           ),
@@ -576,7 +646,7 @@ class _DailyOrderScreenState extends State<DailyOrderScreen> {
                 Container(
                   padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 3),
                   decoration: BoxDecoration(
-                    color: allSent ? Colors.green.withOpacity(0.15) : Colors.orange.withOpacity(0.15),
+                    color: allSent ? AppColors.success.withOpacity(0.15) : AppColors.warning.withOpacity(0.15),
                     borderRadius: BorderRadius.circular(20),
                   ),
                   child: Text(
@@ -584,7 +654,7 @@ class _DailyOrderScreenState extends State<DailyOrderScreen> {
                     style: TextStyle(
                       fontSize: 11,
                       fontWeight: FontWeight.w700,
-                      color: allSent ? Colors.green[800] : Colors.orange[800],
+                      color: allSent ? AppColors.success : AppColors.warning,
                     ),
                   ),
                 ),
