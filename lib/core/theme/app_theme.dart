@@ -110,6 +110,16 @@ class AppTheme {
         backgroundColor: AppColors.deepBlue,
         foregroundColor: Colors.white,
         elevation: 0,
+        // Material 3 otherwise tints the AppBar with colorScheme.surfaceTint
+        // once the content beneath it scrolls, which in light theme (where
+        // surfaceTint = primaryBlue, close in hue to deepBlue) washed out
+        // the contrast of the white "Switch User" chip text against the
+        // bar - it stayed readable in dark theme by coincidence since dark
+        // theme's surfaceTint is flameOrange. Pinning both to zero keeps
+        // the bar a flat, solid deepBlue in both themes so the white chip
+        // text/icon is always legible.
+        scrolledUnderElevation: 0,
+        surfaceTintColor: Colors.transparent,
         centerTitle: false,
         titleTextStyle: TextStyle(
           color: Colors.white,
@@ -196,6 +206,10 @@ class AppTheme {
         backgroundColor: AppColors.deepBlue,
         foregroundColor: Colors.white,
         elevation: 0,
+        // Kept a flat solid deepBlue (no scroll-tint) - see the matching
+        // comment in AppTheme.light's appBarTheme for why.
+        scrolledUnderElevation: 0,
+        surfaceTintColor: Colors.transparent,
         centerTitle: false,
         titleTextStyle: TextStyle(
           color: Colors.white,
