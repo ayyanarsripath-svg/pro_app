@@ -81,7 +81,12 @@ class WhatsAppSmsService {
   /// available inside the app itself, not in the WhatsApp text. Unused
   /// params (customerPhone, imei, workParts, status, receivedDate,
   /// expectedDelivery) are kept so every call site stays unchanged.
-  String serviceIntimationMessage({
+  /// Uses the shop's own saved "Received" template (see
+  /// WhatsAppTemplateScreen / SettingsRepository) when one has been
+  /// customized, substituting {customerName}/{mobileName}/{complaint}/
+  /// {amount}/{shopName} tokens - falls back to the original built-in
+  /// wording when no custom template is saved yet.
+  Future<String> serviceIntimationMessage({
     required String customerName,
     required String customerPhone,
     String? mobileModel,
@@ -93,9 +98,21 @@ class WhatsAppSmsService {
     required String status,
     required DateTime receivedDate,
     DateTime? expectedDelivery,
-  }) {
+  }) async {
     final total = serviceCharge + sparePartsCharge;
     String v(String? s) => (s == null || s.trim().isEmpty) ? '-' : s.trim();
+    final shopName = (await _settingsRepo.get(SettingsRepository.shopName))?.trim();
+    final resolvedShopName = (shopName == null || shopName.isEmpty) ? 'PROFESSIONAL MOBILES' : shopName;
+    final custom = await _settingsRepo.getReceivedIntimationTemplate();
+    if (custom != null && custom.trim().isNotEmpty) {
+      var text = custom;
+      text = text.replaceAll('{customerName}', customerName);
+      text = text.replaceAll('{mobileName}', v(mobileModel));
+      text = text.replaceAll('{complaint}', v(complaint));
+      text = text.replaceAll('{amount}', formatCurrency(total));
+      text = text.replaceAll('{shopName}', resolvedShopName);
+      return text;
+    }
     return '📱 Mobile Service Received\n'
       'Dear Customer, உங்கள் mobile service-க்கு கொடுக்கப்பட்டுள்ளது.\n'
       '🔧 Model: ${v(mobileModel)}\n'
@@ -110,13 +127,31 @@ class WhatsAppSmsService {
   /// the Delivery Status action, once the final amount has been collected.
   /// Simplified to match serviceIntimationMessage's short style (spec:
   /// simplify the WhatsApp text) - bill no / status stay in the app itself.
-  String deliveryMessage({
+  /// Uses the shop's own saved "Delivery" template (see
+  /// WhatsAppTemplateScreen / SettingsRepository) when one has been
+  /// customized, substituting {customerName}/{mobileName}/{amount}/
+  /// {paidAmount}/{billNo}/{shopName} tokens - falls back to the original
+  /// built-in wording when no custom template is saved yet.
+  Future<String> deliveryMessage({
     required String customerName,
     required String billNo,
     String? mobileName,
     required double totalAmount,
     required double paidAmount,
-  }) {
+  }) async {
+    final shopName = (await _settingsRepo.get(SettingsRepository.shopName))?.trim();
+    final resolvedShopName = (shopName == null || shopName.isEmpty) ? 'PROFESSIONAL MOBILES' : shopName;
+    final custom = await _settingsRepo.getDeliveryIntimationTemplate();
+    if (custom != null && custom.trim().isNotEmpty) {
+      var text = custom;
+      text = text.replaceAll('{customerName}', customerName);
+      text = text.replaceAll('{mobileName}', mobileName ?? '-');
+      text = text.replaceAll('{amount}', formatCurrency(totalAmount));
+      text = text.replaceAll('{paidAmount}', formatCurrency(paidAmount));
+      text = text.replaceAll('{billNo}', billNo);
+      text = text.replaceAll('{shopName}', resolvedShopName);
+      return text;
+    }
     return '📱 Mobile Service Delivered\n'
       'Dear Customer, உங்கள் mobile service முடிந்து ஒப்படைக்கப்பட்டுள்ளது.\n'
       '🔧 Model: ${mobileName ?? '-'}\n'
@@ -174,11 +209,29 @@ class WhatsAppSmsService {
   /// PdfService.buildDailyOrderPdf), sent as a separate share step right
   /// after this message, since a wa.me link can pre-fill text but can't
   /// carry a file attachment.
-  String dailyOrderMessage({
+  /// Uses the shop's own saved Daily Order caption template (see
+  /// WhatsAppTemplateScreen / SettingsRepository, editable from Daily
+  /// Orders' own Settings dialog) when one has been customized, substituting
+  /// {supplierName}/{itemCount}/{dates}/{shopName} tokens - falls back to
+  /// the original short built-in heading when no custom template is saved
+  /// yet (spec: "more ... whatspp app message customize panra option need
+  /// and preview kattanum").
+  Future<String> dailyOrderMessage({
     required String supplierName,
     required List<String> orderDateLabels,
     required int itemCount,
-  }) {
+  }) async {
+    final shopName = (await _settingsRepo.get(SettingsRepository.shopName))?.trim();
+    final resolvedShopName = (shopName == null || shopName.isEmpty) ? 'PROFESSIONAL MOBILES' : shopName;
+    final custom = await _settingsRepo.getDailyOrderMessageTemplate();
+    if (custom != null && custom.trim().isNotEmpty) {
+      var text = custom;
+      text = text.replaceAll('{supplierName}', supplierName);
+      text = text.replaceAll('{itemCount}', itemCount.toString());
+      text = text.replaceAll('{dates}', orderDateLabels.join(', '));
+      text = text.replaceAll('{shopName}', resolvedShopName);
+      return text;
+    }
     return 'Professional Mobiles Daily Order';
   }
 

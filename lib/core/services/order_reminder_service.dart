@@ -62,6 +62,24 @@ class OrderReminderService {
       if (pending.isEmpty) return;
 
       final now = DateTime.now();
+
+      // BUG FIX: this used to skip straight to the "already notified today?"
+      // check below with no comparison against the shop's actual saved send
+      // time at all - so the very first call of the day (often the app-open
+      // catch-up right after unlocking in the morning, well before the
+      // chosen time) fired the reminder immediately and then marked today
+      // as done, silently suppressing the real, later trigger at the
+      // configured time (spec: "send time 1:21 ku set panna but
+      // automaticallu message ... send aagala" - the 1:21 setting was never
+      // actually being honoured). Now nothing fires until "now" has
+      // genuinely reached today's configured send time.
+      final sendTimeStr = await _settings.get(SettingsRepository.dailyOrderSendTime) ?? '12:30';
+      final sendTimeParts = sendTimeStr.split(':');
+      final sendHour = int.tryParse(sendTimeParts[0]) ?? 12;
+      final sendMinute = sendTimeParts.length > 1 ? (int.tryParse(sendTimeParts[1]) ?? 30) : 30;
+      final todaysSendTime = DateTime(now.year, now.month, now.day, sendHour, sendMinute);
+      if (now.isBefore(todaysSendTime)) return;
+
       final lastStr = await _settings.get(SettingsRepository.lastOrderReminderAt);
       if (lastStr != null) {
         final last = DateTime.parse(lastStr);

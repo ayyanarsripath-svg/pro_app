@@ -838,6 +838,12 @@ class PdfService {
       Future<Uint8List> buildDailyOrderPdf({
             required String supplierName,
             required List<DailyOrderItem> items,
+            // Optional shop-editable free-text line (e.g. special
+            // instructions to the supplier) printed at the bottom of the
+            // note - see SettingsRepository.dailyOrderPdfNote / Daily
+            // Orders' own Settings dialog (spec: "more pdf ... customize
+            // panra option need").
+            String? note,
       }) async {
             final shop = await _shopInfo();
             final logo = await _logo();
@@ -901,6 +907,20 @@ class PdfService {
                               pw.Text('Generated: ${formatDate(DateTime.now())}', style: const pw.TextStyle(fontSize: 9)),
                               pw.SizedBox(height: 10),
                               for (final date in byDate.keys) dateSection(date, byDate[date]!),
+                              if (note != null && note.trim().isNotEmpty) ...[
+                                    pw.SizedBox(height: 10),
+                                    pw.Container(
+                                          padding: const pw.EdgeInsets.all(6),
+                                          decoration: pw.BoxDecoration(border: pw.Border.all(color: PdfColors.grey600, width: 0.6)),
+                                          child: pw.Column(
+                                                crossAxisAlignment: pw.CrossAxisAlignment.start,
+                                                children: [
+                                                      pw.Text('Note:', style: pw.TextStyle(fontSize: 9, fontWeight: pw.FontWeight.bold)),
+                                                      pw.Text(note.trim(), style: const pw.TextStyle(fontSize: 9)),
+                                                      ],
+                                                ),
+                                          ),
+                                    ],
                               ],
                         ),
                   );

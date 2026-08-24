@@ -93,32 +93,35 @@ Future<void> scheduleDailyGoogleDriveBackup() async {
   );
 }
 
-/// Registers a daily background check, timed to the shop's chosen Daily
-/// Orders send time (Settings inside Daily Orders - defaults to 12:30 if
-/// never set), that shows a local notification reminding the owner to open
-/// the app and send that day's supplier order if anything is still
-/// pending. Re-call this (e.g. right after the owner changes the time in
-/// Settings) - existingWorkPolicy.replace means the new time always takes
-/// over immediately instead of waiting for the old cycle to finish.
+/// Registers a background check that shows a local notification reminding
+/// the owner to open the app and send that day's supplier order, as soon as
+/// possible after the shop's chosen Daily Orders send time (Settings inside
+/// Daily Orders - defaults to 12:30 if never set) has actually passed and
+/// there's still something pending. Re-call this (e.g. right after the
+/// owner changes the time in Settings) - existingWorkPolicy.replace resets
+/// the cycle immediately instead of waiting for the old one to finish.
 ///
-/// Same Android WorkManager timing caveat as the Drive backup above
-/// applies here too - that's why OrderReminderService.checkAndNotifyIfDue()
-/// is also checked every time the app opens (see main.dart), so a late or
-/// missed background trigger still gets caught.
+/// Runs every 15 minutes (Android WorkManager's own minimum periodic
+/// interval - it will not accept anything shorter) rather than once every
+/// 24 hours timed to land exactly on the chosen minute. A single
+/// once-a-day trigger is fragile: WorkManager gives no exact-time guarantee
+/// at all, so if Doze/battery-optimisation/an OEM task-killer pushes that
+/// one attempt back or drops it entirely, the whole day's reminder is
+/// silently lost. Polling every 15 minutes instead means a missed tick
+/// barely matters - the next one is only 15 minutes away. This is safe to
+/// fire this often because OrderReminderService.checkAndNotifyIfDue() does
+/// its own gating: it only ever actually shows a notification once "now"
+/// has reached today's configured send time, and only once per calendar
+/// day (see that method) - every other tick is a fast, harmless no-op.
+/// Same catch-up pattern as the Drive backup above also applies here - see
+/// main.dart, which calls checkAndNotifyIfDue() on every app open too.
 Future<void> scheduleDailyOrderReminder({required int hour, required int minute}) async {
   await _ensureWorkManagerInitialized();
-
-  final now = DateTime.now();
-  var next = DateTime(now.year, now.month, now.day, hour, minute);
-  if (!next.isAfter(now)) {
-    next = next.add(const Duration(days: 1));
-  }
 
   await Workmanager().registerPeriodicTask(
     dailyOrderReminderUniqueName,
     dailyOrderReminderTaskName,
-    frequency: const Duration(hours: 24),
-    initialDelay: next.difference(now),
+    frequency: const Duration(minutes: 15),
     existingWorkPolicy: ExistingPeriodicWorkPolicy.replace,
     backoffPolicy: BackoffPolicy.linear,
     backoffPolicyDelay: const Duration(minutes: 5),
