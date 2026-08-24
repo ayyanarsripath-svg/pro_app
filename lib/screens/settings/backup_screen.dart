@@ -2,6 +2,7 @@ import 'dart:io';
 
 import 'package:flutter/material.dart';
 import 'package:path/path.dart' as p;
+import 'package:share_plus/share_plus.dart';
 
 import '../../core/services/backup_service.dart';
 import '../../core/theme/app_theme.dart';
@@ -18,6 +19,7 @@ class BackupScreen extends StatefulWidget {
 class _BackupScreenState extends State<BackupScreen> {
   final _backupService = BackupService();
   List<File> _backups = [];
+  String _backupDirPath = '';
   bool _loading = true;
   bool _driveLinked = false;
   bool _working = false;
@@ -32,9 +34,11 @@ class _BackupScreenState extends State<BackupScreen> {
     setState(() => _loading = true);
     final backups = await _backupService.listLocalBackups();
     final linked = await _backupService.isGoogleDriveLinked;
+    final dirPath = await _backupService.backupDirPath();
     setState(() {
       _backups = backups;
       _driveLinked = linked;
+      _backupDirPath = dirPath;
       _loading = false;
     });
   }
@@ -86,15 +90,46 @@ class _BackupScreenState extends State<BackupScreen> {
                       OutlinedButton(onPressed: _working ? null : _unlinkDrive, child: const Text('Disconnect')),
                     ],
                   ]),
+                  if (_driveLinked) ...[
+                    const SizedBox(height: 8),
+                    // Fixes a stuck "Account reauth failed" error without
+                    // leaving the app - fully forgets this device's Google
+                    // sign-in and reopens the account picker fresh, and also
+                    // lets the shop switch to a different Google account on
+                    // purpose.
+                    OutlinedButton.icon(
+                      onPressed: _working ? null : _reconnectDrive,
+                      icon: const Icon(Icons.sync_rounded, size: 18),
+                      label: const Text('Change Google Account / Reconnect'),
+                    ),
+                  ],
                 ]),
                 SectionCard(title: 'Local Backups (${_backups.length})', icon: Icons.folder_zip_rounded, children: [
+                  if (_backupDirPath.isNotEmpty)
+                    Padding(
+                      padding: const EdgeInsets.only(bottom: 8),
+                      child: Text(
+                        'These live inside the app\'s own private storage, so they will NOT show up if you browse your phone\'s Files app - that is normal on Android, not a bug. Use the Share button on any backup below to hand it to WhatsApp, Google Drive, email, or a file manager\'s own "Save a copy" action.\n\nApp storage path: $_backupDirPath',
+                        style: TextStyle(color: AppColors.textSecondaryOf(context), fontSize: 11.5),
+                      ),
+                    ),
                   if (_backups.isEmpty) Text('No backups yet.', style: TextStyle(color: AppColors.textSecondaryOf(context))),
                   ..._backups.map((f) => ListTile(
                         contentPadding: EdgeInsets.zero,
                         leading: const Icon(Icons.description_rounded),
                         title: Text(p.basename(f.path), style: const TextStyle(fontSize: 12.5)),
                         subtitle: Text(formatDateTime(f.statSync().modified)),
-                        trailing: TextButton(onPressed: _working ? null : () => _restore(f), child: const Text('Restore')),
+                        trailing: Row(
+                          mainAxisSize: MainAxisSize.min,
+                          children: [
+                            IconButton(
+                              tooltip: 'Share this backup file',
+                              icon: const Icon(Icons.share_rounded, size: 20),
+                              onPressed: _working ? null : () => _shareBackup(f),
+                            ),
+                            TextButton(onPressed: _working ? null : () => _restore(f), child: const Text('Restore')),
+                          ],
+                        ),
                       )),
                 ]),
               ],
@@ -150,6 +185,46 @@ class _BackupScreenState extends State<BackupScreen> {
       if (mounted) setState(() => _working = false);
     }
     _load();
+  }
+
+  /// "Change Google Account / Reconnect" - fully revokes whatever is
+  /// currently linked and reopens the account picker fresh. Used both to
+  /// deliberately switch accounts and as a manual escape hatch if a shop
+  /// keeps hitting the "Account reauth failed" error even after the
+  /// automatic one-time retry inside signInToGoogleDrive().
+  Future<void> _reconnectDrive() async {
+    setState(() => _working = true);
+    try {
+      final ok = await _backupService.reconnectGoogleDrive();
+      if (mounted && !ok) {
+        ScaffoldMessenger.of(context).showSnackBar(const SnackBar(content: Text('Google sign-in was cancelled')));
+      } else if (mounted) {
+        ScaffoldMessenger.of(context).showSnackBar(const SnackBar(content: Text('Google Drive reconnected')));
+      }
+    } catch (e) {
+      _showError('Google Drive connection failed', e);
+    } finally {
+      if (mounted) setState(() => _working = false);
+    }
+    _load();
+  }
+
+  /// Hands the backup .db file to Android's native share sheet - the shop
+  /// picks WhatsApp, Google Drive, email, Bluetooth, or a file manager's
+  /// own "Save a copy" action. This is the actual way to get a copy of a
+  /// local backup out of the app, since the file itself lives in private
+  /// app storage and never appears in the phone's Files app on its own.
+  Future<void> _shareBackup(File file) async {
+    try {
+      await SharePlus.instance.share(
+        ShareParams(
+          text: 'Professional Mobiles backup - ${p.basename(file.path)}',
+          files: [XFile(file.path)],
+        ),
+      );
+    } catch (e) {
+      _showError('Could not open the share sheet', e);
+    }
   }
 
   Future<void> _unlinkDrive() async {

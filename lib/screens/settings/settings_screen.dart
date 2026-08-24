@@ -29,6 +29,7 @@ class _SettingsScreenState extends State<SettingsScreen> {
   final _addressCtrl = TextEditingController();
   final _phoneCtrl = TextEditingController();
   bool _loading = true;
+  String _whatsappSendApp = 'auto';
 
   @override
   void initState() {
@@ -42,7 +43,14 @@ class _SettingsScreenState extends State<SettingsScreen> {
     _taglineCtrl.text = all[SettingsRepository.shopTagline] ?? 'SERVICE & 2ND HAND SALES';
     _addressCtrl.text = all[SettingsRepository.shopAddress] ?? 'Mainroad, Ma.Kunnathur';
     _phoneCtrl.text = all[SettingsRepository.shopPhone] ?? '7806938306';
+    _whatsappSendApp = await _settingsRepo.getWhatsAppSendApp();
     setState(() => _loading = false);
+  }
+
+  Future<void> _saveWhatsAppSendApp(String value) async {
+    setState(() => _whatsappSendApp = value);
+    await _settingsRepo.saveWhatsAppSendApp(value);
+    if (mounted) ScaffoldMessenger.of(context).showSnackBar(const SnackBar(content: Text('WhatsApp sending preference saved')));
   }
 
   Future<void> _saveShopInfo() async {
@@ -151,6 +159,34 @@ class _SettingsScreenState extends State<SettingsScreen> {
           TextField(controller: _phoneCtrl, decoration: const InputDecoration(labelText: 'Phone')),
           const SizedBox(height: 12),
           ElevatedButton(onPressed: _saveShopInfo, child: const Text('Save Shop Details')),
+        ]),
+        SectionCard(title: 'WhatsApp Sending', icon: Icons.chat_bubble_rounded, children: [
+          Text(
+            'If this phone has both WhatsApp and WhatsApp Business installed, choose which one customer intimations (Received/Ready/Delivered/Warranty) should open in - a mismatch is the usual reason a message quietly "never goes" even though it opened somewhere.',
+            style: TextStyle(color: AppColors.textSecondaryOf(context), fontSize: 12.5),
+          ),
+          const SizedBox(height: 10),
+          Wrap(
+            spacing: 8,
+            runSpacing: 8,
+            children: [
+              ChoiceChip(
+                label: const Text('Ask automatically (default)'),
+                selected: _whatsappSendApp == 'auto',
+                onSelected: (_) => _saveWhatsAppSendApp('auto'),
+              ),
+              ChoiceChip(
+                label: const Text('Always use WhatsApp Business'),
+                selected: _whatsappSendApp == 'business',
+                onSelected: (_) => _saveWhatsAppSendApp('business'),
+              ),
+              ChoiceChip(
+                label: const Text('Always use regular WhatsApp'),
+                selected: _whatsappSendApp == 'regular',
+                onSelected: (_) => _saveWhatsAppSendApp('regular'),
+              ),
+            ],
+          ),
         ]),
         Card(
           child: ListTile(
