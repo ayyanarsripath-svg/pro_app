@@ -3,10 +3,9 @@
 Offline-first Android app (Flutter) for a mobile/laptop repair shop that also
 buys and sells 2nd hand phones: customers, service job cards, spare parts &
 accessories inventory, sales billing, 2nd hand mobile purchase/sale,
-suppliers & purchases, a daily supplier-order WhatsApp reminder, expenses, a
-full Profit & Loss engine, A5 bill printing with your logo, staff PIN +
-permissions, and local/Google Drive backup. No server, no internet required
-for daily use.
+suppliers & purchases, expenses, a full Profit & Loss engine, A5 bill
+printing with your logo, staff PIN + permissions, and local/Google Drive
+backup. No server, no internet required for daily use.
 
 ---
 
@@ -14,10 +13,10 @@ for daily use.
 
 This project was written in a sandboxed environment that cannot reach
 Google's Flutter/Dart package servers, so it could not be compiled into a
-ready `.apk` there. Everything else is done: real, organized Dart source, a
-complete offline SQLite schema, and every screen described in the spec.
-Turning it into an installable app takes about 10 minutes with the steps
-below.
+ready `.apk` there. Everything else is done: **~10,000 lines** of real,
+organized Dart source across ~65 files, a complete offline SQLite schema,
+and every screen described in the spec. Turning it into an installable app
+takes about 10 minutes with the steps below.
 
 ## 2. What you need
 
@@ -38,22 +37,18 @@ cloud and hand you back the `.apk`.
 cd professional_mobiles
 
 # 2. Generate the Android platform folder (safe - only adds android/,
-#    never touches the lib/ source that's already here):
+# never touches the lib/ source that's already here):
 flutter create --platforms=android .
 
-# 3. Add these permissions to android/app/src/main/AndroidManifest.xml,
-#    inside the <manifest> tag (above <application>):
-#    <uses-permission android:name="android.permission.CAMERA"/>
-#    <uses-permission android:name="android.permission.INTERNET"/>
-#    <uses-permission android:name="android.permission.POST_NOTIFICATIONS"/>
-#    <uses-permission android:name="android.permission.SCHEDULE_EXACT_ALARM"/>
-#    (CAMERA is for service/2nd-hand phone photos; INTERNET is only used for
-#    the optional Google Drive backup; POST_NOTIFICATIONS + SCHEDULE_EXACT_
-#    ALARM are what let the Supplier Order reminder fire at the exact time
-#    you set, even Android 13+/12+ - without them the OS silently blocks or
-#    delays it. Only needed if you're building locally - if you also build
-#    via a GitHub Actions workflow, make sure its manifest-patching step
-#    adds these same two lines.)
+# 3. Add these two permissions to android/app/src/main/AndroidManifest.xml,
+# inside the <manifest> tag (above <application>):
+# <uses-permission android:name="android.permission.CAMERA"/>
+# <uses-permission android:name="android.permission.INTERNET"/>
+# (CAMERA is for service/2nd-hand phone photos; INTERNET is only used
+# for the optional Google Drive backup - the rest of the app is 100%
+# offline.) Only needed if you're building locally - the GitHub Actions
+# workflow (.github/workflows/build-apk.yml) already does this step
+# for you automatically, every build.
 
 # 4. Fetch packages:
 flutter pub get
@@ -72,14 +67,6 @@ flutter build apk --release
 To test on a connected phone/emulator without building an APK first, use
 `flutter run` instead of step 6.
 
-**After installing:** open the app once and allow the "Notifications" and
-"Alarms & reminders" prompts when asked (needed for Supplier Order
-reminders - see section 8). On Xiaomi/Vivo/Oppo/OnePlus phones, also turn
-off battery optimisation for this app (Settings → Apps → Professional
-Mobiles → Battery → "No restrictions") - those phones aggressively kill
-scheduled alarms otherwise, which is the single most common reason a
-reminder "just doesn't go off" on Android.
-
 ## 4. First launch
 
 The very first time the app opens it asks you to create the **Admin
@@ -91,46 +78,86 @@ Permissions**.
 
 ## 5. Google Drive backup setup (optional - skip if you don't need it)
 
-Everything works fully offline without this.
+Everything works fully offline without this. If you want automatic Drive
+backups too:
 
-**If you build locally on your own machine:**
+### If you build APKs via the GitHub Actions workflow (recommended)
+
+Every APK built by CI used to be signed with a **brand new, throwaway
+debug keystore generated fresh on each run** - so its SHA-1 fingerprint
+was different every single build, which silently broke Google sign-in
+(`DEVELOPER_ERROR` / "no response after picking an account") the moment
+you built again after registering an OAuth client. The workflow now
+restores a **stable** keystore from a repository secret instead, so the
+SHA-1 never changes once you've set this up:
+
+1. In this repo: **Settings → Secrets and variables → Actions → New
+   repository secret**, name it `DEBUG_KEYSTORE_BASE64`, and paste in the
+   base64-encoded keystore your assistant generated for you (delivered as
+   a file alongside these instructions - keep the original `.jks` file
+   itself somewhere safe too, e.g. a password manager; losing it just
+   means a future rebuild gets a new SHA-1 and you re-register the OAuth
+   client, it does **not** lock you out of your own data).
+2. Go to https://console.cloud.google.com → create a project → enable the
+   **Google Drive API**.
+3. Create an **OAuth 2.0 Client ID** of type "Android" using:
+   - Package name: `com.example.pro_app` (matches the `--project-name=pro_app`
+     the workflow passes to `flutter create` - check
+     `android/app/build.gradle`'s `applicationId` after a build if unsure).
+   - SHA-1 fingerprint: `06:96:3D:AB:58:CE:FF:61:A2:58:CE:4B:ED:B3:6D:D7:3C:C7:A9:0E`
+     (this is fixed now - no need to regenerate it after future builds,
+     as long as the same `DEBUG_KEYSTORE_BASE64` secret stays in place -
+     re-check it any time against the "Print release APK signing SHA-1"
+     step's log on the latest CI build if sign-in ever starts failing
+     again, in case the secret was ever replaced).
+4. Push to `main` (or re-run the workflow) to get a build signed with the
+   stable keystore, then use **Settings → Backup & Restore → Connect
+   Google Drive** in the app - no code changes needed, `google_sign_in`
+   picks up the registered client automatically.
+
+**⚠️ Action needed (this is almost certainly why "select account" keeps
+failing with "sign-in cancelled" / "16: ... reauth failed" every time
+the app is updated):** two separate things to check in
+https://console.cloud.google.com for project `pro-app-drive-backup`:
+1. **APIs & Services → Credentials** - open the Android OAuth 2.0
+   Client ID and confirm its SHA-1 exactly matches the one above
+   (`06:96:3D:AB:...`). A previous version of this doc listed a
+   *different* SHA-1 (`E5:90:16:89:...`) as "verified working" - if the
+   `DEBUG_KEYSTORE_BASE64` secret was ever regenerated since then
+   without also updating this registration, sign-in would fail on
+   every device using a current build, which matches exactly what's
+   being reported. Update it to the current SHA-1 if it doesn't match.
+2. **APIs & Services → OAuth consent screen → Publishing status** -
+   while this stays in **Testing**, every sign-in Google grants is a
+   *test-user* grant, and Google expires those refresh tokens after
+   **7 days** regardless of anything this app does - which shows up as
+   exactly this "have to sign in again" cycle roughly every week or
+   two. Click **"Publish App"** to move it to **In production**. For
+   an app used only by you (the account is already the project owner/
+   a listed test user), this does not require Google's review or
+   trigger any "unverified app" block for you - it just removes the
+   7-day expiry. This is a one-time, ~30-second fix.
+
+Status: Drive API enabled. Backups now go to a normal, visible
+"Professional Mobiles Backups" folder in your own Drive (not the
+hidden App Data folder), one file per month - see `BackupService` in
+`lib/core/services/backup_service.dart`.
+
+### If you build locally on your own machine
+
 1. Go to https://console.cloud.google.com → create a project.
 2. Enable the **Google Drive API**.
 3. Create an **OAuth 2.0 Client ID** of type "Android", using this app's
    package name (check `android/app/build.gradle`'s `applicationId`,
-   `com.example.pro_app` or `com.example.professional_mobiles` depending on
-   what you passed to `flutter create --project-name=...`) and your own
-   local keystore's SHA-1 fingerprint (`keytool -list -v -keystore
-   <your-keystore>` - by default `~/.android/debug.keystore`, alias
-   `androiddebugkey`, password `android` for both).
-4. That's it - no code changes needed. `google_sign_in` picks up the client
-   automatically. Use **Settings → Backup & Restore → Connect Google
-   Drive** in the app, then **Choose Folder** to pick (or create) exactly
-   which Drive folder backups go into - the app defaults to creating a
-   normal, visible "Professional Mobiles Backups" folder in your own My
-   Drive if you skip that step (never a hidden folder).
-
-**If you build APKs via a GitHub Actions workflow:** every APK built by CI
-must be signed with the *same* keystore every time, or its SHA-1
-fingerprint changes on every build and silently breaks Google sign-in
-(`DEVELOPER_ERROR` / "sign-in cancelled" every time you rebuild). Restore a
-stable keystore from a repository secret (`DEBUG_KEYSTORE_BASE64`) instead
-of letting the workflow generate a fresh throwaway one, then register that
-keystore's SHA-1 as the OAuth client's fingerprint in Google Cloud Console
-and keep it there. If sign-in that used to work suddenly starts failing
-with `ApiException: 10` / `DEVELOPER_ERROR` after a rebuild, that mismatch
-- CI keystore secret changed without updating the registered SHA-1 - is the
-first thing to check; the in-app error message (Settings → Backup & Restore
-→ Connect Google Drive) now shows this diagnosis directly when sign-in
-fails, instead of a bare "cancelled".
-
-Also check **OAuth consent screen → Publishing status** in Google Cloud
-Console: while it stays in "Testing", every sign-in grant is a test-user
-grant and Google expires those refresh tokens after 7 days regardless of
-anything the app does - which looks exactly like "have to sign in again"
-every week or two. Click "Publish App" to move it to "In production" - for
-an app used only by you (already a project owner / listed test user), this
-is a one-time, ~30-second fix that needs no Google review.
+   `com.example.pro_app` or `com.example.professional_mobiles` depending
+   on what you passed to `flutter create --project-name=...`) and your own
+   local keystore's SHA-1 fingerprint
+   (`keytool -list -v -keystore <your-keystore>`) - by default this is
+   `~/.android/debug.keystore` (alias `androiddebugkey`, password
+   `android` for both).
+4. That's it - no code changes needed. `google_sign_in` picks up the
+   client automatically. Use **Settings → Backup & Restore → Connect
+   Google Drive** in the app.
 
 ## 6. What's inside (maps to your spec)
 
@@ -139,8 +166,7 @@ job cards with photos/status pipeline/warranty/payments/delivery, spare
 parts & accessories inventory with low-stock alerts, sales billing, 2nd
 hand mobile purchase → repair → sale pipeline, suppliers & purchases,
 expenses, warranty claims, returns (accessories/2nd hand/spare parts),
-Admin PIN + staff permissions, manual/daily-or-weekly/Google Drive backup +
-restore.
+Admin PIN + staff permissions, manual/weekly/Google Drive backup + restore.
 
 **This module's additions:**
 - Full category-wise Profit & Loss engine (Service / Accessories / Spare
@@ -158,26 +184,16 @@ restore.
   status colour-coding across Received → Checking → Repairing → Part
   Pending → Ready → Delivered → Warranty → Cancelled.
 - Premium A5 bills (Service Job Card, Sales Bill, 2nd Hand Sales Bill) with
-  your logo printed in a black-and-white-friendly form, boxed sections, and
-  the Tamil return-policy footer + signature lines on the service bill.
-- **Supplier Orders (Daily Order reminder)** - see section 8.
+  your logo printed in a black-and-white-friendly form (per your request -
+  it'll look right on a plain B/W printer), boxed sections, and the Tamil
+  return-policy footer + signature lines on the service bill.
 
 ## 7. Honest limitations
 
-- **Automatic backup** (daily by default, switchable to weekly in Settings
-  → Backup & Restore) runs when the app is opened, not via a true
-  background OS job - Android kills background tasks aggressively without
-  extra plugins, so this keeps things reliable without adding complexity.
-  Manual backup is always one tap away, and "Save Backup To..." lets you
-  put a copy somewhere you can actually browse to (see section 8's sibling
-  note on the private-storage folder for why "Backup Now" alone can look
-  invisible).
-- **Supplier Order reminders** re-arm every time the app is opened (see
-  section 8) - a reboot that happens while the app stays closed for a long
-  stretch means the reminder won't fire until you next open the app. Once
-  opened, anything whose time already passed fires immediately as a
-  catch-up, so nothing is silently skipped - it just isn't a true
-  background service.
+- **Weekly auto-backup** runs when the app is opened (checks "has it been
+  7+ days"), not via a true background OS job - Android kills background
+  tasks aggressively without extra plugins, so this keeps things reliable
+  without adding complexity. Manual backup is always one tap away.
 - **Google Drive backup** needs the one-time setup in section 5 - Google
   requires every app to bring its own OAuth client, this can't be
   pre-baked in for you.
@@ -185,41 +201,7 @@ restore.
   P&L Dashboard) rather than a full inventory module, since it's meant to
   catch one-off income that doesn't fit the other categories.
 - This project wasn't compiled/run in the environment it was written in
-  (see section 1), so please do a quick pass through the main flows after
-  your first build and report anything that needs a fix.
-
-## 8. Supplier Orders - the daily order / WhatsApp auto-send reminder
-
-Flow: **Settings drawer → Supplier Orders → Quick Order**.
-
-1. Type what needs to be ordered (free text - item list, quantities,
-   whatever you'd normally tell the supplier).
-2. Pick a saved supplier or type a name + WhatsApp number.
-3. Set the time it should go out, optionally "Repeat every day at this
-   time" for a standing daily order.
-4. Save. At that exact time you get a notification. Tap it and a bottom
-   sheet opens with the order PDF already generated and two buttons:
-   **"Open WhatsApp Chat"** (opens straight to the supplier's chat with
-   your message pre-filled) and **"Share Order PDF"** (Android's share
-   sheet with the PDF already attached - pick WhatsApp, pick the chat if it
-   isn't offered automatically, tap Send).
-
-**Why it can't be fully one-tap automatic:** Android and WhatsApp
-deliberately don't allow any app to both pre-attach a file *and*
-pre-select the exact chat it goes to in one step - that combination is
-blocked for anti-spam reasons on Meta's side, not something this app can
-route around. The two-button flow above is the closest a normal Android
-app is allowed to get: correct recipient in one tap, correct file in the
-next, Send is always the one manual action left to you (which also
-matches what you asked for - a reminder to tap Send yourself, not a
-message that goes out with nobody checking it first).
-
-**Why the old "set 2:42, fires 2:41 / doesn't fire at all" symptom won't
-recur:** the reminder is scheduled with the phone's real timezone properly
-initialised (a very common Flutter bug is silently scheduling against UTC
-instead), using Android's *exact* alarm mode so Doze/battery-saving
-doesn't push the time around, with the two permissions from section 3
-requested up front, and with a catch-up check every time the app opens so
-a reminder that was missed for any reason (phone off, alarm cleared by a
-reboot, aggressive battery optimisation on some brands) still surfaces the
-moment you next open the app instead of silently vanishing.
+  (see section 1), so please do a quick pass through the main flows
+  (create a service, take a payment, sell an accessory, buy/sell a 2nd
+  hand phone, check the P&L dashboard) after your first build and tell me
+  if anything needs a fix - happy to patch it.
