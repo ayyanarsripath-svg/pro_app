@@ -13,7 +13,7 @@ class DatabaseHelper {
   static final DatabaseHelper instance = DatabaseHelper._internal();
 
   static Database? _db;
-  static const int dbVersion = 6;
+  static const int dbVersion = 7;
   static const String dbFileName = 'professional_mobiles.db';
 
   Future<Database> get database async {
@@ -84,6 +84,13 @@ class DatabaseHelper {
       await db.execute('ALTER TABLE second_hand_sales ADD COLUMN discount REAL NOT NULL DEFAULT 0');
       await db.execute("ALTER TABLE second_hand_phones ADD COLUMN device_type TEXT NOT NULL DEFAULT 'mobile'");
       await db.execute('ALTER TABLE sales_bills ADD COLUMN active INTEGER NOT NULL DEFAULT 1');
+    }
+    // Sales Bill warranty (spec: warranty toggle + "Warranty Period (in
+    // days)" on New Sales Bill - see SalesBill.warranty/warrantyPeriodDays,
+    // prints the period when on, "Nil" when off).
+    if (oldVersion < 7) {
+      await db.execute('ALTER TABLE sales_bills ADD COLUMN warranty INTEGER NOT NULL DEFAULT 0');
+      await db.execute('ALTER TABLE sales_bills ADD COLUMN warranty_period_days INTEGER');
     }
   }
 
@@ -259,6 +266,8 @@ class DatabaseHelper {
         notes TEXT,
         active INTEGER NOT NULL DEFAULT 1,
         created_at TEXT NOT NULL,
+        warranty INTEGER NOT NULL DEFAULT 0,
+        warranty_period_days INTEGER,
         FOREIGN KEY (customer_id) REFERENCES customers(id)
       )
     ''');
