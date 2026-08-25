@@ -92,6 +92,22 @@ jobs:
               '    <uses-permission android:name="android.permission.INTERNET"/>',
               '    <uses-permission android:name="android.permission.POST_NOTIFICATIONS"/>',
               '    <uses-permission android:name="android.permission.REQUEST_IGNORE_BATTERY_OPTIMIZATIONS"/>',
+              # "Pick from Contacts" on the Daily Order supplier phone field
+              # (flutter_contacts) - only used to read a number the shop
+              # explicitly picks, never a background/bulk contacts read.
+              '    <uses-permission android:name="android.permission.READ_CONTACTS"/>',
+              # Daily Order exact-alarm reminder (DailyOrderAlarmReceiver,
+              # see the FileProvider step below) - RECEIVE_BOOT_COMPLETED
+              # lets the reminder re-arm itself after the phone restarts
+              # (Android clears every AlarmManager alarm on reboot, which
+              # would otherwise silently kill this reminder for good until
+              # the owner happened to reopen Daily Order Settings).
+              # SCHEDULE_EXACT_ALARM is what actually lets a *precise*
+              # wall-clock-time alarm survive Doze/battery-optimisation on
+              # Android 12+ (requested one-time via Settings; see
+              # MainActivity's requestExactAlarmPermission).
+              '    <uses-permission android:name="android.permission.RECEIVE_BOOT_COMPLETED"/>',
+              '    <uses-permission android:name="android.permission.SCHEDULE_EXACT_ALARM"/>',
           ]
           to_add = [line for line in needed if line.split('"')[1] not in content]
 
@@ -688,10 +704,182 @@ jobs:
                               // the shop owner stuck with no way to send.
                               result.success(false)
                           }
+                      } else if (call.method == "scheduleDailyOrderAlarm") {
+                          // Exact-time AlarmManager reminder (see
+                          // DailyOrderAlarmReceiver.kt below) - far more
+                          // reliable than WorkManager's 15-minute poll
+                          // alone at actually firing on the shop's chosen
+                          // minute, especially on Xiaomi/Vivo/Oppo builds
+                          // that aggressively kill background JobScheduler
+                          // work regardless of the battery-optimisation
+                          // exemption (spec: "order not send automatically
+                          // to fixed time ... no restriction settings um
+                          // kuduthuttan appium remider varala").
+                          val hour = call.argument<Int>("hour") ?: 12
+                          val minute = call.argument<Int>("minute") ?: 30
+                          DailyOrderAlarmReceiver.schedule(this, hour, minute)
+                          result.success(true)
+                      } else if (call.method == "cancelDailyOrderAlarm") {
+                          DailyOrderAlarmReceiver.cancel(this)
+                          result.success(true)
+                      } else if (call.method == "requestExactAlarmPermission") {
+                          // Android 12+ (API 31+) silently downgrades
+                          // setExactAndAllowWhileIdle to an inexact alarm
+                          // unless this one-time permission is granted via
+                          // system Settings - there is no in-app runtime
+                          // prompt for it, only this Settings screen
+                          // hand-off (same one-tap pattern as
+                          // requestIgnoreBatteryOptimizations in
+                          // background_tasks.dart).
+                          if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.S) {
+                              try {
+                                  val intent = Intent(android.provider.Settings.ACTION_REQUEST_SCHEDULE_EXACT_ALARM)
+                                  intent.data = Uri.parse("package:$packageName")
+                                  startActivity(intent)
+                              } catch (e: Exception) {
+                                  // Not supported on this OEM build - the
+                                  // alarm still gets scheduled, just
+                                  // possibly inexact; never crash the
+                                  // settings screen over this.
+                              }
+                          }
+                          result.success(true)
                       } else {
                           result.notImplemented()
                       }
                   }
+              }
+          }
+          '''
+
+          # BroadcastReceiver that actually fires the exact-time Daily
+          # Order reminder (scheduled by MainActivity's
+          # scheduleDailyOrderAlarm above) and shows its notification
+          # directly via NotificationManager - deliberately NOT going
+          # through the Flutter engine/flutter_local_notifications at
+          # all, so this keeps working even if the app process was fully
+          # killed by the OS, which is exactly the situation this exists
+          # to survive. Also handles BOOT_COMPLETED / MY_PACKAGE_REPLACED
+          # to re-arm the alarm after a restart or app update, since
+          # Android clears every AlarmManager alarm at both of those.
+          daily_order_alarm_receiver_kt = '''package com.example.pro_app
+
+          import android.app.AlarmManager
+          import android.app.NotificationChannel
+          import android.app.NotificationManager
+          import android.app.PendingIntent
+          import android.content.BroadcastReceiver
+          import android.content.Context
+          import android.content.Intent
+          import android.os.Build
+          import androidx.core.app.NotificationCompat
+          import java.util.Calendar
+
+          class DailyOrderAlarmReceiver : BroadcastReceiver() {
+              companion object {
+                  private const val PREFS_NAME = "daily_order_alarm_prefs"
+                  private const val KEY_HOUR = "hour"
+                  private const val KEY_MINUTE = "minute"
+                  private const val KEY_ENABLED = "enabled"
+                  private const val CHANNEL_ID = "daily_order_alarm_v1"
+                  private const val NOTIFICATION_ID = 1002
+                  private const val REQUEST_CODE = 5001
+                  private const val ACTION_FIRE = "com.example.pro_app.DAILY_ORDER_ALARM"
+
+                  fun schedule(context: Context, hour: Int, minute: Int) {
+                      context.getSharedPreferences(PREFS_NAME, Context.MODE_PRIVATE).edit()
+                          .putInt(KEY_HOUR, hour)
+                          .putInt(KEY_MINUTE, minute)
+                          .putBoolean(KEY_ENABLED, true)
+                          .apply()
+                      armNext(context, hour, minute)
+                  }
+
+                  fun cancel(context: Context) {
+                      context.getSharedPreferences(PREFS_NAME, Context.MODE_PRIVATE).edit()
+                          .putBoolean(KEY_ENABLED, false)
+                          .apply()
+                      val am = context.getSystemService(Context.ALARM_SERVICE) as AlarmManager
+                      am.cancel(pendingIntent(context))
+                  }
+
+                  private fun armNext(context: Context, hour: Int, minute: Int) {
+                      val am = context.getSystemService(Context.ALARM_SERVICE) as AlarmManager
+                      val cal = Calendar.getInstance()
+                      cal.set(Calendar.HOUR_OF_DAY, hour)
+                      cal.set(Calendar.MINUTE, minute)
+                      cal.set(Calendar.SECOND, 0)
+                      cal.set(Calendar.MILLISECOND, 0)
+                      if (cal.timeInMillis <= System.currentTimeMillis()) {
+                          cal.add(Calendar.DAY_OF_YEAR, 1)
+                      }
+                      try {
+                          am.setExactAndAllowWhileIdle(AlarmManager.RTC_WAKEUP, cal.timeInMillis, pendingIntent(context))
+                      } catch (e: SecurityException) {
+                          // Android 12+ without the "Alarms & reminders"
+                          // permission granted yet - still schedule an
+                          // inexact alarm rather than nothing at all; this
+                          // becomes exact again automatically next time it
+                          // reschedules once the owner grants the
+                          // permission.
+                          am.set(AlarmManager.RTC_WAKEUP, cal.timeInMillis, pendingIntent(context))
+                      }
+                  }
+
+                  private fun pendingIntent(context: Context): PendingIntent {
+                      val intent = Intent(context, DailyOrderAlarmReceiver::class.java).apply { action = ACTION_FIRE }
+                      return PendingIntent.getBroadcast(
+                          context, REQUEST_CODE, intent,
+                          PendingIntent.FLAG_UPDATE_CURRENT or PendingIntent.FLAG_IMMUTABLE
+                      )
+                  }
+              }
+
+              override fun onReceive(context: Context, intent: Intent) {
+                  val prefs = context.getSharedPreferences(PREFS_NAME, Context.MODE_PRIVATE)
+                  val enabled = prefs.getBoolean(KEY_ENABLED, false)
+                  val hour = prefs.getInt(KEY_HOUR, 12)
+                  val minute = prefs.getInt(KEY_MINUTE, 30)
+
+                  if (intent.action == Intent.ACTION_BOOT_COMPLETED || intent.action == Intent.ACTION_MY_PACKAGE_REPLACED) {
+                      if (enabled) armNext(context, hour, minute)
+                      return
+                  }
+
+                  if (!enabled) return
+
+                  showNotification(context)
+                  armNext(context, hour, minute)
+              }
+
+              private fun showNotification(context: Context) {
+                  val nm = context.getSystemService(Context.NOTIFICATION_SERVICE) as NotificationManager
+                  if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.O) {
+                      val channel = NotificationChannel(CHANNEL_ID, "Daily Order Reminder (exact alarm)", NotificationManager.IMPORTANCE_HIGH)
+                      channel.description = "Reminds you to send today's supplier order, timed to fire even when the app is closed"
+                      nm.createNotificationChannel(channel)
+                  }
+
+                  val launchIntent = Intent(context, MainActivity::class.java).apply {
+                      flags = Intent.FLAG_ACTIVITY_NEW_TASK or Intent.FLAG_ACTIVITY_CLEAR_TOP
+                      putExtra("open_daily_orders", true)
+                  }
+                  val contentIntent = PendingIntent.getActivity(
+                      context, REQUEST_CODE, launchIntent,
+                      PendingIntent.FLAG_UPDATE_CURRENT or PendingIntent.FLAG_IMMUTABLE
+                  )
+
+                  val notification = NotificationCompat.Builder(context, CHANNEL_ID)
+                      .setSmallIcon(R.drawable.ic_notification)
+                      .setContentTitle("Order Time!")
+                      .setContentText("Tap to open Daily Orders and send today's supplier order.")
+                      .setPriority(NotificationCompat.PRIORITY_HIGH)
+                      .setCategory(NotificationCompat.CATEGORY_REMINDER)
+                      .setAutoCancel(true)
+                      .setContentIntent(contentIntent)
+                      .build()
+
+                  nm.notify(NOTIFICATION_ID, notification)
               }
           }
           '''
@@ -705,6 +893,10 @@ jobs:
           with open(os.path.join(kotlin_dir, "MainActivity.kt"), "w", encoding="utf-8") as f:
               f.write(main_activity_kt)
           print("Wrote MainActivity.kt")
+
+          with open(os.path.join(kotlin_dir, "DailyOrderAlarmReceiver.kt"), "w", encoding="utf-8") as f:
+              f.write(daily_order_alarm_receiver_kt)
+          print("Wrote DailyOrderAlarmReceiver.kt")
 
           with open(os.path.join(xml_dir, "file_paths.xml"), "w", encoding="utf-8") as f:
               f.write(file_paths_xml)
@@ -761,6 +953,29 @@ jobs:
               with open(manifest_path, "w", encoding="utf-8") as f:
                   f.write(manifest)
               print("Registered FileProvider.")
+
+          # DailyOrderAlarmReceiver (see daily_order_alarm_receiver_kt
+          # above) - exported=false since it's only ever triggered by this
+          # app's own AlarmManager PendingIntent or by the system boot/
+          # package-replaced broadcasts below, never by another app.
+          if "DailyOrderAlarmReceiver" in manifest:
+              print("Daily Order alarm receiver already registered, nothing to do.")
+          else:
+              receiver_block = (
+                  '    <receiver android:name=".DailyOrderAlarmReceiver" android:exported="false">\n'
+                  '        <intent-filter>\n'
+                  '            <action android:name="android.intent.action.BOOT_COMPLETED" />\n'
+                  '            <action android:name="android.intent.action.MY_PACKAGE_REPLACED" />\n'
+                  '        </intent-filter>\n'
+                  '    </receiver>\n'
+              )
+              idx = manifest.rfind("</application>")
+              if idx == -1:
+                  raise SystemExit(f"Could not find </application> in {manifest_path} - aborting so this doesn't silently produce a broken manifest.")
+              manifest = manifest[:idx] + receiver_block + manifest[idx:]
+              with open(manifest_path, "w", encoding="utf-8") as f:
+                  f.write(manifest)
+              print("Registered DailyOrderAlarmReceiver.")
           PYEOF
 
       # Proper small notification icon (Task: "pro_app notification icon set
