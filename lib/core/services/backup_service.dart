@@ -173,50 +173,76 @@ class BackupService {
   /// tapping an account: no error, no snackbar, nothing. It now always
   /// resolves, and throws a plain-English [Exception] the screen can show.
   ///
-  /// Separately, some phones hit a distinct failure that Android reports as
-  /// a plain "cancelled" but with an extra detail attached, most commonly
-  /// "[16] Account reauth failed" - this is Google Play Services rejecting
-  /// a stale/broken cached sign-in state on THAT phone, not a real tap on
-  /// Cancel and not a problem with this app's own OAuth setup. Rather than
-  /// showing that raw error immediately, this now clears the broken local
-  /// state with [GoogleSignIn.disconnect] and retries once automatically -
-  /// which fixes it silently for most shops. Only if the retry also fails
-  /// does the shop see an error, and it's a plain-English one instead of
-  /// the raw Android string.
+  /// The "cancelled (with extra detail)" / "[16] Account reauth failed"
+  /// failure this can also hit is handled by [_authenticateAccount] below -
+  /// see its doc comment for why a single retry wasn't holding up on every
+  /// phone.
   Future<bool> signInToGoogleDrive() async {
     await _ensureInitialized();
-    try {
-      return await _authenticateAndLink();
-    } on GoogleSignInException catch (e) {
-      if (e.code == GoogleSignInExceptionCode.canceled) {
-        final hasExtraDetail = e.description != null && e.description!.trim().isNotEmpty;
-        if (!hasExtraDetail) return false; // a genuine tap on Cancel - nothing to show
+    final account = await _authenticateAccount();
+    if (account == null) return false; // a genuine tap on Cancel
+    await account.authorizationClient.authorizeScopes(_driveScopes);
+    return true;
+  }
 
+  /// How many times an interactive sign-in automatically retries (each
+  /// retry first clears the phone's cached sign-in state with
+  /// [GoogleSignIn.disconnect] and pauses briefly) before giving up and
+  /// showing the shop an error. A single retry used to be enough for most
+  /// shops, but some phones need their cached state cleared more than once
+  /// before Play Services lets a fresh sign-in through - this is why
+  /// [_authenticateAccount] loops instead of trying just twice.
+  static const _maxAuthAttempts = 3;
+
+  /// Runs the Google account picker + sign-in, retrying automatically (up
+  /// to [_maxAuthAttempts] times total) whenever Android reports a plain
+  /// "cancelled" but with an extra detail attached, most commonly "[16]
+  /// Account reauth failed" - this is Google Play Services rejecting a
+  /// stale/broken cached sign-in state on THAT phone (spec: "pic panna
+  /// solluthu pic panna thirumba pic panna solluthu aprom error kamikkuthu"
+  /// - asks to pick an account, picks, asks again, picks again, then
+  /// still errors), not a real tap on Cancel and not a problem with this
+  /// app's own OAuth setup. Each retry clears that broken state with
+  /// [GoogleSignIn.disconnect] and pauses briefly first, since Play
+  /// Services sometimes needs a moment to actually drop the old cached
+  /// account before a fresh attempt can succeed - retrying instantly back
+  /// to back tended to just hit the same stale state again.
+  ///
+  /// A genuine tap on Cancel (no extra detail attached) returns null
+  /// immediately, never retried. Any other kind of [GoogleSignInException]
+  /// (bad OAuth client config, no internet, etc.) is translated and thrown
+  /// right away. Only once every retry has *also* failed with the
+  /// reauth-style error does this throw the specific, actionable
+  /// [_reauthFailedMessage] - shared by [signInToGoogleDrive],
+  /// [reconnectGoogleDrive], and the silent-auth-expired fallback inside
+  /// [backupToGoogleDrive], so every place this app opens the account
+  /// picker gets the same resilience.
+  Future<GoogleSignInAccount?> _authenticateAccount() async {
+    GoogleSignInException? lastReauthError;
+    for (var attempt = 1; attempt <= _maxAuthAttempts; attempt++) {
+      try {
+        final account = await _googleSignIn.authenticate();
+        await _settings.set(SettingsRepository.googleDriveLinked, 'true');
+        return account;
+      } on GoogleSignInException catch (e) {
+        if (e.code != GoogleSignInExceptionCode.canceled) {
+          throw Exception(_friendlyGoogleError(e));
+        }
+        final hasExtraDetail = e.description != null && e.description!.trim().isNotEmpty;
+        if (!hasExtraDetail) return null; // a genuine tap on Cancel - stop immediately
+
+        lastReauthError = e;
+        if (attempt == _maxAuthAttempts) break;
         try {
           await _googleSignIn.disconnect();
         } catch (_) {
           // nothing was linked yet on this phone to disconnect - fine,
-          // fall through to the retry below regardless.
+          // still retry below regardless.
         }
-        try {
-          return await _authenticateAndLink();
-        } on GoogleSignInException catch (retryError) {
-          if (retryError.code == GoogleSignInExceptionCode.canceled &&
-              !(retryError.description != null && retryError.description!.trim().isNotEmpty)) {
-            return false; // the retry itself was a genuine user cancel
-          }
-          throw Exception(_reauthFailedMessage(retryError));
-        }
+        await Future.delayed(const Duration(milliseconds: 800));
       }
-      throw Exception(_friendlyGoogleError(e));
     }
-  }
-
-  Future<bool> _authenticateAndLink() async {
-    final account = await _googleSignIn.authenticate();
-    await account.authorizationClient.authorizeScopes(_driveScopes);
-    await _settings.set(SettingsRepository.googleDriveLinked, 'true');
-    return true;
+    throw Exception(_reauthFailedMessage(lastReauthError!));
   }
 
   /// Fully forgets whatever Google account is currently linked (if any) -
@@ -225,8 +251,8 @@ class BackupService {
   /// either link a *different* Google account, or get past a stuck
   /// "Account reauth failed" error without leaving the app. Exposed as its
   /// own "Change Google Account" button in Settings -> Backup & Restore,
-  /// separate from the automatic one-time retry inside
-  /// [signInToGoogleDrive] above.
+  /// separate from the automatic retries already inside
+  /// [signInToGoogleDrive]/[_authenticateAccount] above.
   Future<bool> reconnectGoogleDrive() async {
     await _ensureInitialized();
     try {
@@ -235,33 +261,38 @@ class BackupService {
       // nothing was linked yet - fine, still proceed to a fresh sign-in.
     }
     await _settings.set(SettingsRepository.googleDriveLinked, 'false');
-    try {
-      return await _authenticateAndLink();
-    } on GoogleSignInException catch (e) {
-      if (e.code == GoogleSignInExceptionCode.canceled) return false;
-      throw Exception(_friendlyGoogleError(e));
-    }
+    final account = await _authenticateAccount();
+    if (account == null) return false;
+    await account.authorizationClient.authorizeScopes(_driveScopes);
+    return true;
   }
 
   /// The specific, actionable message shown when even the automatic
-  /// disconnect-and-retry inside [signInToGoogleDrive] couldn't get past a
-  /// "cancelled (with extra detail)" error such as "[16] Account reauth
-  /// failed". Distinct from [_friendlyGoogleError] (which handles the
-  /// other, more standard [GoogleSignInException] codes) because this one
-  /// needs to explain a phone-side stuck state, not an app configuration
-  /// problem.
+  /// disconnect-and-retry loop inside [_authenticateAccount] couldn't get
+  /// past a "cancelled (with extra detail)" error such as "[16] Account
+  /// reauth failed". Distinct from [_friendlyGoogleError] (which handles
+  /// the other, more standard [GoogleSignInException] codes) because this
+  /// one needs to explain a phone-side stuck state, not an app
+  /// configuration problem.
   String _reauthFailedMessage(GoogleSignInException e) {
-    return 'Google could not confirm your account on this phone (it reported '
-        '"${e.description ?? e.code.name}"). This is almost always a stuck '
+    return 'Google could not confirm your account on this phone (it kept '
+        'reporting "${e.description ?? e.code.name}" even after retrying '
+        'automatically several times). This is almost always a stuck '
         'sign-in on the phone itself, not a problem with the app or your '
         'internet.\n\n'
         'Please try:\n'
-        '1. Tap "Connect Google Drive" again - it often works the 2nd time.\n'
-        '2. If it keeps failing, use "Change Google Account" below, or open '
-        'the Google Account app on this phone -> your account -> Security '
-        '-> "Apps with access to your account", remove Professional '
-        'Mobiles there, then connect again from here.\n'
-        '3. Make sure this phone has an active internet connection.';
+        '1. Close this app completely (swipe it away from recent apps), '
+        'reopen it, and tap "Connect Google Drive" again - a full restart '
+        'clears more of the stuck state than retrying inside the app does.\n'
+        '2. Open the Google Play Store app -> tap your profile picture -> '
+        'Settings -> About -> check for a Play Services/Play Store update, '
+        'and install one if available - this exact error is commonly tied '
+        'to an outdated Play Services build.\n'
+        '3. If it still fails, open the Google Account app on this phone '
+        '-> your account -> Security -> "Apps with access to your '
+        'account", remove Professional Mobiles there, restart the phone, '
+        'then connect again from here.\n'
+        '4. Make sure this phone has an active internet connection.';
   }
 
   /// Translates the raw Google sign-in error codes into something a shop
@@ -399,9 +430,15 @@ class BackupService {
         // Silent sign-in didn't work any more (expired/revoked token) -
         // re-open the account flow right here instead of failing outright,
         // satisfying "reconnect automatically" without a separate trip to
-        // Settings first.
-        account = await _googleSignIn.authenticate();
-        await _settings.set(SettingsRepository.googleDriveLinked, 'true');
+        // Settings first. Goes through the same retrying
+        // _authenticateAccount() as the "Connect Google Drive"/"Change
+        // Google Account" buttons, so a stuck "[16] Account reauth failed"
+        // hit from the "Backup to Drive" button gets the same automatic
+        // recovery instead of failing on the first try.
+        account = await _authenticateAccount();
+        if (account == null) {
+          throw Exception('Sign-in was cancelled.');
+        }
       }
 
       // Reuse a previously granted authorization silently if we still have
