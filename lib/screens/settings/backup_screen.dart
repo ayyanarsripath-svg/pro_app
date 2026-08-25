@@ -213,13 +213,20 @@ class _BackupScreenState extends State<BackupScreen> {
     // file_picker 11+ refactored FilePicker to static methods (no more
     // `.platform` instance) and now defaults allowMultiple to true -
     // explicitly false here since exactly one file is expected below.
+    // file_picker 12 also changed pickFiles() to return the picked files
+    // list directly (List<PlatformFile>?) instead of the old
+    // FilePickerResult wrapper object, so there is no `.files` getter
+    // anymore - the result itself is the list, and an empty list (not
+    // null) is what a user cancel now looks like.
     final result = await FilePicker.pickFiles(
       type: FileType.any,
       allowMultiple: false,
       dialogTitle: 'Choose a backup file to restore',
     );
-    if (result == null || result.files.single.path == null) return;
-    final file = File(result.files.single.path!);
+    if (result == null || result.isEmpty || result.single.path == null) {
+      return;
+    }
+    final file = File(result.single.path!);
     if (!mounted) return;
 
     final confirm = await showDialog<bool>(
