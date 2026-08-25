@@ -61,16 +61,23 @@ jobs:
 
       # README step 3: CAMERA (service / 2nd-hand phone photos), INTERNET
       # (Google Drive backup - without this, every network call
-      # google_sign_in/googleapis makes fails outright), and
-      # POST_NOTIFICATIONS (Android 13+ requires this manifest declaration
-      # before OrderReminderService can even ask the user for the runtime
-      # "Allow notifications?" permission - flutter_local_notifications does
-      # NOT add this to the manifest automatically, the app must declare it
-      # itself) permissions. Previously this was a manual, easy-to-forget
-      # step, and since android/ is regenerated fresh by `flutter create`
-      # above on every build that has never run before on this repo, a
-      # one-time manual edit would never survive anyway. Idempotent: skips
-      # any permission already present.
+      # google_sign_in/googleapis makes fails outright), POST_NOTIFICATIONS
+      # (Android 13+ requires this manifest declaration before
+      # OrderReminderService can even ask the user for the runtime "Allow
+      # notifications?" permission - flutter_local_notifications does NOT
+      # add this to the manifest automatically, the app must declare it
+      # itself), and REQUEST_IGNORE_BATTERY_OPTIMIZATIONS (lets
+      # background_tasks.dart's requestIgnoreBatteryOptimizations() show
+      # the "Allow this app to ignore battery optimizations?" system
+      # dialog - needed so the Daily Orders reminder and the daily Google
+      # Drive backup keep running in the background on phones like Xiaomi/
+      # MIUI, Vivo, and Oppo that otherwise silently kill them; see
+      # DailyOrderScreen's "Reminder not showing up?" button) permissions.
+      # Previously this was a manual, easy-to-forget step, and since
+      # android/ is regenerated fresh by `flutter create` above on every
+      # build that has never run before on this repo, a one-time manual
+      # edit would never survive anyway. Idempotent: skips any permission
+      # already present.
       - name: Add required Android permissions
         run: |
           python3 - <<'PYEOF'
@@ -84,6 +91,7 @@ jobs:
               '    <uses-permission android:name="android.permission.CAMERA"/>',
               '    <uses-permission android:name="android.permission.INTERNET"/>',
               '    <uses-permission android:name="android.permission.POST_NOTIFICATIONS"/>',
+              '    <uses-permission android:name="android.permission.REQUEST_IGNORE_BATTERY_OPTIMIZATIONS"/>',
           ]
           to_add = [line for line in needed if line.split('"')[1] not in content]
 
@@ -299,7 +307,7 @@ jobs:
                           for (i in itemIds.indices) {
                               if (i >= itemRows) continue
                               val raw = if (enabled == "false") "" else (widgetData.getString("item_$i", "") ?: "")
-                              views.setTextViewText(itemIds[i], if (raw.isEmpty()) "" else "•  $raw")
+                              views.setTextViewText(itemIds[i], if (raw.isEmpty()) "" else "• $raw")
                               views.setViewVisibility(itemIds[i], if (raw.isEmpty()) View.GONE else View.VISIBLE)
                           }
 
@@ -493,12 +501,12 @@ jobs:
               print("Widget receiver already registered, nothing to do.")
           else:
               blocks_to_add.append(
-                  '        <receiver android:name=".DailyOrderWidgetProvider" android:exported="true" android:label="Daily Orders">\n'
-                  '            <intent-filter>\n'
-                  '                <action android:name="android.appwidget.action.APPWIDGET_UPDATE" />\n'
-                  '            </intent-filter>\n'
-                  '            <meta-data android:name="android.appwidget.provider" android:resource="@xml/daily_order_widget_info" />\n'
-                  '        </receiver>\n'
+                  '    <receiver android:name=".DailyOrderWidgetProvider" android:exported="true" android:label="Daily Orders">\n'
+                  '        <intent-filter>\n'
+                  '            <action android:name="android.appwidget.action.APPWIDGET_UPDATE" />\n'
+                  '        </intent-filter>\n'
+                  '        <meta-data android:name="android.appwidget.provider" android:resource="@xml/daily_order_widget_info" />\n'
+                  '    </receiver>\n'
               )
 
           # QuickAddActivity (see quick_add_activity_kt above) - deliberately
@@ -518,15 +526,15 @@ jobs:
               print("QuickAddActivity already registered, nothing to do.")
           else:
               blocks_to_add.append(
-                  '        <activity\n'
-                  '            android:name=".QuickAddActivity"\n'
-                  '            android:theme="@android:style/Theme.Material.Light.NoActionBar"\n'
-                  '            android:configChanges="orientation|keyboardHidden|keyboard|screenSize|smallestScreenSize|locale|layoutDirection|fontScale|screenLayout|density|uiMode"\n'
-                  '            android:hardwareAccelerated="true"\n'
-                  '            android:windowSoftInputMode="adjustResize"\n'
-                  '            android:launchMode="singleTask"\n'
-                  '            android:taskAffinity="com.example.pro_app.quickadd"\n'
-                  '            android:excludeFromRecents="true" />\n'
+                  '    <activity\n'
+                  '        android:name=".QuickAddActivity"\n'
+                  '        android:theme="@android:style/Theme.Material.Light.NoActionBar"\n'
+                  '        android:configChanges="orientation|keyboardHidden|keyboard|screenSize|smallestScreenSize|locale|layoutDirection|fontScale|screenLayout|density|uiMode"\n'
+                  '        android:hardwareAccelerated="true"\n'
+                  '        android:windowSoftInputMode="adjustResize"\n'
+                  '        android:launchMode="singleTask"\n'
+                  '        android:taskAffinity="com.example.pro_app.quickadd"\n'
+                  '        android:excludeFromRecents="true" />\n'
               )
 
           if blocks_to_add:
@@ -697,15 +705,15 @@ jobs:
               print("FileProvider already registered, nothing to do.")
           else:
               provider_block = (
-                  '        <provider\n'
-                  '            android:name="androidx.core.content.FileProvider"\n'
-                  '            android:authorities="${applicationId}.wafileprovider"\n'
-                  '            android:exported="false"\n'
-                  '            android:grantUriPermissions="true">\n'
-                  '            <meta-data\n'
-                  '                android:name="android.support.FILE_PROVIDER_PATHS"\n'
-                  '                android:resource="@xml/file_paths" />\n'
-                  '        </provider>\n'
+                  '    <provider\n'
+                  '        android:name="androidx.core.content.FileProvider"\n'
+                  '        android:authorities="${applicationId}.wafileprovider"\n'
+                  '        android:exported="false"\n'
+                  '        android:grantUriPermissions="true">\n'
+                  '        <meta-data\n'
+                  '            android:name="android.support.FILE_PROVIDER_PATHS"\n'
+                  '            android:resource="@xml/file_paths" />\n'
+                  '    </provider>\n'
               )
               idx = manifest.rfind("</application>")
               if idx == -1:
@@ -765,8 +773,7 @@ jobs:
           echo "Using apksigner: $APKSIGNER"
           "$APKSIGNER" verify --print-certs build/app/outputs/flutter-apk/app-release.apk
           echo "---applicationId---"
-          grep -R "applicationId" android/app/build.gradle* || true        
-  
+          grep -R "applicationId" android/app/build.gradle* || true
 
       - uses: actions/upload-artifact@v4
         with:
