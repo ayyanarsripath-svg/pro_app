@@ -1,6 +1,7 @@
 import 'dart:io';
 
 import 'package:flutter/material.dart';
+import 'package:flutter/services.dart';
 import 'package:image_picker/image_picker.dart';
 import 'package:provider/provider.dart';
 
@@ -23,6 +24,11 @@ class SettingsScreen extends StatefulWidget {
 }
 
 class _SettingsScreenState extends State<SettingsScreen> {
+  // Same native channel MainActivity.kt already exposes for the WhatsApp
+  // direct-share feature - reused here to ask the running app for its own
+  // signing certificate's SHA-1 (see MainActivity.kt's getSigningSha1()).
+  static const _nativeChannel = MethodChannel('pro_app/whatsapp_share');
+
   final _settingsRepo = SettingsRepository();
   final _nameCtrl = TextEditingController();
   final _taglineCtrl = TextEditingController();
@@ -76,6 +82,72 @@ class _SettingsScreenState extends State<SettingsScreen> {
   Future<void> _resetLogo() async {
     await context.read<LogoService>().clearLogo();
     if (mounted) ScaffoldMessenger.of(context).showSnackBar(const SnackBar(content: Text('Logo reset to default')));
+  }
+
+  // Admin-only "App Signing Info" - reads this exact install's signing
+  // certificate SHA-1 fingerprint natively (MainActivity.kt) and shows it
+  // with a one-tap copy button, formatted exactly the way Google Cloud
+  // Console's OAuth client "SHA-1 certificate fingerprint" field expects.
+  // This is the value that must match the "Pro App Android" OAuth client
+  // in Google Cloud Console (project pro-app-drive-backup) for Google
+  // Drive backup sign-in to work - if Drive sign-in ever starts looping
+  // with "[16] Account reauth failed" again, re-check this against that
+  // Console page.
+  Future<void> _showSigningInfo() async {
+    String? sha1;
+    String? error;
+    try {
+      final result = await _nativeChannel.invokeMethod<String>('getSigningSha1');
+      sha1 = result;
+    } catch (e) {
+      error = e.toString();
+    }
+    if (!mounted) return;
+    await showDialog<void>(
+      context: context,
+      builder: (context) => AlertDialog(
+        title: const Text('App Signing Info'),
+        content: Column(
+          mainAxisSize: MainAxisSize.min,
+          crossAxisAlignment: CrossAxisAlignment.start,
+          children: [
+            const Text(
+              'This is this install\'s signing certificate SHA-1. Paste it into '
+              'Google Cloud Console -> APIs & Services -> Credentials -> '
+              '"Pro App Android" OAuth client -> SHA-1 certificate fingerprint '
+              'if Google Drive backup ever gets stuck re-asking for account '
+              'sign-in.',
+              style: TextStyle(fontSize: 12.5, color: AppColors.textSecondaryOf(context)),
+            ),
+            const SizedBox(height: 14),
+            if (sha1 != null)
+              SelectableText(
+                sha1,
+                style: const TextStyle(fontWeight: FontWeight.bold, fontFamily: 'monospace', fontSize: 13),
+              )
+            else
+              Text(
+                'Could not read the signing certificate${error != null ? ' ($error)' : ''}.',
+                style: const TextStyle(color: Colors.red),
+              ),
+          ],
+        ),
+        actions: [
+          if (sha1 != null)
+            TextButton.icon(
+              onPressed: () {
+                Clipboard.setData(ClipboardData(text: sha1!));
+                ScaffoldMessenger.of(context).showSnackBar(
+                  const SnackBar(content: Text('SHA-1 copied - paste it into Google Cloud Console')),
+                );
+              },
+              icon: const Icon(Icons.copy_rounded, size: 18),
+              label: const Text('Copy'),
+            ),
+          TextButton(onPressed: () => Navigator.pop(context), child: const Text('Close')),
+        ],
+      ),
+    );
   }
 
   @override
@@ -223,6 +295,16 @@ class _SettingsScreenState extends State<SettingsScreen> {
               subtitle: const Text('Add staff accounts, set what they can see/do'),
               trailing: const Icon(Icons.chevron_right),
               onTap: () => Navigator.push(context, MaterialPageRoute(builder: (_) => const StaffScreen())),
+            ),
+          ),
+        if (auth.isAdmin)
+          Card(
+            child: ListTile(
+              leading: const Icon(Icons.fingerprint_rounded, color: AppColors.primaryBlue),
+              title: const Text('App Signing Info'),
+              subtitle: const Text('SHA-1 fingerprint for Google Cloud Console (Drive backup sign-in)'),
+              trailing: const Icon(Icons.chevron_right),
+              onTap: _showSigningInfo,
             ),
           ),
         Card(
