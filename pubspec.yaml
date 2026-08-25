@@ -89,6 +89,12 @@ dependencies:
   # click panna file choose panra maadhiri vaikkanum").
   file_picker: ^12.0.0
 
+  # "Pick from Contacts" on the Daily Order supplier phone field - lets the
+  # shop choose the supplier's number from the phone's own saved Contacts
+  # app instead of retyping it (spec: "phone number kekkutho anga contact
+  # app la erunthu choose panramathiri panni kudu").
+  flutter_contacts: ^1.1.9+2
+
 dev_dependencies:
   flutter_test:
     sdk: flutter
