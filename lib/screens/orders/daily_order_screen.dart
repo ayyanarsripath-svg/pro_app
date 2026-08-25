@@ -198,6 +198,85 @@ class _DailyOrderScreenState extends State<DailyOrderScreen> {
     return preview;
   }
 
+  /// Shown from the "Reminder not showing up?" button inside the Daily
+  /// Order Settings dialog below (spec: "daily order widget problem not
+  /// solved / the problem is order not send automatically to fixed time" -
+  /// traced to Android/MIUI-style background restrictions silently killing
+  /// the reminder trigger, not an app bug - see background_tasks.dart's
+  /// checkAndNotifyIfDue wiring, which is already correct). Explains what's
+  /// actually happening and gives the owner two concrete fixes: one this
+  /// button can do for them directly (the standard Android battery-
+  /// optimization exemption), and one that only they can do by hand (the
+  /// OEM-only "Autostart" toggle Xiaomi/Vivo/Oppo/Realme phones hide
+  /// outside any app's reach).
+  Future<void> _showReminderTroubleshootDialog(BuildContext parentContext) async {
+    await showDialog<void>(
+      context: parentContext,
+      builder: (dialogContext) => AlertDialog(
+        title: const Text('Reminder Not Showing Up?'),
+        content: SingleChildScrollView(
+          child: Column(
+            mainAxisSize: MainAxisSize.min,
+            crossAxisAlignment: CrossAxisAlignment.start,
+            children: [
+              const Text(
+                'On many phones (Xiaomi/Redmi/Poco, Vivo, Oppo, Realme especially), Android itself kills this '
+                'app\'s background reminder to save battery - unless the phone is told not to. This is a phone '
+                'setting, not something broken in the app. Two steps fix it:',
+                style: TextStyle(fontSize: 13),
+              ),
+              const SizedBox(height: 14),
+              const Text('1. Allow background running', style: TextStyle(fontWeight: FontWeight.w700, fontSize: 13)),
+              const SizedBox(height: 4),
+              const Text(
+                'Tap the button below and choose "Allow" on the popup - this tells Android not to restrict this app.',
+                style: TextStyle(fontSize: 12.5),
+              ),
+              const SizedBox(height: 8),
+              OutlinedButton.icon(
+                onPressed: requestIgnoreBatteryOptimizations,
+                icon: const Icon(Icons.battery_charging_full_rounded, size: 18),
+                label: const Text('Allow Background Running'),
+              ),
+              const SizedBox(height: 16),
+              const Text('2. Turn on Autostart (Xiaomi/Redmi/Poco - MIUI)', style: TextStyle(fontWeight: FontWeight.w700, fontSize: 13)),
+              const SizedBox(height: 4),
+              const Text(
+                'This one can only be turned on by hand - no app can switch it on for you:\n\n'
+                'Settings → Apps → Manage apps → Professional Mobiles → Autostart → turn ON\n\n'
+                '(or: Security app → Permissions → Autostart → find Professional Mobiles → turn ON)\n\n'
+                'Also check: Settings → Battery & performance → App battery saver → Professional Mobiles → '
+                'choose "No restrictions".',
+                style: TextStyle(fontSize: 12.5),
+              ),
+              const SizedBox(height: 12),
+              const Text('Vivo / Oppo / Realme phones', style: TextStyle(fontWeight: FontWeight.w700, fontSize: 13)),
+              const SizedBox(height: 4),
+              const Text(
+                'Similar idea, different name: Settings → Battery → App background power consumption / '
+                'High background power usage apps → Professional Mobiles → allow it. Also check the same '
+                'Autostart-style toggle under Settings → Apps → Autostart (Vivo) or Manage → Startup manager (Oppo).',
+                style: TextStyle(fontSize: 12.5),
+              ),
+              const SizedBox(height: 12),
+              Align(
+                alignment: Alignment.centerLeft,
+                child: TextButton.icon(
+                  onPressed: openAppSettings,
+                  icon: const Icon(Icons.settings_applications_rounded, size: 18),
+                  label: const Text("Open this app's phone settings"),
+                ),
+              ),
+            ],
+          ),
+        ),
+        actions: [
+          TextButton(onPressed: () => Navigator.pop(dialogContext), child: const Text('Close')),
+        ],
+      ),
+    );
+  }
+
   Future<void> _openSettings() async {
     final nameCtrl = TextEditingController(text: _supplierName);
     final phoneCtrl = TextEditingController(text: _supplierPhone);
@@ -278,6 +357,18 @@ class _DailyOrderScreenState extends State<DailyOrderScreen> {
                   value: reminderOn,
                   onChanged: (v) => setDialogState(() => reminderOn = v),
                 ),
+                if (reminderOn)
+                  Padding(
+                    padding: const EdgeInsets.only(left: 4, bottom: 4),
+                    child: Align(
+                      alignment: Alignment.centerLeft,
+                      child: TextButton.icon(
+                        onPressed: () => _showReminderTroubleshootDialog(dialogContext),
+                        icon: const Icon(Icons.battery_alert_rounded, size: 16, color: AppColors.warning),
+                        label: const Text('Reminder not showing up? Tap here', style: TextStyle(fontSize: 12.5)),
+                      ),
+                    ),
+                  ),
                 SwitchListTile(
                   contentPadding: EdgeInsets.zero,
                   title: const Text('Home Screen Widget'),
