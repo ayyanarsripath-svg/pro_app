@@ -603,15 +603,28 @@ class _DailyOrderScreenState extends State<DailyOrderScreen> {
   Future<void> _addItem() async {
     final partCtrl = TextEditingController();
     final typeCtrl = TextEditingController();
-    final qtyCtrl = TextEditingController();
+    // Pre-filled with "1" - by far the most common quantity, so the shop
+    // doesn't have to type it every single time (spec: "quantity la fixed
+    // number 1 nu pottu kudu, adikkadi 1 podrathu kaduppa erukku"). Tapping
+    // the field selects the "1" so typing a different number just replaces
+    // it instead of requiring a manual delete first - see qtyFocus listener
+    // below.
+    final qtyCtrl = TextEditingController(text: '1');
     final phoneCtrl = TextEditingController();
     // Enter/Done moves focus to the next field instead of just closing the
     // keyboard (spec: field full pannittu enter azhuthina aditha tabku
-    // poganum).
-    final partFocus = FocusNode();
+    // poganum). Field order is Type/Model -> Part/Accessory -> Quantity ->
+    // Phone (spec: "type model mela potru kizhe parts and accessories
+    // potru").
     final typeFocus = FocusNode();
+    final partFocus = FocusNode();
     final qtyFocus = FocusNode();
     final phoneFocus = FocusNode();
+    qtyFocus.addListener(() {
+      if (qtyFocus.hasFocus) {
+        qtyCtrl.selection = TextSelection(baseOffset: 0, extentOffset: qtyCtrl.text.length);
+      }
+    });
 
     final ok = await showDialog<bool>(
       context: context,
@@ -622,17 +635,17 @@ class _DailyOrderScreenState extends State<DailyOrderScreen> {
             mainAxisSize: MainAxisSize.min,
             children: [
               TextField(
-                controller: partCtrl,
-                focusNode: partFocus,
-                decoration: const InputDecoration(labelText: 'Part / Accessory Name *'),
-                textInputAction: TextInputAction.next,
-                onSubmitted: (_) => FocusScope.of(dialogContext).requestFocus(typeFocus),
-              ),
-              const SizedBox(height: 10),
-              TextField(
                 controller: typeCtrl,
                 focusNode: typeFocus,
                 decoration: const InputDecoration(labelText: 'Type / Model'),
+                textInputAction: TextInputAction.next,
+                onSubmitted: (_) => FocusScope.of(dialogContext).requestFocus(partFocus),
+              ),
+              const SizedBox(height: 10),
+              TextField(
+                controller: partCtrl,
+                focusNode: partFocus,
+                decoration: const InputDecoration(labelText: 'Part / Accessory Name *'),
                 textInputAction: TextInputAction.next,
                 onSubmitted: (_) => FocusScope.of(dialogContext).requestFocus(qtyFocus),
               ),
@@ -641,6 +654,7 @@ class _DailyOrderScreenState extends State<DailyOrderScreen> {
                 controller: qtyCtrl,
                 focusNode: qtyFocus,
                 decoration: const InputDecoration(labelText: 'Quantity *'),
+                keyboardType: TextInputType.number,
                 textInputAction: TextInputAction.next,
                 onSubmitted: (_) => FocusScope.of(dialogContext).requestFocus(phoneFocus),
               ),
@@ -700,9 +714,10 @@ class _DailyOrderScreenState extends State<DailyOrderScreen> {
     final phoneCtrl = TextEditingController(text: item.phone ?? '');
     // Enter/Done moves focus to the next field instead of just closing the
     // keyboard (spec: field full pannittu enter azhuthina aditha tabku
-    // poganum).
-    final partFocus = FocusNode();
+    // poganum). Field order matches _addItem: Type/Model -> Part/Accessory
+    // -> Quantity -> Phone.
     final typeFocus = FocusNode();
+    final partFocus = FocusNode();
     final qtyFocus = FocusNode();
     final phoneFocus = FocusNode();
 
@@ -715,17 +730,17 @@ class _DailyOrderScreenState extends State<DailyOrderScreen> {
             mainAxisSize: MainAxisSize.min,
             children: [
               TextField(
-                controller: partCtrl,
-                focusNode: partFocus,
-                decoration: const InputDecoration(labelText: 'Part / Accessory Name *'),
-                textInputAction: TextInputAction.next,
-                onSubmitted: (_) => FocusScope.of(dialogContext).requestFocus(typeFocus),
-              ),
-              const SizedBox(height: 10),
-              TextField(
                 controller: typeCtrl,
                 focusNode: typeFocus,
                 decoration: const InputDecoration(labelText: 'Type / Model'),
+                textInputAction: TextInputAction.next,
+                onSubmitted: (_) => FocusScope.of(dialogContext).requestFocus(partFocus),
+              ),
+              const SizedBox(height: 10),
+              TextField(
+                controller: partCtrl,
+                focusNode: partFocus,
+                decoration: const InputDecoration(labelText: 'Part / Accessory Name *'),
                 textInputAction: TextInputAction.next,
                 onSubmitted: (_) => FocusScope.of(dialogContext).requestFocus(qtyFocus),
               ),
@@ -734,6 +749,7 @@ class _DailyOrderScreenState extends State<DailyOrderScreen> {
                 controller: qtyCtrl,
                 focusNode: qtyFocus,
                 decoration: const InputDecoration(labelText: 'Quantity *'),
+                keyboardType: TextInputType.number,
                 textInputAction: TextInputAction.next,
                 onSubmitted: (_) => FocusScope.of(dialogContext).requestFocus(phoneFocus),
               ),
