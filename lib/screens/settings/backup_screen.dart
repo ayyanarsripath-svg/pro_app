@@ -1,5 +1,6 @@
 import 'dart:io';
 
+import 'package:file_picker/file_picker.dart';
 import 'package:flutter/material.dart';
 import 'package:path/path.dart' as p;
 import 'package:share_plus/share_plus.dart';
@@ -55,11 +56,34 @@ class _BackupScreenState extends State<BackupScreen> {
                 SectionCard(title: 'Manual Backup', icon: Icons.save_rounded, children: [
                   Text('Creates a local copy of your entire database right now.', style: TextStyle(color: AppColors.textSecondaryOf(context), fontSize: 12.5)),
                   const SizedBox(height: 10),
-                  ElevatedButton.icon(
-                    onPressed: _working ? null : _createBackup,
-                    icon: const Icon(Icons.backup_rounded),
-                    label: const Text('Backup Now'),
-                  ),
+                  Wrap(spacing: 8, runSpacing: 8, children: [
+                    ElevatedButton.icon(
+                      onPressed: _working ? null : _createBackup,
+                      icon: const Icon(Icons.backup_rounded),
+                      label: const Text('Backup Now'),
+                    ),
+                    // File-picker based restore, separate from the
+                    // list-based "Restore" button on each item under
+                    // "Local Backups" below - this one lets the shop pick
+                    // a .db backup file from anywhere on the phone (e.g.
+                    // one they were sent on WhatsApp, or saved from Google
+                    // Drive/a file manager), not just the backups this
+                    // install itself created (spec: "restore button click
+                    // panna file choose panra maadhiri vaikkanum").
+                    OutlinedButton.icon(
+                      onPressed: _working ? null : _restoreFromFile,
+                      icon: const Icon(Icons.folder_open_rounded),
+                      label: const Text('Restore from File'),
+                    ),
+                  ]),
+                  if (_backupDirPath.isNotEmpty)
+                    Padding(
+                      padding: const EdgeInsets.only(top: 8),
+                      child: Text(
+                        'Manual backups are saved to: $_backupDirPath',
+                        style: TextStyle(color: AppColors.textSecondaryOf(context), fontSize: 11.5),
+                      ),
+                    ),
                 ]),
                 SectionCard(title: 'Weekly Automatic Backup', icon: Icons.auto_mode_rounded, children: [
                   Text(
@@ -156,14 +180,70 @@ class _BackupScreenState extends State<BackupScreen> {
   Future<void> _createBackup() async {
     setState(() => _working = true);
     try {
-      await _backupService.createManualBackup();
-      if (mounted) ScaffoldMessenger.of(context).showSnackBar(const SnackBar(content: Text('Backup created')));
+      final file = await _backupService.createManualBackup();
+      // Shows exactly where the file landed, not just "Backup created" -
+      // the shop kept asking "backup save aana pinnaadi enga
+      // pogudhu/store aaguthu" with no way to tell from the old message
+      // alone (spec: "backup create panna enga save aaguthunu kattu").
+      // Long-duration SnackBar (6s) since a folder path takes a moment
+      // longer to read than a short confirmation.
+      if (mounted) {
+        ScaffoldMessenger.of(context).showSnackBar(
+          SnackBar(
+            content: Text('Backup created - saved to ${file.path}'),
+            duration: const Duration(seconds: 6),
+          ),
+        );
+      }
     } catch (e) {
       _showError('Backup failed', e);
     } finally {
       if (mounted) setState(() => _working = false);
     }
     _load();
+  }
+
+  /// "Restore from File" - opens Android's own file picker (not limited to
+  /// this app's private storage) so the shop can restore from a backup
+  /// .db file saved anywhere: Downloads, a Google Drive/WhatsApp download,
+  /// an SD card, etc. Complements the per-item "Restore" button under
+  /// "Local Backups" below, which only offers backups this exact app
+  /// install already knows about.
+  Future<void> _restoreFromFile() async {
+    final result = await FilePicker.platform.pickFiles(
+      type: FileType.any,
+      dialogTitle: 'Choose a backup file to restore',
+    );
+    if (result == null || result.files.single.path == null) return;
+    final file = File(result.files.single.path!);
+    if (!mounted) return;
+
+    final confirm = await showDialog<bool>(
+      context: context,
+      builder: (context) => AlertDialog(
+        title: const Text('Restore Backup?'),
+        content: Text(
+          'This will replace your current data with "${p.basename(file.path)}". Make sure this file is a genuine Professional Mobiles backup - restoring the wrong file can leave the app unable to open. The app must be restarted after restoring.',
+        ),
+        actions: [
+          TextButton(onPressed: () => Navigator.pop(context, false), child: const Text('Cancel')),
+          ElevatedButton(onPressed: () => Navigator.pop(context, true), child: const Text('Restore')),
+        ],
+      ),
+    );
+    if (confirm != true) return;
+
+    setState(() => _working = true);
+    try {
+      await _backupService.restoreFrom(file);
+      if (mounted) {
+        ScaffoldMessenger.of(context).showSnackBar(const SnackBar(content: Text('Restored. Please close and reopen the app.')));
+      }
+    } catch (e) {
+      _showError('Restore failed', e);
+    } finally {
+      if (mounted) setState(() => _working = false);
+    }
   }
 
   // Previously this called signInToGoogleDrive() with no try/catch: an
