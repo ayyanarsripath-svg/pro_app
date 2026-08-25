@@ -1,3 +1,6 @@
+import 'dart:io';
+
+import 'package:android_intent_plus/android_intent.dart';
 import 'package:workmanager/workmanager.dart';
 
 import 'backup_service.dart';
@@ -133,4 +136,70 @@ Future<void> scheduleDailyOrderReminder({required int hour, required int minute}
 Future<void> cancelDailyOrderReminder() async {
   await _ensureWorkManagerInitialized();
   await Workmanager().cancelByUniqueName(dailyOrderReminderUniqueName);
+}
+
+/// Opens Android's own "Allow [app] to ignore battery optimizations?"
+/// system dialog for THIS app specifically. Many phones (Xiaomi/MIUI,
+/// Vivo, Oppo/ColorOS, Realme especially - see spec: "daily order widget
+/// problem ... order not send automatically to fixed time") kill
+/// WorkManager's background reminder trigger outright unless the app is
+/// whitelisted from battery/Doze restrictions, which silently drops the
+/// "Order Time!" notification with no error the shop would ever see - it
+/// just never fires. This one system dialog (tap "Allow") is the
+/// standard-Android half of the fix; see DailyOrderScreen's Settings
+/// dialog for the MIUI-style "Autostart" instructions this button's
+/// dialog also shows, since Autostart is a separate OEM-only toggle with
+/// no public Android API to request it - the shop has to turn that on by
+/// hand.
+///
+/// Safe/idempotent to call repeatedly: if the app is already whitelisted,
+/// Android just closes the dialog immediately with nothing for the owner
+/// to do. Android-only (matches the rest of this app); no-op elsewhere.
+/// Never throws into the caller - a phone that doesn't support this intent
+/// (very old/heavily customized Android builds) just does nothing instead
+/// of crashing the settings screen.
+Future<void> requestIgnoreBatteryOptimizations() async {
+  if (!Platform.isAndroid) return;
+  try {
+    final intent = AndroidIntent(
+      action: 'android.settings.REQUEST_IGNORE_BATTERY_OPTIMIZATIONS',
+      data: 'package:com.example.pro_app',
+    );
+    await intent.launch();
+  } catch (_) {
+    // Some OEM Android builds don't support this specific intent action -
+    // fail silently rather than crash the settings screen; the shop can
+    // still use the manual OEM battery-settings steps shown alongside
+    // this button.
+  }
+}
+
+/// Opens the phone's general battery-optimization app list (Android's
+/// stock "Battery optimization" screen showing every installed app) as a
+/// fallback when the direct per-app request above isn't supported on a
+/// particular OEM build - the owner can find "Professional Mobiles" in
+/// that list themselves and set it to "Don't optimize". Same
+/// never-throws, Android-only behaviour as [requestIgnoreBatteryOptimizations].
+Future<void> openBatteryOptimizationSettings() async {
+  if (!Platform.isAndroid) return;
+  try {
+    final intent = AndroidIntent(action: 'android.settings.IGNORE_BATTERY_OPTIMIZATION_SETTINGS');
+    await intent.launch();
+  } catch (_) {}
+}
+
+/// Opens this app's own "App info" settings page - from there the owner
+/// can reach OEM-specific battery/autostart controls that live under
+/// "App info" on many phones (e.g. MIUI's "Battery saver" per-app option,
+/// or a "Permissions" section containing Autostart on some ROMs) when
+/// they aren't reachable via any standard Android intent.
+Future<void> openAppSettings() async {
+  if (!Platform.isAndroid) return;
+  try {
+    final intent = AndroidIntent(
+      action: 'android.settings.APPLICATION_DETAILS_SETTINGS',
+      data: 'package:com.example.pro_app',
+    );
+    await intent.launch();
+  } catch (_) {}
 }
