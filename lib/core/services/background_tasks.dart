@@ -1,10 +1,17 @@
 import 'dart:io';
 
 import 'package:android_intent_plus/android_intent.dart';
+import 'package:flutter/services.dart';
 import 'package:workmanager/workmanager.dart';
 
 import 'backup_service.dart';
 import 'order_reminder_service.dart';
+
+// Same native channel MainActivity.kt already exposes for WhatsApp direct
+// share and App Signing Info - reused here for the exact-alarm Daily Order
+// reminder (DailyOrderAlarmReceiver.kt). Kept private to this file since
+// nothing outside background_tasks.dart needs to talk to it directly.
+const _nativeChannel = MethodChannel('pro_app/whatsapp_share');
 
 /// Shared WorkManager task registry.
 ///
@@ -129,6 +136,19 @@ Future<void> scheduleDailyOrderReminder({required int hour, required int minute}
     backoffPolicy: BackoffPolicy.linear,
     backoffPolicyDelay: const Duration(minutes: 5),
   );
+
+  // Also arms a native Android AlarmManager exact alarm for this same
+  // hour:minute (DailyOrderAlarmReceiver.kt) - this is the actual fix for
+  // "reminder never fires even with no-restriction battery settings on":
+  // WorkManager's periodic polling above is still kept as a catch-up, but
+  // an exact alarm is what real Android alarm-clock/reminder apps use
+  // specifically because it survives Doze and OEM background-killers far
+  // more reliably than JobScheduler-based WorkManager does. Never lets a
+  // platform-channel hiccup (e.g. running on a very old/unusual Android
+  // build) block the rest of Settings from saving.
+  try {
+    await _nativeChannel.invokeMethod('scheduleDailyOrderAlarm', {'hour': hour, 'minute': minute});
+  } catch (_) {}
 }
 
 /// Cancels the background order-reminder trigger - called when the owner
@@ -136,6 +156,9 @@ Future<void> scheduleDailyOrderReminder({required int hour, required int minute}
 Future<void> cancelDailyOrderReminder() async {
   await _ensureWorkManagerInitialized();
   await Workmanager().cancelByUniqueName(dailyOrderReminderUniqueName);
+  try {
+    await _nativeChannel.invokeMethod('cancelDailyOrderAlarm');
+  } catch (_) {}
 }
 
 /// Opens Android's own "Allow [app] to ignore battery optimizations?"
@@ -172,6 +195,21 @@ Future<void> requestIgnoreBatteryOptimizations() async {
     // still use the manual OEM battery-settings steps shown alongside
     // this button.
   }
+}
+
+/// Opens Android 12+'s "Alarms & reminders" permission screen for this
+/// app, needed for the exact-alarm Daily Order reminder above to actually
+/// fire at the precise minute instead of being silently downgraded to an
+/// inexact (possibly late-by-hours) alarm - there is no in-app runtime
+/// prompt for this, only this one-time Settings hand-off, same pattern as
+/// [requestIgnoreBatteryOptimizations]. No-op (does nothing, never throws)
+/// on Android 11 and below, where this permission doesn't exist and every
+/// exact alarm is already allowed by default.
+Future<void> requestExactAlarmPermission() async {
+  if (!Platform.isAndroid) return;
+  try {
+    await _nativeChannel.invokeMethod('requestExactAlarmPermission');
+  } catch (_) {}
 }
 
 /// Opens the phone's general battery-optimization app list (Android's
