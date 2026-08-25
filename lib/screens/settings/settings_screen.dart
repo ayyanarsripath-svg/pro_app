@@ -6,6 +6,7 @@ import 'package:image_picker/image_picker.dart';
 import 'package:provider/provider.dart';
 
 import '../../core/repositories/settings_repository.dart';
+import '../../core/repositories/staff_repository.dart';
 import '../../core/services/auth_service.dart';
 import '../../core/services/logo_service.dart';
 import '../../core/services/theme_service.dart';
@@ -84,6 +85,59 @@ class _SettingsScreenState extends State<SettingsScreen> {
     if (mounted) ScaffoldMessenger.of(context).showSnackBar(const SnackBar(content: Text('Logo reset to default')));
   }
 
+  // Re-asks for a staff/admin PIN right before revealing the signing
+  // fingerprint below - being an admin login already gates the menu entry
+  // itself, but this is sensitive enough (it's effectively a security
+  // credential for the Google Drive OAuth client) that the spec asked for
+  // an extra "master password" re-check immediately before showing it,
+  // same idea as re-entering a password before revealing something
+  // sensitive elsewhere. Any active staff/admin PIN is accepted, same as
+  // every other PIN check in the app.
+  Future<bool> _confirmMasterPin() async {
+    final pinCtrl = TextEditingController();
+    String? error;
+    final ok = await showDialog<bool>(
+      context: context,
+      builder: (context) => StatefulBuilder(
+        builder: (context, setLocalState) => AlertDialog(
+          title: const Text('Enter Master PIN'),
+          content: Column(
+            mainAxisSize: MainAxisSize.min,
+            crossAxisAlignment: CrossAxisAlignment.start,
+            children: [
+              const Text('For your protection, re-enter your admin/staff PIN to view the signing info.'),
+              const SizedBox(height: 12),
+              TextField(
+                controller: pinCtrl,
+                autofocus: true,
+                obscureText: true,
+                keyboardType: TextInputType.number,
+                maxLength: 6,
+                decoration: InputDecoration(labelText: 'PIN', errorText: error),
+                onSubmitted: (_) => Navigator.pop(context, true),
+              ),
+            ],
+          ),
+          actions: [
+            TextButton(onPressed: () => Navigator.pop(context, false), child: const Text('Cancel')),
+            ElevatedButton(
+              onPressed: () async {
+                final staff = await StaffRepository().verifyPin(pinCtrl.text.trim());
+                if (staff == null) {
+                  setLocalState(() => error = 'Wrong PIN');
+                  return;
+                }
+                if (context.mounted) Navigator.pop(context, true);
+              },
+              child: const Text('Confirm'),
+            ),
+          ],
+        ),
+      ),
+    );
+    return ok ?? false;
+  }
+
   // Admin-only "App Signing Info" - reads this exact install's signing
   // certificate SHA-1 fingerprint natively (MainActivity.kt) and shows it
   // with a one-tap copy button, formatted exactly the way Google Cloud
@@ -94,6 +148,8 @@ class _SettingsScreenState extends State<SettingsScreen> {
   // with "[16] Account reauth failed" again, re-check this against that
   // Console page.
   Future<void> _showSigningInfo() async {
+    final confirmed = await _confirmMasterPin();
+    if (!confirmed || !mounted) return;
     String? sha1;
     String? error;
     try {
@@ -111,7 +167,7 @@ class _SettingsScreenState extends State<SettingsScreen> {
           mainAxisSize: MainAxisSize.min,
           crossAxisAlignment: CrossAxisAlignment.start,
           children: [
-            const Text(
+            Text(
               'This is this install\'s signing certificate SHA-1. Paste it into '
               'Google Cloud Console -> APIs & Services -> Credentials -> '
               '"Pro App Android" OAuth client -> SHA-1 certificate fingerprint '
