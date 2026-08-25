@@ -1,6 +1,7 @@
 import 'dart:io';
 
 import 'package:flutter/material.dart';
+import 'package:flutter_contacts/flutter_contacts.dart';
 import 'package:path_provider/path_provider.dart';
 import 'package:printing/printing.dart';
 import 'package:url_launcher/url_launcher.dart';
@@ -239,6 +240,21 @@ class _DailyOrderScreenState extends State<DailyOrderScreen> {
                 label: const Text('Allow Background Running'),
               ),
               const SizedBox(height: 16),
+              const Text('1b. Allow exact-time alarms (Android 12+)', style: TextStyle(fontWeight: FontWeight.w700, fontSize: 13)),
+              const SizedBox(height: 4),
+              const Text(
+                'On newer phones, tap below and choose "Allow" - this lets the reminder fire at the exact minute '
+                'you set instead of Android silently delaying it. Does nothing (safe to tap) on older phones that '
+                "don't need this.",
+                style: TextStyle(fontSize: 12.5),
+              ),
+              const SizedBox(height: 8),
+              OutlinedButton.icon(
+                onPressed: requestExactAlarmPermission,
+                icon: const Icon(Icons.alarm_rounded, size: 18),
+                label: const Text('Allow Exact Alarm Timing'),
+              ),
+              const SizedBox(height: 16),
               const Text('2. Turn on Autostart (Xiaomi/Redmi/Poco - MIUI)', style: TextStyle(fontWeight: FontWeight.w700, fontSize: 13)),
               const SizedBox(height: 4),
               const Text(
@@ -322,19 +338,41 @@ class _DailyOrderScreenState extends State<DailyOrderScreen> {
                   onSubmitted: (_) => FocusScope.of(dialogContext).unfocus(),
                 ),
                 const SizedBox(height: 4),
-                Align(
-                  alignment: Alignment.centerLeft,
-                  child: TextButton.icon(
-                    onPressed: () async {
-                      final picked = await _pickSupplier();
-                      if (picked != null) {
-                        nameCtrl.text = picked.name;
-                        phoneCtrl.text = picked.phone ?? '';
-                      }
-                    },
-                    icon: const Icon(Icons.local_shipping_rounded, size: 18),
-                    label: const Text('Pick from Suppliers list'),
-                  ),
+                Wrap(
+                  spacing: 4,
+                  children: [
+                    TextButton.icon(
+                      onPressed: () async {
+                        final picked = await _pickSupplier();
+                        if (picked != null) {
+                          nameCtrl.text = picked.name;
+                          phoneCtrl.text = picked.phone ?? '';
+                        }
+                      },
+                      icon: const Icon(Icons.local_shipping_rounded, size: 18),
+                      label: const Text('Pick from Suppliers list'),
+                    ),
+                    // Lets the shop pick the supplier's number straight
+                    // from the phone's own saved Contacts, instead of
+                    // retyping it (spec: "phone number kekkutho anga
+                    // contact app la erunthu choose panramathiri panni
+                    // kudu ... saving contact la erunthu choose
+                    // pannippan"). Uses the system contact picker
+                    // (openExternalPick), which needs no extra runtime
+                    // permission prompt - Android grants this app
+                    // temporary access to only the one contact picked.
+                    TextButton.icon(
+                      onPressed: () async {
+                        final picked = await _pickFromContacts(dialogContext);
+                        if (picked != null) {
+                          if (picked.name.isNotEmpty) nameCtrl.text = picked.name;
+                          if (picked.phone.isNotEmpty) phoneCtrl.text = picked.phone;
+                        }
+                      },
+                      icon: const Icon(Icons.contacts_rounded, size: 18),
+                      label: const Text('Pick from Contacts'),
+                    ),
+                  ],
                 ),
                 const Divider(height: 20),
                 ListTile(
@@ -470,6 +508,36 @@ class _DailyOrderScreenState extends State<DailyOrderScreen> {
         ],
       ),
     );
+  }
+
+  /// Opens Android's own Contacts picker UI and returns the picked
+  /// contact's display name + first phone number (sanitised at send time
+  /// by WhatsAppSmsService, so any formatting - spaces, dashes, +91, etc -
+  /// picked straight from Contacts is fine as-is). Returns null if the
+  /// shop backs out of the picker, or if the chosen contact has no phone
+  /// number saved at all.
+  Future<({String name, String phone})?> _pickFromContacts(BuildContext dialogContext) async {
+    try {
+      final contact = await FlutterContacts.openExternalPick();
+      if (contact == null) return null;
+      final phone = contact.phones.isNotEmpty ? contact.phones.first.number : '';
+      if (phone.isEmpty) {
+        if (dialogContext.mounted) {
+          ScaffoldMessenger.of(dialogContext).showSnackBar(
+            SnackBar(content: Text('${contact.displayName} has no phone number saved')),
+          );
+        }
+        return null;
+      }
+      return (name: contact.displayName, phone: phone);
+    } catch (e) {
+      if (dialogContext.mounted) {
+        ScaffoldMessenger.of(dialogContext).showSnackBar(
+          SnackBar(content: Text('Could not open Contacts: $e')),
+        );
+      }
+      return null;
+    }
   }
 
   // ---------------------------------------------------------------------
