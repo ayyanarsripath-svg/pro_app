@@ -82,6 +82,13 @@ dependencies:
   # own.
   share_plus: ^13.3.0
 
+  # "Restore from File" button (Settings -> Backup & Restore) - opens
+  # Android's native file picker so a backup .db file saved anywhere on
+  # the phone (Downloads, a WhatsApp/Drive download, etc.), not just this
+  # app's own private backups, can be restored (spec: "restore button
+  # click panna file choose panra maadhiri vaikkanum").
+  file_picker: ^8.1.6
+
 dev_dependencies:
   flutter_test:
     sdk: flutter
