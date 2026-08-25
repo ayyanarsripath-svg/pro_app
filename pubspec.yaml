@@ -87,7 +87,7 @@ dependencies:
   # the phone (Downloads, a WhatsApp/Drive download, etc.), not just this
   # app's own private backups, can be restored (spec: "restore button
   # click panna file choose panra maadhiri vaikkanum").
-  file_picker: ^8.1.6
+  file_picker: ^12.0.0
 
 dev_dependencies:
   flutter_test:
