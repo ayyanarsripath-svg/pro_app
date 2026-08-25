@@ -69,6 +69,19 @@ dependencies:
   # widget for now, matching the "phone's home screen widget" request.
   home_widget: ^0.9.3
 
+  # Lets a customer intimation explicitly open in WhatsApp Business
+  # instead of regular WhatsApp when both are installed (Settings ->
+  # WhatsApp Sending) - see WhatsAppSmsService.sendWhatsApp. Android-only,
+  # matching the rest of this app.
+  android_intent_plus: ^6.1.0
+
+  # Share button next to each Local Backup file (Settings -> Backup &
+  # Restore) - hands the .db file to WhatsApp/Drive/email/a file
+  # manager's own "Save a copy", since the file itself lives in the app's
+  # private storage and never shows up in the phone's Files app on its
+  # own.
+  share_plus: ^13.3.0
+
 dev_dependencies:
   flutter_test:
     sdk: flutter
