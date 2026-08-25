@@ -210,8 +210,12 @@ class _BackupScreenState extends State<BackupScreen> {
   /// "Local Backups" below, which only offers backups this exact app
   /// install already knows about.
   Future<void> _restoreFromFile() async {
-    final result = await FilePicker.platform.pickFiles(
+    // file_picker 11+ refactored FilePicker to static methods (no more
+    // `.platform` instance) and now defaults allowMultiple to true -
+    // explicitly false here since exactly one file is expected below.
+    final result = await FilePicker.pickFiles(
       type: FileType.any,
+      allowMultiple: false,
       dialogTitle: 'Choose a backup file to restore',
     );
     if (result == null || result.files.single.path == null) return;
