@@ -63,7 +63,21 @@ class DailyOrderWidgetService {
         );
         await HomeWidget.saveWidgetData<int>('pending_count', pending.length);
         for (var i = 0; i < _maxRows; i++) {
-          final text = i < pending.length ? '${pending[i].partName} x${pending[i].quantity}' : '';
+          // Includes Type/Model alongside the part/accessory name (spec:
+          // "preview la part or accessories name and quantity mattumthan
+          // kamikkuthu enakku type or model um sethu preview la kattanum")
+          // - previously only "<part name> x<qty>" was written here, so a
+          // shop with several entries of the same part name but different
+          // models had no way to tell them apart on the home screen widget
+          // without opening the app.
+          String text;
+          if (i < pending.length) {
+            final item = pending[i];
+            final model = (item.typeModel ?? '').trim();
+            text = model.isEmpty ? '${item.partName} x${item.quantity}' : '${item.partName} ($model) x${item.quantity}';
+          } else {
+            text = '';
+          }
           await HomeWidget.saveWidgetData<String>('item_$i', text);
         }
       }
