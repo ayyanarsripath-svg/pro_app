@@ -1,5 +1,6 @@
 import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
+import 'package:url_launcher/url_launcher.dart';
 
 import '../../core/repositories/daily_order_repository.dart';
 import '../../core/services/daily_order_widget_service.dart';
@@ -48,6 +49,12 @@ class _QuickAddOrderScreenState extends State<QuickAddOrderScreen> {
     super.dispose();
   }
 
+  Future<void> _callPhone(String phone) async {
+    try {
+      await launchUrl(Uri(scheme: 'tel', path: phone));
+    } catch (_) {}
+  }
+
   void _closeToHomeScreen() {
     // This screen runs in its own separate Activity/task (see the class
     // doc comment) - popping it finishes that whole task straight back to
@@ -89,6 +96,22 @@ class _QuickAddOrderScreenState extends State<QuickAddOrderScreen> {
           SnackBar(content: Text('Added "$part". Note the next item...')),
         );
       } else {
+        // BUG FIX: this used to call _closeToHomeScreen() immediately after
+        // awaiting refresh() - but refresh() awaiting the Dart-side
+        // saveWidgetData/updateWidget calls only guarantees THIS engine
+        // issued those platform-channel calls, not that Android's
+        // SharedPreferences write has actually reached disk and the home
+        // screen's widget host has actually redrawn before
+        // SystemNavigator.pop() tears this whole separate Activity/engine
+        // down (spec: "once order enter pannathukku aporom preview
+        // therithu but konja neram kazhichi marubadi order enter panna
+        // antha preview katta mattangithu" - worked at first, then
+        // intermittently stopped reflecting the newest item). A short
+        // pause here gives that native work time to actually land before
+        // the process that triggered it disappears - cheap insurance
+        // against a race that otherwise only shows up "sometimes".
+        await Future.delayed(const Duration(milliseconds: 400));
+        if (!mounted) return;
         _closeToHomeScreen();
       }
     } catch (e) {
@@ -159,7 +182,26 @@ class _QuickAddOrderScreenState extends State<QuickAddOrderScreen> {
                 TextField(
                   controller: _phoneCtrl,
                   keyboardType: TextInputType.phone,
-                  decoration: const InputDecoration(labelText: 'Phone (optional)', border: OutlineInputBorder()),
+                  decoration: InputDecoration(
+                    labelText: 'Phone (optional)',
+                    border: const OutlineInputBorder(),
+                    // Same "call right from here" convenience as the full
+                    // Daily Orders screen's Add/Edit Item dialogs (spec:
+                    // "phone number note pannathukku aprom call panra
+                    // option ella call panni inform panrathukku option
+                    // kudu") - useful since this quick-add screen is
+                    // reached straight from the home-screen widget, with
+                    // no easy way back to the full item list to find the
+                    // same call button there.
+                    suffixIcon: IconButton(
+                      icon: const Icon(Icons.call_rounded),
+                      tooltip: 'Call this number',
+                      onPressed: () {
+                        final phone = _phoneCtrl.text.trim();
+                        if (phone.isNotEmpty) _callPhone(phone);
+                      },
+                    ),
+                  ),
                 ),
                 const SizedBox(height: 22),
                 SizedBox(

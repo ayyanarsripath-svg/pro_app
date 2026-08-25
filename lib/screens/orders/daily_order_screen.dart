@@ -648,7 +648,24 @@ class _DailyOrderScreenState extends State<DailyOrderScreen> {
               TextField(
                 controller: phoneCtrl,
                 focusNode: phoneFocus,
-                decoration: const InputDecoration(labelText: 'Phone (optional - for your own reference, tap to call)'),
+                decoration: InputDecoration(
+                  labelText: 'Phone (optional - for your own reference, tap to call)',
+                  // Lets the shop call the supplier/customer about this
+                  // item right away, straight from this dialog, instead of
+                  // having to save first and find it in the list below to
+                  // reach the same call button there (spec: "add order
+                  // item la once phone number note pannathukku aprom call
+                  // panra option ella"). Only meaningful once a number has
+                  // actually been typed.
+                  suffixIcon: IconButton(
+                    icon: const Icon(Icons.call_rounded),
+                    tooltip: 'Call this number',
+                    onPressed: () {
+                      final phone = phoneCtrl.text.trim();
+                      if (phone.isNotEmpty) _callPhone(phone);
+                    },
+                  ),
+                ),
                 keyboardType: TextInputType.phone,
                 textInputAction: TextInputAction.done,
                 onSubmitted: (_) => FocusScope.of(dialogContext).unfocus(),
@@ -724,7 +741,17 @@ class _DailyOrderScreenState extends State<DailyOrderScreen> {
               TextField(
                 controller: phoneCtrl,
                 focusNode: phoneFocus,
-                decoration: const InputDecoration(labelText: 'Phone (optional - for your own reference, tap to call)'),
+                decoration: InputDecoration(
+                  labelText: 'Phone (optional - for your own reference, tap to call)',
+                  suffixIcon: IconButton(
+                    icon: const Icon(Icons.call_rounded),
+                    tooltip: 'Call this number',
+                    onPressed: () {
+                      final phone = phoneCtrl.text.trim();
+                      if (phone.isNotEmpty) _callPhone(phone);
+                    },
+                  ),
+                ),
                 keyboardType: TextInputType.phone,
                 textInputAction: TextInputAction.done,
                 onSubmitted: (_) => FocusScope.of(dialogContext).unfocus(),
