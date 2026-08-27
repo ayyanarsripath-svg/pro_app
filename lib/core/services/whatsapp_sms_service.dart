@@ -74,12 +74,28 @@ class WhatsAppSmsService {
   /// Returns false (rather than throwing) if WhatsApp isn't installed or
   /// anything about the native share fails, so callers can fall back to
   /// the older two-step [sendWhatsApp] + PDF-share flow.
+  ///
+  /// Also respects Settings -> WhatsApp Sending (same
+  /// [SettingsRepository.getWhatsAppSendApp] choice [sendWhatsApp] above
+  /// already honoured) - previously this specific PDF-attach flow ignored
+  /// that setting entirely and always targeted regular WhatsApp on the
+  /// native side, so a shop that chose "Business" there still saw the Daily
+  /// Order Send button open regular WhatsApp every time (spec: "daily order
+  /// send panrathu normal whatsapp than open aaguthu enakku business
+  /// whtsapp open aaganum athukku option set pannu").
   Future<bool> shareFileToWhatsApp({required String filePath, required String text, String? phone}) async {
     try {
+      final preferred = await _settingsRepo.getWhatsAppSendApp();
+      final targetPackage = preferred == 'business'
+          ? _businessPackage
+          : preferred == 'regular'
+              ? _regularPackage
+              : null; // 'auto' - let the native side use its own default (com.whatsapp)
       final ok = await _shareChannel.invokeMethod<bool>('shareToWhatsApp', {
         'filePath': filePath,
         'text': text,
         'phone': (phone == null || phone.trim().isEmpty) ? null : _sanitizePhone(phone),
+        'targetPackage': targetPackage,
       });
       return ok ?? false;
     } catch (_) {

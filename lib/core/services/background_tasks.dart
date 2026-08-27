@@ -229,6 +229,35 @@ Future<void> requestExactAlarmPermission() async {
   } catch (_) {}
 }
 
+/// Reports whether the exact-alarm ("Alarms & reminders") permission
+/// above is ACTUALLY granted right now - unlike
+/// [requestExactAlarmPermission], which only ever opens the Settings
+/// screen and has no idea what the owner chose there. Used by
+/// DailyOrderScreen to show a clear, always-visible warning ("reminder
+/// may not fire on time - tap to fix") whenever the reminder is turned on
+/// but this permission is still missing, instead of the alarm silently
+/// falling back to an inexact, possibly hours-late trigger with nothing
+/// in the app ever telling the owner why (spec: "notification time ku
+/// kattuthu but alarm or reminder varala ella settings um allow
+/// kuduthuttan" - settings show the right time but the alarm never
+/// actually fires even though the owner believes every permission is
+/// already allowed - a missing exact-alarm grant is the single most
+/// likely silent cause).
+/// Returns true on Android 11 and below (no such permission exists there,
+/// every exact alarm is always allowed) and true if the check itself
+/// fails for any reason - this function's job is to warn about a
+/// confirmed problem, never to invent a false one from a plugin hiccup.
+/// Returns true (skips the check) on non-Android platforms too.
+Future<bool> hasExactAlarmPermission() async {
+  if (!Platform.isAndroid) return true;
+  try {
+    final granted = await _nativeChannel.invokeMethod<bool>('canScheduleExactAlarms');
+    return granted ?? true;
+  } catch (_) {
+    return true;
+  }
+}
+
 /// Opens the phone's general battery-optimization app list (Android's
 /// stock "Battery optimization" screen showing every installed app) as a
 /// fallback when the direct per-app request above isn't supported on a
