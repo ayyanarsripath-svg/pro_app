@@ -40,15 +40,17 @@ cd professional_mobiles
 # never touches the lib/ source that's already here):
 flutter create --platforms=android .
 
-# 3. Add these two permissions to android/app/src/main/AndroidManifest.xml,
+# 3. Add this permission to android/app/src/main/AndroidManifest.xml,
 # inside the <manifest> tag (above <application>):
-# <uses-permission android:name="android.permission.CAMERA"/>
 # <uses-permission android:name="android.permission.INTERNET"/>
-# (CAMERA is for service/2nd-hand phone photos; INTERNET is only used
-# for the optional Google Drive backup - the rest of the app is 100%
-# offline.) Only needed if you're building locally - the GitHub Actions
-# workflow (.github/workflows/build-apk.yml) already does this step
-# for you automatically, every build.
+# (INTERNET is only used for the optional Google Drive backup - the rest
+# of the app is 100% offline. Service/2nd-hand-phone photo capture does
+# NOT need a CAMERA permission declared - image_picker delegates to the
+# phone's own Camera app via an Intent, and deliberately declaring CAMERA
+# would only add an unnecessary extra runtime permission prompt.) Only
+# needed if you're building locally - the GitHub Actions workflow
+# (.github/workflows/build-apk.yml) already does this step for you
+# automatically, every build.
 
 # 4. Fetch packages:
 flutter pub get
