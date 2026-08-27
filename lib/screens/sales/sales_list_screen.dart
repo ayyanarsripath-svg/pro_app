@@ -31,11 +31,23 @@ class _SalesListScreenState extends State<SalesListScreen> {
   List<SalesBill> _bills = [];
   Set<String> _claimedBillIds = {};
   bool _loading = true;
+  // Which bill's Print button is currently mid-build - a Set (not a
+  // single bool/id) since this is a list of many bills and nothing stops
+  // the shop owner tapping Print on a different row while one is already
+  // running.
+  final Set<String> _printingIds = {};
 
   @override
   void initState() {
     super.initState();
     _load();
+    // Warms up the shared logo/font/terms-note caches the moment this
+    // list opens, before any specific bill is even picked to print - see
+    // PdfService.warmUp's doc comment (spec: "service bill print kudutha
+    // 5 to 7 second aaguthu ... optimization panni 2 to 3 second la
+    // varamathiri panna mudiuma" - same PdfService, same fix, benefits
+    // every bill type this app prints).
+    _pdfService.warmUp();
   }
 
   Future<void> _load() async {
@@ -74,7 +86,12 @@ class _SalesListScreenState extends State<SalesListScreen> {
                   children: [
                     if (!claimed)
                     IconButton(icon: const Icon(Icons.verified_user_rounded), tooltip: 'Warranty Claim', onPressed: () => _fileWarrantyClaim(b)),
-                    IconButton(icon: const Icon(Icons.print_rounded), onPressed: () => _print(b)),
+                    IconButton(
+                      icon: _printingIds.contains(b.id)
+                          ? const SizedBox(width: 18, height: 18, child: CircularProgressIndicator(strokeWidth: 2))
+                          : const Icon(Icons.print_rounded),
+                      onPressed: _printingIds.contains(b.id) ? null : () => _print(b),
+                    ),
                     // Delete moved behind a "more" overflow menu instead of
                     // sitting as its own icon right next to Print (spec:
                     // print/delete pakkathula erukku, accident ah delete
@@ -118,10 +135,16 @@ class _SalesListScreenState extends State<SalesListScreen> {
   }
 
   Future<void> _print(SalesBill bill) async {
-    final items = await _repo.itemsFor(bill.id);
-    final customer = bill.customerId != null ? await _customerRepo.byId(bill.customerId!) : null;
-    final bytes = await _pdfService.buildSalesBill(bill: bill, items: items, customer: customer, warrantyClaimed: _claimedBillIds.contains(bill.id));
-    await Printing.layoutPdf(format: PdfPageFormat.a5, name: 'Sales_${bill.billNo}', onLayout: (format) async => bytes);
+    if (_printingIds.contains(bill.id)) return;
+    setState(() => _printingIds.add(bill.id));
+    try {
+      final items = await _repo.itemsFor(bill.id);
+      final customer = bill.customerId != null ? await _customerRepo.byId(bill.customerId!) : null;
+      final bytes = await _pdfService.buildSalesBill(bill: bill, items: items, customer: customer, warrantyClaimed: _claimedBillIds.contains(bill.id));
+      await Printing.layoutPdf(format: PdfPageFormat.a5, name: 'Sales_${bill.billNo}', onLayout: (format) async => bytes);
+    } finally {
+      if (mounted) setState(() => _printingIds.remove(bill.id));
+    }
   }
 
   /// Admin/permission-gated Delete (soft-delete: sets active=0 and clears
