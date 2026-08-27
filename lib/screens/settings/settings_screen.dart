@@ -4,6 +4,7 @@ import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
 import 'package:image_picker/image_picker.dart';
 import 'package:provider/provider.dart';
+import 'package:url_launcher/url_launcher.dart';
 
 import '../../core/repositories/settings_repository.dart';
 import '../../core/repositories/staff_repository.dart';
@@ -29,6 +30,20 @@ class _SettingsScreenState extends State<SettingsScreen> {
   // direct-share feature - reused here to ask the running app for its own
   // signing certificate's SHA-1 (see MainActivity.kt's getSigningSha1()).
   static const _nativeChannel = MethodChannel('pro_app/whatsapp_share');
+
+  // This app's own Google Cloud project (see README.md's Google Drive
+  // Backup section) - both links below jump straight into it instead of
+  // Console's generic project picker, so there's no "which project?" step
+  // for the shop owner to get stuck on.
+  static const _gcpProjectId = 'pro-app-drive-backup';
+  static const _androidPackageName = 'com.example.pro_app';
+  static const _credentialsUrl = 'https://console.cloud.google.com/apis/credentials?project=$_gcpProjectId';
+  // "Audience" is Google Cloud Console's current name for the OAuth
+  // consent screen's Test users list (older Console UIs call this page
+  // "OAuth consent screen") - this is where a specific Google account
+  // (mail id) has to be added before Google will let that account sign in
+  // at all while this project stays in "Testing" publishing status.
+  static const _testUsersUrl = 'https://console.cloud.google.com/auth/audience?project=$_gcpProjectId';
 
   final _settingsRepo = SettingsRepository();
   final _nameCtrl = TextEditingController();
@@ -138,6 +153,51 @@ class _SettingsScreenState extends State<SettingsScreen> {
     return ok ?? false;
   }
 
+  /// Opens a URL in the phone's own browser (Chrome on almost every
+  /// Android device) - always externally, never inside this app, since
+  /// signing in to Google Cloud Console needs the full browser (cookies,
+  /// account switcher) that an in-app webview can't reliably offer.
+  Future<void> _openInChrome(String url) async {
+    try {
+      final ok = await launchUrl(Uri.parse(url), mode: LaunchMode.externalApplication);
+      if (!ok && mounted) {
+        ScaffoldMessenger.of(context).showSnackBar(SnackBar(content: Text('Could not open $url')));
+      }
+    } catch (e) {
+      if (mounted) {
+        ScaffoldMessenger.of(context).showSnackBar(SnackBar(content: Text('Could not open the link: $e')));
+      }
+    }
+  }
+
+  /// One tappable row: an icon + a link-styled label that opens [url] in
+  /// Chrome (spec: "atha touch panna direct ah chrome open aagi sha
+  /// change panra website kattanum" - the SHA-1/test-user setup steps
+  /// below used to only ever be plain, un-clickable instructions text;
+  /// now each step that needs a Console page opens it directly).
+  Widget _consoleLinkRow({required IconData icon, required String label, required String url}) {
+    return InkWell(
+      onTap: () => _openInChrome(url),
+      borderRadius: BorderRadius.circular(6),
+      child: Padding(
+        padding: const EdgeInsets.symmetric(vertical: 4),
+        child: Row(
+          children: [
+            Icon(icon, size: 16, color: AppColors.primaryBlue),
+            const SizedBox(width: 6),
+            Expanded(
+              child: Text(
+                label,
+                style: const TextStyle(fontSize: 12.5, color: AppColors.primaryBlue, decoration: TextDecoration.underline, fontWeight: FontWeight.w600),
+              ),
+            ),
+            Icon(Icons.open_in_new_rounded, size: 14, color: AppColors.primaryBlue.withOpacity(0.7)),
+          ],
+        ),
+      ),
+    );
+  }
+
   // Admin-only "App Signing Info" - reads this exact install's signing
   // certificate SHA-1 fingerprint natively (MainActivity.kt) and shows it
   // with a one-tap copy button, formatted exactly the way Google Cloud
@@ -147,6 +207,18 @@ class _SettingsScreenState extends State<SettingsScreen> {
   // Drive backup sign-in to work - if Drive sign-in ever starts looping
   // with "[16] Account reauth failed" again, re-check this against that
   // Console page.
+  //
+  // Also walks through the OTHER half of getting a Google account working
+  // with Drive backup (spec: "sha finger print entha mail id ku work
+  // aaganumnu setup pannuvomla antha instruction kattanum") - registering
+  // the SHA-1 alone is not enough while this project's OAuth consent
+  // screen stays in "Testing" status; the specific Google account (mail
+  // id) that will sign in from this phone also has to be added as a Test
+  // user, or Google refuses that account outright before this app ever
+  // sees it. Both steps now have their own direct Console link (tap ->
+  // Chrome opens straight to that page - see _consoleLinkRow), instead of
+  // this dialog just describing the steps in plain text and leaving the
+  // shop owner to find Console's menus themselves.
   Future<void> _showSigningInfo() async {
     final confirmed = await _confirmMasterPin();
     if (!confirmed || !mounted) return;
@@ -163,30 +235,57 @@ class _SettingsScreenState extends State<SettingsScreen> {
       context: context,
       builder: (context) => AlertDialog(
         title: const Text('App Signing Info'),
-        content: Column(
-          mainAxisSize: MainAxisSize.min,
-          crossAxisAlignment: CrossAxisAlignment.start,
-          children: [
-            Text(
-              'This is this install\'s signing certificate SHA-1. Paste it into '
-              'Google Cloud Console -> APIs & Services -> Credentials -> '
-              '"Pro App Android" OAuth client -> SHA-1 certificate fingerprint '
-              'if Google Drive backup ever gets stuck re-asking for account '
-              'sign-in.',
-              style: TextStyle(fontSize: 12.5, color: AppColors.textSecondaryOf(context)),
-            ),
-            const SizedBox(height: 14),
-            if (sha1 != null)
-              SelectableText(
-                sha1,
-                style: const TextStyle(fontWeight: FontWeight.bold, fontFamily: 'monospace', fontSize: 13),
-              )
-            else
+        content: SingleChildScrollView(
+          child: Column(
+            mainAxisSize: MainAxisSize.min,
+            crossAxisAlignment: CrossAxisAlignment.start,
+            children: [
               Text(
-                'Could not read the signing certificate${error != null ? ' ($error)' : ''}.',
-                style: const TextStyle(color: Colors.red),
+                'This is this install\'s signing certificate SHA-1 - Google needs it, '
+                'together with the package name below, to let this app sign in for '
+                'Google Drive backup.',
+                style: TextStyle(fontSize: 12.5, color: AppColors.textSecondaryOf(context)),
               ),
-          ],
+              const SizedBox(height: 14),
+              if (sha1 != null) ...[
+                Text('SHA-1 fingerprint', style: TextStyle(fontSize: 11, color: AppColors.textSecondaryOf(context))),
+                SelectableText(
+                  sha1,
+                  style: const TextStyle(fontWeight: FontWeight.bold, fontFamily: 'monospace', fontSize: 13),
+                ),
+                const SizedBox(height: 10),
+                Text('Package name', style: TextStyle(fontSize: 11, color: AppColors.textSecondaryOf(context))),
+                const SelectableText(
+                  _androidPackageName,
+                  style: TextStyle(fontWeight: FontWeight.bold, fontFamily: 'monospace', fontSize: 13),
+                ),
+                const Divider(height: 26),
+                const Text('How to set this up', style: TextStyle(fontWeight: FontWeight.w700, fontSize: 12.5)),
+                const SizedBox(height: 6),
+                Text(
+                  '1. Open Credentials below - sign in with the Google account that owns this app\'s '
+                  'project, if asked. Open the "Pro App Android" Android OAuth client, paste in the '
+                  'SHA-1 and package name above (use Copy), then Save.',
+                  style: TextStyle(fontSize: 12, color: AppColors.textSecondaryOf(context)),
+                ),
+                const SizedBox(height: 6),
+                _consoleLinkRow(icon: Icons.vpn_key_rounded, label: 'Open Credentials (add SHA-1)', url: _credentialsUrl),
+                const SizedBox(height: 10),
+                Text(
+                  '2. Open Test users below and Add the Google mail id that will actually sign in on '
+                  'this phone. Skip this only if that account already appears in the list, or if '
+                  '"Publishing status" has already been moved to "In production".',
+                  style: TextStyle(fontSize: 12, color: AppColors.textSecondaryOf(context)),
+                ),
+                const SizedBox(height: 6),
+                _consoleLinkRow(icon: Icons.person_add_alt_1_rounded, label: 'Open Test Users (add mail id)', url: _testUsersUrl),
+              ] else
+                Text(
+                  'Could not read the signing certificate${error != null ? ' ($error)' : ''}.',
+                  style: const TextStyle(color: Colors.red),
+                ),
+            ],
+          ),
         ),
         actions: [
           if (sha1 != null)
