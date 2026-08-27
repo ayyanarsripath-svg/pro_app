@@ -35,6 +35,16 @@ class PdfService {
   /// they've replaced the default artwork, falling back to the bundled
   /// black & white phoenix logo otherwise. Cached per PdfService
   /// instance/print job, same as before.
+  ///
+  /// PERF: this used to load `logo_bw.png` - the same 1254x1254 artwork as
+  /// `logo_bw_1bit.png` below, but as a full RGB PNG at 865KB instead of
+  /// this already-prepared, visually-identical 41KB version (a ~21x
+  /// smaller file the assets folder already had sitting unused). Every
+  /// bill print decodes this image and re-embeds it into the PDF even
+  /// though the header only ever draws it at 38x38 points - on a bill
+  /// print taking 5-7 seconds, decoding/encoding a needlessly huge image
+  /// for a stamp-sized logo was a real, avoidable chunk of that time.
+  /// Switching to the smaller file changes nothing the customer sees.
   Future<Uint8List> _logo() async {
     if (_logoBytes != null) return _logoBytes!;
     final customPath = await _settings.get(SettingsRepository.logoPath);
@@ -45,8 +55,47 @@ class PdfService {
         return _logoBytes!;
       }
     }
-    _logoBytes = (await rootBundle.load('assets/images/logo_bw.png')).buffer.asUint8List();
+    _logoBytes = (await rootBundle.load('assets/images/logo_bw_1bit.png')).buffer.asUint8List();
     return _logoBytes!;
+  }
+
+  /// Kicks off loading every asset a bill print needs (logo, Tamil font,
+  /// terms-note images) right now, in the background, without waiting for
+  /// the result - call this from a bill screen's initState() so all of
+  /// this work happens WHILE the shop owner is still reading the bill on
+  /// screen, before they ever tap Print. By the time they do tap it, this
+  /// PdfService instance's caches (_logoBytes/_fontRegular/etc, see the
+  /// fields above) are already warm and buildXBill() only has to do the
+  /// actual page layout - not also wait on cold asset loads it was going
+  /// to need anyway (spec: "service bill print kudutha 5 to 7 second
+  /// aaguthu ... optimization panni 2 to 3 second la varamathiri panna
+  /// mudiuma" - this is the main lever for cutting the wait that happens
+  /// AFTER tapping Print, on top of the logo-size fix above). Errors are
+  /// swallowed - a failed warm-up just means the first real print pays
+  /// the normal cold-load cost, exactly like before this existed.
+  void warmUp() {
+    () async {
+      // Sequential, not parallel: these are cheap CPU/decode steps on the
+      // UI isolate (no separate isolate is spun up for this), so keeping
+      // them one-after-another instead of racing all five via Future.wait
+      // avoids briefly hogging the CPU all at once while the shop owner
+      // is still interacting with the bill screen.
+      try {
+        await _logo();
+      } catch (_) {}
+      try {
+        await _regularFont();
+      } catch (_) {}
+      try {
+        await _termsNoteImage();
+      } catch (_) {}
+      try {
+        await _termsNoteSecondHandImage();
+      } catch (_) {}
+      try {
+        await _termsNoteAccessoriesImage();
+      } catch (_) {}
+    }();
   }
 
   /// The 7-point Tamil return/repair policy note, pre-rendered as a crisp
