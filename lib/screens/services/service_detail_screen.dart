@@ -55,11 +55,18 @@ class _ServiceDetailScreenState extends State<ServiceDetailScreen> {
   List<ServicePhoto> _photos = [];
   ServiceProfitBreakdown? _profit;
   bool _loading = true; bool _warrantyClaimed = false;
+  bool _printing = false;
 
   @override
   void initState() {
     super.initState();
     _load();
+    // Starts loading the bill's logo/font/terms-note assets right now, in
+    // the background, so most of that work is already done by the time
+    // the owner actually taps Print - see PdfService.warmUp's doc comment
+    // (spec: "service bill print kudutha 5 to 7 second aaguthu ...
+    // optimization panni 2 to 3 second la varamathiri panna mudiuma").
+    _pdfService.warmUp();
   }
 
   Future<void> _load() async {
@@ -100,7 +107,13 @@ class _ServiceDetailScreenState extends State<ServiceDetailScreen> {
       appBar: AppBar(
         title: Text('SERVICE ${s.billNo}'),
         actions: [
-          IconButton(icon: const Icon(Icons.print_rounded), tooltip: 'Print', onPressed: _printBill),
+          IconButton(
+            icon: _printing
+                ? const SizedBox(width: 20, height: 20, child: CircularProgressIndicator(strokeWidth: 2))
+                : const Icon(Icons.print_rounded),
+            tooltip: 'Print',
+            onPressed: _printing ? null : _printBill,
+          ),
         ],
       ),
       body: RefreshIndicator(
@@ -891,9 +904,18 @@ class _ServiceDetailScreenState extends State<ServiceDetailScreen> {
   }
 
   Future<void> _printBill() async {
-    if (_customer == null || _service == null) return;
-    final bytes = await _pdfService.buildServiceBill(service: _service!, customer: _customer!, partsUsed: _usages, warrantyClaimed: _warrantyClaimed);
-    await Printing.layoutPdf(format: PdfPageFormat.a5, name: 'Service_${_service!.billNo}', onLayout: (format) async => bytes);
+    if (_customer == null || _service == null || _printing) return;
+    // Spinner on the AppBar Print button while this runs (see the
+    // _printing check above too, so a second tap - AppBar icon or this
+    // same action from the horizontal Quick Actions row - can't start a
+    // second overlapping build while one is already in flight).
+    setState(() => _printing = true);
+    try {
+      final bytes = await _pdfService.buildServiceBill(service: _service!, customer: _customer!, partsUsed: _usages, warrantyClaimed: _warrantyClaimed);
+      await Printing.layoutPdf(format: PdfPageFormat.a5, name: 'Service_${_service!.billNo}', onLayout: (format) async => bytes);
+    } finally {
+      if (mounted) setState(() => _printing = false);
+    }
   }
 
   /// Opens the phone's own dialer with the customer's saved number already
