@@ -5,6 +5,7 @@ import 'package:flutter/services.dart';
 import 'package:workmanager/workmanager.dart';
 
 import 'backup_service.dart';
+import 'daily_order_auto_send_signal.dart';
 import 'order_reminder_service.dart';
 
 // Same native channel MainActivity.kt already exposes for WhatsApp direct
@@ -125,14 +126,30 @@ Future<void> scheduleDailyGoogleDriveBackup() async {
 /// day (see that method) - every other tick is a fast, harmless no-op.
 /// Same catch-up pattern as the Drive backup above also applies here - see
 /// main.dart, which calls checkAndNotifyIfDue() on every app open too.
-Future<void> scheduleDailyOrderReminder({required int hour, required int minute}) async {
+///
+/// BUG FIX: the WorkManager registration below used to pass
+/// ExistingPeriodicWorkPolicy.replace unconditionally, and this function is
+/// called from BOTH main.dart (every single app open) AND Settings' save
+/// handler. .replace tears down and re-registers the periodic task from
+/// scratch, resetting its internal 15-minute timer back to zero - so a shop
+/// owner who opens the app more often than every 15 minutes could keep this
+/// catch-up poll perpetually restarting and never actually get an
+/// uninterrupted 15 minutes to fire (the native exact alarm below is now
+/// the primary, reliable trigger, but this WorkManager poll is still the
+/// catch-up net for the rare case the exact alarm itself got dropped).
+/// [forceReset] now defaults to false (existingWorkPolicy.keep, matching
+/// scheduleDailyGoogleDriveBackup's already-correct pattern) so a routine
+/// app open leaves an already-running cycle alone; only Settings' save
+/// handler passes forceReset: true, since changing the send time is exactly
+/// the one case where the cycle genuinely needs to restart.
+Future<void> scheduleDailyOrderReminder({required int hour, required int minute, bool forceReset = false}) async {
   await _ensureWorkManagerInitialized();
 
   await Workmanager().registerPeriodicTask(
     dailyOrderReminderUniqueName,
     dailyOrderReminderTaskName,
     frequency: const Duration(minutes: 15),
-    existingWorkPolicy: ExistingPeriodicWorkPolicy.replace,
+    existingWorkPolicy: forceReset ? ExistingPeriodicWorkPolicy.replace : ExistingPeriodicWorkPolicy.keep,
     backoffPolicy: BackoffPolicy.linear,
     backoffPolicyDelay: const Duration(minutes: 5),
   );
@@ -240,4 +257,30 @@ Future<void> openAppSettings() async {
     );
     await intent.launch();
   } catch (_) {}
+}
+
+/// Call once from main(), right after the app boots, to catch the case
+/// where THIS launch is happening because the shop owner tapped the
+/// native exact-alarm reminder notification (DailyOrderAlarmReceiver.kt) -
+/// that notification's contentIntent launches MainActivity with an
+/// "open_daily_orders" extra, completely separately from
+/// flutter_local_notifications (see OrderReminderService's own,
+/// independent tap-handling - the exact alarm fires and is tapped purely
+/// natively, so Dart never sees it any other way). Asks MainActivity "did
+/// your launching Intent carry that flag?", consumes it (so re-checking
+/// later never re-fires the same auto-send), and fires the same
+/// DailyOrderAutoSendSignal used by the flutter_local_notifications path
+/// if so - either reminder tapped lands the owner in the same one-tap-
+/// left-for-WhatsApp state. Never throws - a platform-channel hiccup here
+/// must never block app startup.
+Future<bool> consumeDailyOrderAlarmLaunch() async {
+  if (!Platform.isAndroid) return false;
+  try {
+    final launched = await _nativeChannel.invokeMethod('consumeDailyOrderLaunchFlag');
+    if (launched == true) {
+      DailyOrderAutoSendSignal.fire();
+      return true;
+    }
+  } catch (_) {}
+  return false;
 }
