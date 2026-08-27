@@ -6,6 +6,7 @@ import '../../core/repositories/daily_order_repository.dart';
 import '../../core/services/daily_order_widget_service.dart';
 import '../../core/theme/app_theme.dart';
 import '../../core/utils/formatters.dart';
+import '../../models/daily_order_item.dart';
 
 /// Reached ONLY via the Daily Orders home-screen widget's "+ Add"/card tap
 /// - see main.dart's quickAddMain() entry point and QuickAddActivity.kt
@@ -50,6 +51,16 @@ class _QuickAddOrderScreenState extends State<QuickAddOrderScreen> {
   bool _saving = false;
   int _addedCount = 0;
 
+  // Recent-items history shown below the Save buttons (spec: "save and add
+  // another button kizha 10 history need kurippa recent items history top
+  // la varanum") - not just what's been added THIS session, but the last
+  // [_recentItemsLimit] items noted anywhere (including from the main app),
+  // newest first, so the shop owner can glance down and confirm what they
+  // just typed actually saved without leaving this screen. Loaded once at
+  // open and refreshed after every successful save.
+  static const _recentItemsLimit = 10;
+  List<DailyOrderItem> _recentItems = [];
+
   @override
   void initState() {
     super.initState();
@@ -58,6 +69,12 @@ class _QuickAddOrderScreenState extends State<QuickAddOrderScreen> {
         _qtyCtrl.selection = TextSelection(baseOffset: 0, extentOffset: _qtyCtrl.text.length);
       }
     });
+    _loadRecent();
+  }
+
+  Future<void> _loadRecent() async {
+    final items = await _repo.recent(limit: _recentItemsLimit);
+    if (mounted) setState(() => _recentItems = items);
   }
 
   @override
@@ -115,6 +132,11 @@ class _QuickAddOrderScreenState extends State<QuickAddOrderScreen> {
         // no-retyping convenience described above.
         _qtyCtrl.text = '1';
         _phoneCtrl.clear();
+        // Refreshes the history list below the buttons so the item just
+        // saved appears at the top immediately, before the next one is
+        // typed - see _recentItems' doc comment.
+        await _loadRecent();
+        if (!mounted) return;
         setState(() => _saving = false);
         ScaffoldMessenger.of(context).showSnackBar(
           SnackBar(content: Text('Added "$part". Note the next item...')),
@@ -253,10 +275,73 @@ class _QuickAddOrderScreenState extends State<QuickAddOrderScreen> {
                     label: const Text('Save & Add Another'),
                   ),
                 ),
+                if (_recentItems.isNotEmpty) ...[
+                  const SizedBox(height: 26),
+                  _recentHistorySection(),
+                ],
               ],
             ),
           ),
         ),
+      ),
+    );
+  }
+
+  /// Recently-noted items, newest first (spec: "recent items history top
+  /// la varanum") - see [_recentItems]' doc comment. Read-only (this
+  /// screen's whole job is fast entry, not editing) - tap the full app's
+  /// Daily Orders screen for that.
+  Widget _recentHistorySection() {
+    return Column(
+      crossAxisAlignment: CrossAxisAlignment.start,
+      children: [
+        Row(
+          children: [
+            Icon(Icons.history_rounded, size: 16, color: AppColors.textSecondaryOf(context)),
+            const SizedBox(width: 6),
+            Text(
+              'Recently added',
+              style: TextStyle(fontSize: 12.5, fontWeight: FontWeight.w700, color: AppColors.textSecondaryOf(context)),
+            ),
+          ],
+        ),
+        const SizedBox(height: 8),
+        Container(
+          decoration: BoxDecoration(
+            border: Border.all(color: AppColors.textSecondaryOf(context).withOpacity(0.2)),
+            borderRadius: BorderRadius.circular(10),
+          ),
+          child: Column(
+            children: [
+              for (var i = 0; i < _recentItems.length; i++) ...[
+                if (i > 0) const Divider(height: 1),
+                _recentHistoryRow(_recentItems[i]),
+              ],
+            ],
+          ),
+        ),
+      ],
+    );
+  }
+
+  Widget _recentHistoryRow(DailyOrderItem item) {
+    final model = (item.typeModel ?? '').trim();
+    final title = model.isEmpty ? item.partName : '${item.partName} ($model)';
+    return Padding(
+      padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 8),
+      child: Row(
+        children: [
+          Expanded(
+            child: Text(title, style: const TextStyle(fontSize: 13), maxLines: 1, overflow: TextOverflow.ellipsis),
+          ),
+          const SizedBox(width: 8),
+          Text('x${item.quantity}', style: const TextStyle(fontSize: 13, fontWeight: FontWeight.w700)),
+          const SizedBox(width: 10),
+          Text(
+            TimeOfDay.fromDateTime(item.createdAt).format(context),
+            style: TextStyle(fontSize: 11.5, color: AppColors.textSecondaryOf(context)),
+          ),
+        ],
       ),
     );
   }
