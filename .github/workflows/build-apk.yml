@@ -626,6 +626,19 @@ jobs:
           class MainActivity : FlutterActivity() {
               private val channelName = "pro_app/whatsapp_share"
 
+              // Lets consumeDailyOrderLaunchFlag (below) see a fresh
+              // "open_daily_orders" extra even when Android reuses this
+              // Activity instance instead of recreating it (e.g. tapping the
+              // exact-alarm notification - see DailyOrderAlarmReceiver.kt -
+              // while the app is already running in the background).
+              // Without this override, `intent` would keep returning
+              // whatever launched the ORIGINAL instance, never the tap that
+              // just happened.
+              override fun onNewIntent(intent: Intent) {
+                  super.onNewIntent(intent)
+                  setIntent(intent)
+              }
+
               // Lets Settings -> "App Signing Info" (admin-only) show this
               // exact install's certificate SHA-1, formatted the same way
               // Google Cloud Console expects it - so whoever manages the
@@ -751,6 +764,19 @@ jobs:
                               }
                           }
                           result.success(true)
+                      } else if (call.method == "consumeDailyOrderLaunchFlag") {
+                          // Read by background_tasks.dart's
+                          // consumeDailyOrderAlarmLaunch(), called once from
+                          // main.dart at every app boot - true exactly once
+                          // per notification tap that carried this flag
+                          // (DailyOrderAlarmReceiver's launchIntent below),
+                          // then immediately cleared from `intent` so
+                          // re-checking later (e.g. a hot-reload, or this
+                          // method being called again for any reason) never
+                          // re-fires the same auto-send.
+                          val flag = intent?.getBooleanExtra("open_daily_orders", false) ?: false
+                          if (flag) intent?.removeExtra("open_daily_orders")
+                          result.success(flag)
                       } else {
                           result.notImplemented()
                       }
