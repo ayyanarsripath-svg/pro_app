@@ -59,7 +59,7 @@ jobs:
             echo "Restored stable debug.keystore."
           fi
 
-      # README step 3: CAMERA (service / 2nd-hand phone photos), INTERNET
+      # README step 3: INTERNET
       # (Google Drive backup - without this, every network call
       # google_sign_in/googleapis makes fails outright), POST_NOTIFICATIONS
       # (Android 13+ requires this manifest declaration before
@@ -88,7 +88,22 @@ jobs:
               content = f.read()
 
           needed = [
-              '    <uses-permission android:name="android.permission.CAMERA"/>',
+              # NOTE: deliberately NOT declaring android.permission.CAMERA
+              # here (spec: "pro_app first time install pannumpothu ...
+              # camera ethula extra enna thevio" - the shop asked why a
+              # camera permission was being requested at all). The service/
+              # 2nd-hand-phone photo capture in service_detail_screen.dart
+              # uses image_picker's ImageSource.camera, which - per
+              # image_picker's own documentation - delegates to the phone's
+              # existing Camera app via an Intent and needs NO permission of
+              # its own UNLESS the app's manifest explicitly declares
+              # CAMERA, in which case image_picker then additionally
+              # requires that runtime permission be granted first. This app
+              # has no other camera use (no `camera` package, no native
+              # capture code), so declaring it only added an unnecessary
+              # extra runtime "Allow camera access?" prompt with zero
+              # benefit - removing it does not break the photo feature,
+              # only removes the redundant prompt in front of it.
               '    <uses-permission android:name="android.permission.INTERNET"/>',
               '    <uses-permission android:name="android.permission.POST_NOTIFICATIONS"/>',
               '    <uses-permission android:name="android.permission.REQUEST_IGNORE_BATTERY_OPTIMIZATIONS"/>',
@@ -611,6 +626,8 @@ jobs:
           # anything about the direct share fails.
           main_activity_kt = '''package com.example.pro_app
 
+          import android.app.AlarmManager
+          import android.content.Context
           import android.content.Intent
           import android.content.pm.PackageManager
           import android.content.pm.Signature
@@ -685,6 +702,20 @@ jobs:
                           // side) - null/blank if the caller didn't have a
                           // number to target.
                           val phone = call.argument<String>("phone")
+                          // Which WhatsApp app to target - "com.whatsapp.w4b"
+                          // (Business) or "com.whatsapp" (Regular), chosen by
+                          // the shop owner in Settings (see
+                          // SettingsRepository.whatsappSendApp) and passed
+                          // through from WhatsAppSmsService.shareFileToWhatsApp.
+                          // Null/blank (the "Auto" choice, or an older app
+                          // build that doesn't send this argument) falls back
+                          // to the original hardcoded regular-WhatsApp
+                          // behaviour below (spec: "daily order send panrathu
+                          // normal whatsapp than open aaguthu enakku business
+                          // whtsapp open aaganum" - the Send button was always
+                          // opening regular WhatsApp with no way to choose
+                          // Business instead).
+                          val targetPackage = call.argument<String>("targetPackage")
                           try {
                               if (filePath == null) {
                                   result.success(false)
@@ -695,7 +726,7 @@ jobs:
                                       type = "application/pdf"
                                       putExtra(Intent.EXTRA_STREAM, uri)
                                       putExtra(Intent.EXTRA_TEXT, text)
-                                      setPackage("com.whatsapp")
+                                      setPackage(if (targetPackage.isNullOrBlank()) "com.whatsapp" else targetPackage)
                                       addFlags(Intent.FLAG_GRANT_READ_URI_PERMISSION)
                                       addFlags(Intent.FLAG_ACTIVITY_NEW_TASK)
                                       // "jid" is not a documented WhatsApp
@@ -764,6 +795,31 @@ jobs:
                               }
                           }
                           result.success(true)
+                      } else if (call.method == "canScheduleExactAlarms") {
+                          // Lets background_tasks.dart's
+                          // hasExactAlarmPermission() tell the Daily Order
+                          // screen the truth about whether the alarm above
+                          // will actually fire exactly on time, instead of
+                          // silently falling back to an inexact (possibly
+                          // hours-late) alarm - requestExactAlarmPermission
+                          // only ever OPENS the Settings screen, it never
+                          // reports back what the owner chose there, so
+                          // without this check the app has no way to warn
+                          // when the permission is still missing (spec:
+                          // "notification time ku kattuthu but alarm or
+                          // reminder varala ella settings um allow
+                          // kuduthuttan" - settings show the right time but
+                          // the alarm never actually fires even though the
+                          // owner believes everything is allowed).
+                          if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.S) {
+                              val am = getSystemService(Context.ALARM_SERVICE) as AlarmManager
+                              result.success(am.canScheduleExactAlarms())
+                          } else {
+                              // Below Android 12 every exact alarm is always
+                              // allowed by default - there is no such
+                              // permission to check.
+                              result.success(true)
+                          }
                       } else if (call.method == "consumeDailyOrderLaunchFlag") {
                           // Read by background_tasks.dart's
                           // consumeDailyOrderAlarmLaunch(), called once from
