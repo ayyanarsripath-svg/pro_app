@@ -87,4 +87,18 @@ class DailyOrderRepository {
     final rows = await db.query('daily_order_items', orderBy: 'order_date DESC, s_no ASC');
     return rows.map(DailyOrderItem.fromMap).toList();
   }
+
+  /// Most recently ADDED items (by [DailyOrderItem.createdAt], not by
+  /// [orderDate]/s_no like [all]/[itemsForDate]) - used by the home-screen
+  /// widget's Quick Add screen to show a short "what did I just note down"
+  /// history right under the Save buttons (spec: "quick add order la save
+  /// and add another button kizha 10 history need kurippa recent items
+  /// history top la varanum"), so a shop owner adding several items in a
+  /// row there can see their own recent entries without switching to the
+  /// full app. Newest first, capped at [limit].
+  Future<List<DailyOrderItem>> recent({int limit = 10}) async {
+    final db = await _dbHelper.database;
+    final rows = await db.query('daily_order_items', orderBy: 'created_at DESC', limit: limit);
+    return rows.map(DailyOrderItem.fromMap).toList();
+  }
 }
