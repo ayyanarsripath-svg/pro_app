@@ -1,3 +1,4 @@
+import 'dart:async';
 import 'dart:io';
 
 import 'package:flutter/material.dart';
@@ -34,7 +35,7 @@ class DailyOrderScreen extends StatefulWidget {
   State<DailyOrderScreen> createState() => _DailyOrderScreenState();
 }
 
-class _DailyOrderScreenState extends State<DailyOrderScreen> {
+class _DailyOrderScreenState extends State<DailyOrderScreen> with WidgetsBindingObserver {
   final _repo = DailyOrderRepository();
   final _settingsRepo = SettingsRepository();
   final _supplierRepo = SupplierRepository();
@@ -51,6 +52,12 @@ class _DailyOrderScreenState extends State<DailyOrderScreen> {
   bool _reminderEnabled = true;
   bool _widgetEnabled = true;
 
+  // True until proven otherwise (hasExactAlarmPermission() defaults to true
+  // on any check failure/non-Android platform - see its own doc comment) so
+  // this never flashes a false warning while the very first check is still
+  // in flight.
+  bool _exactAlarmOk = true;
+
   // Tracks the last DailyOrderAutoSendSignal.tick value already acted on -
   // see _maybeAutoSend.
   int _lastHandledAutoSendTick = 0;
@@ -60,12 +67,29 @@ class _DailyOrderScreenState extends State<DailyOrderScreen> {
     super.initState();
     _load();
     DailyOrderAutoSendSignal.tick.addListener(_maybeAutoSend);
+    // Granting the exact-alarm permission (see _recheckExactAlarm and the
+    // "Fix now" banner below) sends the owner out to the phone's own
+    // Settings app and back - there's no callback for "they came back",
+    // only this app-resumed lifecycle event, so that's when the warning
+    // banner re-checks itself and clears automatically once fixed.
+    WidgetsBinding.instance.addObserver(this);
   }
 
   @override
   void dispose() {
     DailyOrderAutoSendSignal.tick.removeListener(_maybeAutoSend);
+    WidgetsBinding.instance.removeObserver(this);
     super.dispose();
+  }
+
+  @override
+  void didChangeAppLifecycleState(AppLifecycleState state) {
+    if (state == AppLifecycleState.resumed) _recheckExactAlarm();
+  }
+
+  Future<void> _recheckExactAlarm() async {
+    final ok = await hasExactAlarmPermission();
+    if (mounted) setState(() => _exactAlarmOk = ok);
   }
 
   Future<void> _load() async {
@@ -84,6 +108,10 @@ class _DailyOrderScreenState extends State<DailyOrderScreen> {
       _widgetEnabled = widgetEnabled;
       _loading = false;
     });
+    // See _recheckExactAlarm's doc comment - re-checked on every load (pull-
+    // to-refresh, first open, settings save) as well as on app-resume, so
+    // the warning banner below is never stale.
+    unawaited(_recheckExactAlarm());
     // Keeps the home-screen widget in sync with whatever just changed
     // (item added/deleted/sent, or a settings save) - see
     // DailyOrderWidgetService's doc comment for why _load() is the natural
@@ -144,6 +172,11 @@ class _DailyOrderScreenState extends State<DailyOrderScreen> {
           padding: const EdgeInsets.all(14),
           children: [
             _supplierCard(),
+            if (_reminderEnabled && !_exactAlarmOk) ...[
+              const SizedBox(height: 4),
+              _exactAlarmWarningBanner(),
+              const SizedBox(height: 4),
+            ],
             if (pending.isNotEmpty) ...[
               const SizedBox(height: 4),
               _pendingBanner(pending),
@@ -587,6 +620,64 @@ class _DailyOrderScreenState extends State<DailyOrderScreen> {
   // ---------------------------------------------------------------------
   // Pending banner + Send Order flow
   // ---------------------------------------------------------------------
+
+  /// Always-visible warning shown right on the Daily Order screen itself
+  /// (not buried inside a settings dialog) whenever the reminder is turned
+  /// on but Android's exact-alarm permission is missing - the single most
+  /// likely reason the reminder can silently never fire even though the
+  /// send time shown in Settings looks correct and every other permission
+  /// was allowed (spec: "daily order la eppo notification time ku kattuthu
+  /// but alarm or reminder varala ella settings um allow kuduthuttan" -
+  /// settings show the right time but the alarm never actually comes even
+  /// though the owner believes everything is already allowed). One tap on
+  /// "Fix now" opens the exact Settings screen for this; the banner clears
+  /// itself automatically the moment the owner returns to the app with it
+  /// granted - see _recheckExactAlarm/didChangeAppLifecycleState above.
+  Widget _exactAlarmWarningBanner() {
+    return Container(
+      margin: const EdgeInsets.only(top: 10),
+      padding: const EdgeInsets.all(14),
+      decoration: BoxDecoration(
+        color: Colors.orange.withOpacity(0.12),
+        borderRadius: BorderRadius.circular(14),
+        border: Border.all(color: Colors.orange.withOpacity(0.4)),
+      ),
+      child: Column(
+        crossAxisAlignment: CrossAxisAlignment.start,
+        children: [
+          const Row(
+            children: [
+              Icon(Icons.warning_amber_rounded, color: Colors.orange),
+              SizedBox(width: 8),
+              Expanded(
+                child: Text(
+                  "Reminder may not ring on time",
+                  style: TextStyle(fontWeight: FontWeight.w700),
+                ),
+              ),
+            ],
+          ),
+          const SizedBox(height: 6),
+          const Text(
+            'One phone permission ("Alarms & reminders") is still off, so this reminder can be delayed by Android '
+            'or may not ring at all - even though the send time above is set correctly. Tap below to allow it '
+            '(one screen, one tap).',
+            style: TextStyle(fontSize: 12.5),
+          ),
+          const SizedBox(height: 10),
+          SizedBox(
+            width: double.infinity,
+            child: ElevatedButton.icon(
+              style: ElevatedButton.styleFrom(backgroundColor: Colors.orange.shade700, foregroundColor: Colors.white),
+              onPressed: requestExactAlarmPermission,
+              icon: const Icon(Icons.alarm_rounded),
+              label: const Text('Fix Now - Allow Exact Alarm Timing'),
+            ),
+          ),
+        ],
+      ),
+    );
+  }
 
   Widget _pendingBanner(List<DailyOrderItem> pending) {
     final today = isoDateFormat.format(DateTime.now());

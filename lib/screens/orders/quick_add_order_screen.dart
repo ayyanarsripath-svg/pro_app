@@ -34,11 +34,31 @@ class _QuickAddOrderScreenState extends State<QuickAddOrderScreen> {
 
   final _partCtrl = TextEditingController();
   final _typeCtrl = TextEditingController();
-  final _qtyCtrl = TextEditingController();
+  // Pre-filled with "1" - by far the most common quantity, so the shop
+  // doesn't have to type it every single time (spec: "quick add order la
+  // quantity la fixed ah 1 sethukko adikadi 1 qantitynu type pann
+  // mudila"). Tapping the field selects the "1" so typing a different
+  // number just replaces it instead of requiring a manual delete first -
+  // see _qtyFocus listener below. Matches the same pattern already used in
+  // the main Daily Order screen's own Add Item dialog (daily_order_screen.
+  // dart's _addItem) - this widget-launched screen had simply never been
+  // updated to match when that fix was made there.
+  final _qtyCtrl = TextEditingController(text: '1');
   final _phoneCtrl = TextEditingController();
+  final _qtyFocus = FocusNode();
 
   bool _saving = false;
   int _addedCount = 0;
+
+  @override
+  void initState() {
+    super.initState();
+    _qtyFocus.addListener(() {
+      if (_qtyFocus.hasFocus) {
+        _qtyCtrl.selection = TextSelection(baseOffset: 0, extentOffset: _qtyCtrl.text.length);
+      }
+    });
+  }
 
   @override
   void dispose() {
@@ -46,6 +66,7 @@ class _QuickAddOrderScreenState extends State<QuickAddOrderScreen> {
     _typeCtrl.dispose();
     _qtyCtrl.dispose();
     _phoneCtrl.dispose();
+    _qtyFocus.dispose();
     super.dispose();
   }
 
@@ -89,7 +110,10 @@ class _QuickAddOrderScreenState extends State<QuickAddOrderScreen> {
       if (addAnother) {
         _partCtrl.clear();
         _typeCtrl.clear();
-        _qtyCtrl.clear();
+        // Reset back to the "1" default (not a blank clear()) so the next
+        // item in this same add-another streak still gets the same
+        // no-retyping convenience described above.
+        _qtyCtrl.text = '1';
         _phoneCtrl.clear();
         setState(() => _saving = false);
         ScaffoldMessenger.of(context).showSnackBar(
@@ -160,21 +184,27 @@ class _QuickAddOrderScreenState extends State<QuickAddOrderScreen> {
                   ),
                 ),
                 const SizedBox(height: 18),
-                TextField(
-                  controller: _partCtrl,
-                  autofocus: true,
-                  textCapitalization: TextCapitalization.sentences,
-                  decoration: const InputDecoration(labelText: 'Part / Accessory Name *', border: OutlineInputBorder()),
-                ),
-                const SizedBox(height: 12),
+                // Field order: Type/Model above Part/Accessory Name (spec:
+                // "quick add order la type / model mela set pannu part /
+                // accessories name ah kizha set pannu") - matches the same
+                // order already used in the main Daily Order screen's own
+                // Add Item dialog.
                 TextField(
                   controller: _typeCtrl,
+                  autofocus: true,
                   textCapitalization: TextCapitalization.sentences,
                   decoration: const InputDecoration(labelText: 'Type / Model', border: OutlineInputBorder()),
                 ),
                 const SizedBox(height: 12),
                 TextField(
+                  controller: _partCtrl,
+                  textCapitalization: TextCapitalization.sentences,
+                  decoration: const InputDecoration(labelText: 'Part / Accessory Name *', border: OutlineInputBorder()),
+                ),
+                const SizedBox(height: 12),
+                TextField(
                   controller: _qtyCtrl,
+                  focusNode: _qtyFocus,
                   keyboardType: TextInputType.number,
                   decoration: const InputDecoration(labelText: 'Quantity *', border: OutlineInputBorder()),
                 ),
