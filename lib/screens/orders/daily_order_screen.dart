@@ -10,6 +10,7 @@ import '../../core/repositories/daily_order_repository.dart';
 import '../../core/repositories/settings_repository.dart';
 import '../../core/repositories/supplier_repository.dart';
 import '../../core/services/background_tasks.dart';
+import '../../core/services/daily_order_auto_send_signal.dart';
 import '../../core/services/daily_order_widget_service.dart';
 import '../../core/services/pdf_service.dart';
 import '../../core/services/whatsapp_sms_service.dart';
@@ -50,10 +51,21 @@ class _DailyOrderScreenState extends State<DailyOrderScreen> {
   bool _reminderEnabled = true;
   bool _widgetEnabled = true;
 
+  // Tracks the last DailyOrderAutoSendSignal.tick value already acted on -
+  // see _maybeAutoSend.
+  int _lastHandledAutoSendTick = 0;
+
   @override
   void initState() {
     super.initState();
     _load();
+    DailyOrderAutoSendSignal.tick.addListener(_maybeAutoSend);
+  }
+
+  @override
+  void dispose() {
+    DailyOrderAutoSendSignal.tick.removeListener(_maybeAutoSend);
+    super.dispose();
   }
 
   Future<void> _load() async {
@@ -78,6 +90,33 @@ class _DailyOrderScreenState extends State<DailyOrderScreen> {
     // place for this rather than threading a refresh call through every
     // individual mutation.
     await _widgetService.refresh();
+    // Re-checked here (not just via the listener registered in initState)
+    // so a signal that already fired BEFORE this screen was even built -
+    // e.g. AppShell jumped straight to this tab because of the same tap -
+    // still gets picked up, now that _supplierPhone/_allItems have their
+    // real loaded values to decide with.
+    _maybeAutoSend();
+  }
+
+  /// Auto-runs the same PDF-build + open-WhatsApp-with-attachment flow the
+  /// "Send Order via WhatsApp" button triggers, the moment a Daily Order
+  /// reminder (either the native exact-alarm notification, or the
+  /// WorkManager-polled one - see DailyOrderAutoSendSignal's doc comment)
+  /// is tapped (spec: "antha time vantha piragu auto matically pdf file ahh
+  /// whatsapp ku send aaganum pdf na just send button mattum press
+  /// pannuvan" - the shop just wants WhatsApp already open with Send
+  /// ready, one tap left for them). Guards against double-firing on the
+  /// same tap (e.g. both this screen's own initState/_load and AppShell's
+  /// tab-jump settling around the same signal) and against starting a send
+  /// that's already in progress, has no supplier phone configured yet, or
+  /// has nothing pending.
+  void _maybeAutoSend() {
+    if (!mounted) return;
+    final tick = DailyOrderAutoSendSignal.tick.value;
+    if (tick == _lastHandledAutoSendTick) return;
+    _lastHandledAutoSendTick = tick;
+    if (_sending || _supplierPhone.trim().isEmpty || _pending.isEmpty) return;
+    _sendOrder();
   }
 
   List<DailyOrderItem> get _pending => _allItems.where((i) => !i.sent).toList();
@@ -474,7 +513,12 @@ class _DailyOrderScreenState extends State<DailyOrderScreen> {
       await _widgetService.setEnabled(widgetOn);
 
       if (reminderOn) {
-        await scheduleDailyOrderReminder(hour: pickedTime.hour, minute: pickedTime.minute);
+        // forceReset: true - this is the one place the WorkManager catch-up
+        // poll genuinely needs to restart (the owner just changed the send
+        // time/turned the reminder back on). See background_tasks.dart's
+        // BUG FIX note on scheduleDailyOrderReminder for why every OTHER
+        // caller (main.dart, on every app open) must NOT force a reset.
+        await scheduleDailyOrderReminder(hour: pickedTime.hour, minute: pickedTime.minute, forceReset: true);
       } else {
         await cancelDailyOrderReminder();
       }
