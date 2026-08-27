@@ -33,11 +33,17 @@ class _SecondHandDetailScreenState extends State<SecondHandDetailScreen> {
   SecondHandPhone? _phone;
   List<SecondHandRepairItem> _repairs = [];
   bool _loading = true;
+  bool _printing = false;
 
   @override
   void initState() {
     super.initState();
     _load();
+    // See PdfService.warmUp's doc comment (spec: "service bill print
+    // kudutha 5 to 7 second aaguthu ... optimization panni 2 to 3 second
+    // la varamathiri panna mudiuma") - same fix applied to every bill
+    // screen that uses this shared PdfService.
+    _pdfService.warmUp();
   }
 
   Future<void> _load() async {
@@ -80,7 +86,7 @@ class _SecondHandDetailScreenState extends State<SecondHandDetailScreen> {
               if (auth.canDoInventoryActions) _actionChip('Add Repair Cost', Icons.build_rounded, _addRepairItem),
               if (auth.canDoInventoryActions) _actionChip('Change Status', Icons.sync_alt_rounded, _changeStatus),
               if (auth.canDoBillingActions && phone.status != SecondHandStatus.sold) _actionChip('Sell Phone', Icons.sell_rounded, _sellPhone),
-              if (auth.canDoBillingActions && phone.status == SecondHandStatus.sold) _actionChip('Print Sales Bill', Icons.print_rounded, _printSale),
+              if (auth.canDoBillingActions && phone.status == SecondHandStatus.sold) _actionChip('Print Sales Bill', Icons.print_rounded, _printSale, loading: _printing),
               if (auth.canDoBillingActions && phone.status == SecondHandStatus.sold) _actionChip('Customer Return', Icons.assignment_return_rounded, _customerReturn),
               if (auth.canDoBillingActions && phone.status == SecondHandStatus.sold && phone.warranty && !_warrantyClaimed) _actionChip('Warranty Claim', Icons.verified_user_rounded, _fileWarrantyClaim),
               if (auth.canDelete) _actionChip('Delete', Icons.delete_rounded, _deletePhone, color: AppColors.danger),
@@ -162,10 +168,12 @@ class _SecondHandDetailScreenState extends State<SecondHandDetailScreen> {
         ),
       );
 
-  Widget _actionChip(String label, IconData icon, VoidCallback onTap, {Color? color}) => ActionChip(
-        avatar: Icon(icon, size: 16, color: color ?? AppColors.primaryBlue),
+  Widget _actionChip(String label, IconData icon, VoidCallback onTap, {Color? color, bool loading = false}) => ActionChip(
+        avatar: loading
+            ? SizedBox(width: 14, height: 14, child: CircularProgressIndicator(strokeWidth: 2, color: color ?? AppColors.primaryBlue))
+            : Icon(icon, size: 16, color: color ?? AppColors.primaryBlue),
         label: Text(label),
-        onPressed: onTap,
+        onPressed: loading ? null : onTap,
       );
 
   Future<void> _addRepairItem() async {
@@ -334,17 +342,23 @@ class _SecondHandDetailScreenState extends State<SecondHandDetailScreen> {
   }
 
   Future<void> _printSale() async {
-    final phone = _phone!;
-    final sale = await _repo.latestSaleForPhone(widget.phoneId);
-    if (sale == null) {
-      if (mounted) {
-        ScaffoldMessenger.of(context).showSnackBar(const SnackBar(content: Text('No sale record found for this phone')));
+    if (_printing) return;
+    setState(() => _printing = true);
+    try {
+      final phone = _phone!;
+      final sale = await _repo.latestSaleForPhone(widget.phoneId);
+      if (sale == null) {
+        if (mounted) {
+          ScaffoldMessenger.of(context).showSnackBar(const SnackBar(content: Text('No sale record found for this phone')));
+        }
+        return;
       }
-      return;
+      final customer = sale.customerId != null ? await _customerRepo.byId(sale.customerId!) : null;
+      final bytes = await _pdfService.buildSecondHandSalesBill(phone: phone, sale: sale, customer: customer, warrantyClaimed: _warrantyClaimed);
+      await Printing.layoutPdf(format: PdfPageFormat.a5, name: '2ndHandSale_${phone.purchaseNo}', onLayout: (format) async => bytes);
+    } finally {
+      if (mounted) setState(() => _printing = false);
     }
-    final customer = sale.customerId != null ? await _customerRepo.byId(sale.customerId!) : null;
-    final bytes = await _pdfService.buildSecondHandSalesBill(phone: phone, sale: sale, customer: customer, warrantyClaimed: _warrantyClaimed);
-    await Printing.layoutPdf(format: PdfPageFormat.a5, name: '2ndHandSale_${phone.purchaseNo}', onLayout: (format) async => bytes);
   }
 
   Future<void> _customerReturn() async {
