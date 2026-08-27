@@ -3,6 +3,7 @@ import 'package:provider/provider.dart';
 
 import '../../core/theme/app_theme.dart';
 import '../../core/services/auth_service.dart';
+import '../../core/services/daily_order_auto_send_signal.dart';
 import '../../core/services/logo_service.dart';
 import '../../core/services/menu_order_service.dart';
 import '../dashboard/dashboard_screen.dart';
@@ -47,6 +48,48 @@ class _AppShellState extends State<AppShell> {
   // launch - without this, marking a job Delivered (or any other data
   // change) never showed up on the dashboard until the app was restarted.
   Key _dashboardKey = UniqueKey();
+
+  // Tracks the last DailyOrderAutoSendSignal.tick value already acted on,
+  // so the same alarm tap doesn't re-jump the tab on every unrelated
+  // rebuild.
+  int _lastHandledAutoSendTick = 0;
+
+  @override
+  void initState() {
+    super.initState();
+    DailyOrderAutoSendSignal.tick.addListener(_onAutoSendSignal);
+    // Covers the cold-start case: the app process was fully dead and this
+    // notification/alarm tap is what launched it, so the signal already
+    // fired (see main.dart) BEFORE this widget (built only after the PIN
+    // gate) even existed to add the listener above. Checking once, right
+    // after the first frame, catches that already-fired signal instead of
+    // silently landing on Dashboard.
+    WidgetsBinding.instance.addPostFrameCallback((_) => _onAutoSendSignal());
+  }
+
+  @override
+  void dispose() {
+    DailyOrderAutoSendSignal.tick.removeListener(_onAutoSendSignal);
+    super.dispose();
+  }
+
+  /// Jumps straight to the Daily Orders tab the moment the Daily Order
+  /// reminder alarm/notification is tapped (spec: "reminder alarm
+  /// adikkanum atha paathu na whatsapp send button click pannuvan") -
+  /// DailyOrderScreen itself then notices the same tick change and
+  /// auto-runs the send flow (see its _maybeAutoSend).
+  void _onAutoSendSignal() {
+    if (!mounted) return;
+    final tick = DailyOrderAutoSendSignal.tick.value;
+    if (tick == _lastHandledAutoSendTick) return;
+    _lastHandledAutoSendTick = tick;
+    final auth = context.read<AuthService>();
+    final menuOrder = context.read<MenuOrderService>();
+    final destinations = _orderedDestinations(menuOrder, auth);
+    final i = destinations.indexWhere((d) => d.id == 'daily_orders');
+    if (i == -1) return; // this login's menu section can't see Daily Orders
+    setState(() => _index = i);
+  }
 
   // The full, fixed set of menu items in their built-in default order.
   // MenuOrderService only ever reorders this list for display - it's never
