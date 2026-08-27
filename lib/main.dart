@@ -71,6 +71,19 @@ Future<void> main() async {
   // reminders should ever be able to stop the app from opening.
   try {
     await OrderReminderService.ensureInitialized();
+    // Catches the case where THIS app launch is happening because the shop
+    // owner tapped a Daily Order reminder while the app was fully closed
+    // (not just backgrounded) - two independent paths, since the exact
+    // alarm (background_tasks.dart's consumeDailyOrderAlarmLaunch) and the
+    // WorkManager-polled notification (OrderReminderService's
+    // consumeColdStartLaunch) are fired completely separately (native
+    // AlarmManager+Intent vs flutter_local_notifications). Both must run
+    // before AppShell/DailyOrderScreen ever build so neither one misses the
+    // signal (DailyOrderAutoSendSignal.tick is a counter precisely so a
+    // fire() here, before either widget exists yet, is still picked up
+    // once they mount).
+    await OrderReminderService.consumeColdStartLaunch();
+    await consumeDailyOrderAlarmLaunch();
     OrderReminderService().checkAndNotifyIfDue();
   } catch (_) {
     // See HOTFIX note above - reminder setup must never block app startup.
