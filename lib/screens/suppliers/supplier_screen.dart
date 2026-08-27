@@ -1,4 +1,5 @@
 import 'package:flutter/material.dart';
+import 'package:flutter_contacts/flutter_contacts.dart';
 import 'package:provider/provider.dart';
 
 import '../../core/repositories/supplier_repository.dart';
@@ -105,27 +106,80 @@ class _SupplierScreenState extends State<SupplierScreen> {
     final addressCtrl = TextEditingController();
     final ok = await showDialog<bool>(
       context: context,
-      builder: (context) => AlertDialog(
+      builder: (dialogContext) => AlertDialog(
         title: const Text('Add Supplier'),
-        content: Column(
-          mainAxisSize: MainAxisSize.min,
-          children: [
-            TextField(controller: nameCtrl, decoration: const InputDecoration(labelText: 'Name')),
-            const SizedBox(height: 10),
-            TextField(controller: phoneCtrl, decoration: const InputDecoration(labelText: 'Phone'), keyboardType: TextInputType.phone),
-            const SizedBox(height: 10),
-            TextField(controller: addressCtrl, decoration: const InputDecoration(labelText: 'Address')),
-          ],
+        content: SingleChildScrollView(
+          child: Column(
+            mainAxisSize: MainAxisSize.min,
+            children: [
+              TextField(controller: nameCtrl, decoration: const InputDecoration(labelText: 'Name')),
+              const SizedBox(height: 10),
+              TextField(controller: phoneCtrl, decoration: const InputDecoration(labelText: 'Phone'), keyboardType: TextInputType.phone),
+              const SizedBox(height: 4),
+              // Lets the shop pick the supplier's number straight from the
+              // phone's own saved Contacts instead of retyping it (spec:
+              // "supplier la add supplier la phone number contact la
+              // erunthu add panra option kudu") - same system contact
+              // picker (openExternalPick) already used for the Daily
+              // Order supplier field, which needs no extra runtime
+              // permission prompt since Android grants this app temporary
+              // access to only the one contact picked.
+              Align(
+                alignment: Alignment.centerLeft,
+                child: TextButton.icon(
+                  onPressed: () async {
+                    final picked = await _pickFromContacts(dialogContext);
+                    if (picked != null) {
+                      if (picked.name.isNotEmpty) nameCtrl.text = picked.name;
+                      if (picked.phone.isNotEmpty) phoneCtrl.text = picked.phone;
+                    }
+                  },
+                  icon: const Icon(Icons.contacts_rounded, size: 18),
+                  label: const Text('Pick from Contacts'),
+                ),
+              ),
+              const SizedBox(height: 6),
+              TextField(controller: addressCtrl, decoration: const InputDecoration(labelText: 'Address')),
+            ],
+          ),
         ),
         actions: [
-          TextButton(onPressed: () => Navigator.pop(context, false), child: const Text('Cancel')),
-          ElevatedButton(onPressed: () => Navigator.pop(context, true), child: const Text('Save')),
+          TextButton(onPressed: () => Navigator.pop(dialogContext, false), child: const Text('Cancel')),
+          ElevatedButton(onPressed: () => Navigator.pop(dialogContext, true), child: const Text('Save')),
         ],
       ),
     );
     if (ok == true && nameCtrl.text.trim().isNotEmpty) {
       await _repo.create(name: nameCtrl.text.trim(), phone: phoneCtrl.text.trim(), address: addressCtrl.text.trim());
       _load();
+    }
+  }
+
+  /// Same pattern as DailyOrderScreen's own _pickFromContacts - opens
+  /// Android's native contact picker and returns the chosen contact's name
+  /// + first saved phone number, or null if the picker was cancelled or
+  /// the chosen contact has no number saved.
+  Future<({String name, String phone})?> _pickFromContacts(BuildContext dialogContext) async {
+    try {
+      final contact = await FlutterContacts.openExternalPick();
+      if (contact == null) return null;
+      final phone = contact.phones.isNotEmpty ? contact.phones.first.number : '';
+      if (phone.isEmpty) {
+        if (dialogContext.mounted) {
+          ScaffoldMessenger.of(dialogContext).showSnackBar(
+            SnackBar(content: Text('${contact.displayName} has no phone number saved')),
+          );
+        }
+        return null;
+      }
+      return (name: contact.displayName, phone: phone);
+    } catch (e) {
+      if (dialogContext.mounted) {
+        ScaffoldMessenger.of(dialogContext).showSnackBar(
+          SnackBar(content: Text('Could not open Contacts: $e')),
+        );
+      }
+      return null;
     }
   }
 }
