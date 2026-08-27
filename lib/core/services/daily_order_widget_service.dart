@@ -1,3 +1,5 @@
+import 'dart:async';
+
 import 'package:home_widget/home_widget.dart';
 
 import '../repositories/daily_order_repository.dart';
@@ -83,6 +85,27 @@ class DailyOrderWidgetService {
       }
 
       await HomeWidget.updateWidget(androidName: _androidWidgetName);
+
+      // BUG FIX: "daily order widget refresh aagamattangithu once screen
+      // la add pannathukku aprom" - the home-screen widget would refresh
+      // the first time then go stale on later adds (worst with the
+      // widget's own Quick Add screen and its "Save & Add Another" button,
+      // which can call this several times within a couple of seconds).
+      // The widget data itself was always being written correctly (see
+      // above) - the gap was Android's ACTION_APPWIDGET_UPDATE broadcast
+      // above sometimes not being applied by the home screen launcher when
+      // several of these land in quick succession (some OEM launchers
+      // coalesce/drop a broadcast that arrives while the previous one is
+      // still being redrawn). A second, identical update shortly after -
+      // by which point the first redraw has finished - is cheap insurance
+      // that a dropped/coalesced broadcast is never the reason the widget
+      // looks stale. Fire-and-forget: this refresh() call has already done
+      // its job by the time this fires, so nothing awaits it.
+      unawaited(Future.delayed(const Duration(milliseconds: 800), () async {
+        try {
+          await HomeWidget.updateWidget(androidName: _androidWidgetName);
+        } catch (_) {}
+      }));
     } catch (_) {
       // A widget refresh failing (e.g. plugin not ready yet on very first
       // launch) must never break the rest of the app - the widget simply

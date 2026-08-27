@@ -871,22 +871,27 @@ class PdfService {
             ),
             pw.Table(
               border: pw.TableBorder.all(color: PdfColors.grey600, width: 0.6),
+              // Column order: S.No, Type/Model, Part/Accessory, Qty (spec:
+              // "daily order pdf la s.No then type / model then part
+              // accesories then QTY eppadi order ah allign panni kudu") -
+              // matches the field order already used on-screen in both the
+              // main Add Item dialog and the widget's Quick Add screen.
               columnWidths: const {
                 0: pw.FlexColumnWidth(0.7),
-                1: pw.FlexColumnWidth(3.2),
-                2: pw.FlexColumnWidth(2),
+                1: pw.FlexColumnWidth(2),
+                2: pw.FlexColumnWidth(3.2),
                 3: pw.FlexColumnWidth(1.3),
               },
               children: [
                 pw.TableRow(
                   decoration: const pw.BoxDecoration(color: PdfColors.grey200),
-                  children: [_th('S.No'), _th('Part / Accessory'), _th('Type / Model'), _th('Qty')],
+                  children: [_th('S.No'), _th('Type / Model'), _th('Part / Accessory'), _th('Qty')],
                 ),
                 for (final item in dateItems)
                   pw.TableRow(children: [
                     _td('${item.sNo}'),
-                    _td(item.partName),
                     _td(item.typeModel?.isNotEmpty == true ? item.typeModel! : '-'),
+                    _td(item.partName),
                     _td(item.quantity),
                   ]),
               ],
