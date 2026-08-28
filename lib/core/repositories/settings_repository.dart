@@ -67,6 +67,15 @@ class SettingsRepository {
   // installed on the phone.
   static const whatsappSendApp = 'whatsapp_send_app';
 
+  // One-time flag: has the "Test Print?" prompt already been shown on the
+  // Dashboard once (spec: "app first time open pannumpothu test print
+  // option onnu venum, first print poda late aaguthu athu check panna")?
+  // Stored in the settings table (same as everything else here) so it
+  // survives across app restarts and stays a genuine one-time "first app
+  // open" nudge rather than reappearing every launch - the same Test Print
+  // action stays permanently available afterwards from Settings -> Printing.
+  static const testPrintPromptShown = 'test_print_prompt_shown';
+
   // NOTE: the Daily Orders home-screen widget's on/off toggle is
   // deliberately NOT a key in this table. Backups (see BackupService) work
   // by copying the whole SQLite database file, so anything stored here goes
@@ -208,8 +217,20 @@ class SettingsRepository {
 
   Future<void> saveDailyOrderPdfNote(String note) => set(dailyOrderPdfNote, note);
 
-  /// 'auto' (default) | 'business' | 'regular' - see [whatsappSendApp].
-  Future<String> getWhatsAppSendApp() async => (await get(whatsappSendApp)) ?? 'auto';
+  /// 'auto' | 'business' (default) | 'regular' - see [whatsappSendApp].
+  /// Defaults to 'business' (not 'auto') so a shop that never opens
+  /// Settings still gets WhatsApp Business as the first preference for
+  /// every customer intimation out of the box (spec: "intimation ...
+  /// enakku first preference business whatsapp venum") - still fully
+  /// changeable any time from Settings -> WhatsApp Sending.
+  Future<String> getWhatsAppSendApp() async => (await get(whatsappSendApp)) ?? 'business';
 
   Future<void> saveWhatsAppSendApp(String value) => set(whatsappSendApp, value);
+
+  /// See [testPrintPromptShown]. Defaults to false (not shown yet) so a
+  /// fresh install/first app open always offers the one-time Test Print
+  /// prompt exactly once.
+  Future<bool> hasShownTestPrintPrompt() async => (await get(testPrintPromptShown)) == '1';
+
+  Future<void> markTestPrintPromptShown() => set(testPrintPromptShown, '1');
 }
