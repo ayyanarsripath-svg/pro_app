@@ -356,9 +356,30 @@ class _SecondHandDetailScreenState extends State<SecondHandDetailScreen> {
       final customer = sale.customerId != null ? await _customerRepo.byId(sale.customerId!) : null;
       final bytes = await _pdfService.buildSecondHandSalesBill(phone: phone, sale: sale, customer: customer, warrantyClaimed: _warrantyClaimed);
       await Printing.layoutPdf(format: PdfPageFormat.a5, name: '2ndHandSale_${phone.purchaseNo}', onLayout: (format) async => bytes);
+    } catch (e) {
+      // PREVIOUSLY no catch here at all - a failed PDF build/print just
+      // silently stopped the spinner with nothing shown (same "print
+      // varala" symptom fixed on the Service bill's print button - see
+      // ServiceDetailScreen._printBill).
+      _showError('Print failed', e);
     } finally {
       if (mounted) setState(() => _printing = false);
     }
+  }
+
+  /// Shows an error in a dialog (not just a snackbar, which can clip a
+  /// longer message) - same pattern as BackupScreen/ServiceDetailScreen.
+  void _showError(String title, Object error) {
+    if (!mounted) return;
+    final message = error.toString().replaceFirst('Exception: ', '');
+    showDialog(
+      context: context,
+      builder: (context) => AlertDialog(
+        title: Text(title),
+        content: Text(message),
+        actions: [TextButton(onPressed: () => Navigator.pop(context), child: const Text('OK'))],
+      ),
+    );
   }
 
   Future<void> _customerReturn() async {
