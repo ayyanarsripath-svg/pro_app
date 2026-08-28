@@ -21,18 +21,36 @@ Future<void> main() async {
   // Warms up the offline SQLite database before the UI needs it.
   await DatabaseHelper.instance.database;
 
-  // Fire-and-forget: takes a local backup automatically if more than 7
-  // days have passed since the last one (spec "Weekly automatic backup").
-  BackupService().runWeeklyAutoBackupIfDue();
-
   // Registers the ~10 PM daily Google Drive backup with Android's
   // WorkManager (no permission prompt - see backup_service.dart), and also
   // runs today's Drive backup right now if it's still due (e.g. the
   // background run hasn't happened yet, ran late, or failed last time due
   // to no internet) - this app-open catch-up is what guarantees a missed
-  // day never stays missed for long.
+  // day never stays missed for long. This is now the app's ONE automatic
+  // backup mechanism (the old separate "weekly automatic local backup" was
+  // removed - spec: "weekly automatic backup remove pannittu daily
+  // automatic back up create pannu google drive ku").
+  //
+  // If this attempt fails (no internet, sign-in hiccup, etc.),
+  // runDailyGoogleDriveBackupIfDue itself already records the failure and
+  // shows a non-dismissible notification (see BackupService) - the .then()
+  // below additionally queues the network-constrained WorkManager retry
+  // (safe to do from here, the foreground/main isolate) so the backup
+  // uploads automatically the moment this phone is back online, without
+  // needing the app opened again. Fire-and-forget (not awaited) so a slow
+  // or failing Drive attempt never delays the rest of app startup.
   scheduleDailyGoogleDriveBackup();
-  BackupService().runDailyGoogleDriveBackupIfDue();
+  BackupService().runDailyGoogleDriveBackupIfDue().then((_) async {
+    try {
+      if ((await BackupService().driveBackupStatus()).pending) {
+        await schedulePendingDriveBackupRetry();
+      } else {
+        await cancelPendingDriveBackupRetry();
+      }
+    } catch (_) {
+      // Never let this follow-up scheduling step affect app startup.
+    }
+  });
 
   // Daily Orders reminder (see screens/orders/daily_order_screen.dart) -
   // registers the background WorkManager trigger at the shop's saved send
