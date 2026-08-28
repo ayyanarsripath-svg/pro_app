@@ -440,9 +440,15 @@ class _SecondHandDetailScreenState extends State<SecondHandDetailScreen> {
       await _warrantyRepo.fileClaim(claimType: 'second_hand', referenceId: widget.phoneId, description: descCtrl.text.trim());
       final customer = sale?.customerId != null ? await _customerRepo.byId(sale!.customerId!) : null;
       if (customer?.phone != null && customer!.phone!.trim().isNotEmpty) {
+        // WhatsApp (Business by preference) first; SMS only as a fallback
+        // when WhatsApp itself couldn't be launched - see the same fix in
+        // ServiceFormScreen._submit for the full spec reference.
         final waMsg = _waService.warrantyClaimMessage(customerName: customer.name, referenceLabel: '${phone.isLaptop ? 'Laptop' : 'Mobile'} ${phone.purchaseNo}', description: descCtrl.text.trim());
-        try { await _waService.sendWhatsApp(phone: customer.phone!, message: waMsg); } catch (_) {}
-        try { await _waService.sendSms(phone: customer.phone!, message: waMsg); } catch (_) {}
+        var waSent = false;
+        try { waSent = await _waService.sendWhatsApp(phone: customer.phone!, message: waMsg); } catch (_) {}
+        if (!waSent) {
+          try { await _waService.sendSms(phone: customer.phone!, message: waMsg); } catch (_) {}
+        }
       }
       if (mounted) {
         ScaffoldMessenger.of(context).showSnackBar(const SnackBar(content: Text('Warranty claim filed')));
