@@ -112,14 +112,25 @@ class _BackupScreenState extends State<BackupScreen> {
                     _buildDriveStatusBanner(context),
                   ],
                   const SizedBox(height: 10),
-                  Row(children: [
+                  Wrap(spacing: 8, runSpacing: 8, children: [
                     if (!_driveLinked)
                       ElevatedButton.icon(onPressed: _working ? null : _linkDrive, icon: const Icon(Icons.login_rounded), label: const Text('Connect Google Drive')),
                     if (_driveLinked) ...[
                       ElevatedButton.icon(onPressed: _working ? null : _backupToDrive, icon: const Icon(Icons.cloud_upload_rounded), label: const Text('Backup to Drive')),
-                      const SizedBox(width: 8),
                       OutlinedButton(onPressed: _working ? null : _unlinkDrive, child: const Text('Disconnect')),
                     ],
+                    // "Restore Backup" for Google Drive (spec: "google driver
+                    // backup la extra oru button create pannu athu restore
+                    // backup nu name vai atha click panna earkanavey back up
+                    // aana file automatically restore aakanum") - shown even
+                    // when not yet linked, since tapping it in that state is
+                    // exactly how the shop gets told to connect first (spec:
+                    // "login pannalana intimation pannanum").
+                    OutlinedButton.icon(
+                      onPressed: _working ? null : _restoreFromDrive,
+                      icon: const Icon(Icons.cloud_download_rounded),
+                      label: const Text('Restore Backup'),
+                    ),
                   ]),
                   if (_driveLinked) ...[
                     const SizedBox(height: 8),
@@ -440,6 +451,93 @@ class _BackupScreenState extends State<BackupScreen> {
       if (mounted) setState(() => _working = false);
     }
     _load();
+  }
+
+  /// "Restore Backup" under Google Drive Backup (spec: "google driver
+  /// backup la extra oru button create pannu athu restore backup nu name
+  /// vai atha click panna earkanavey back up aana file automatically
+  /// restore aakanum oruvela earkanavey backup pannalana inform pannanum
+  /// and login pannalana intimation pannanum") - three cases, in order:
+  /// (1) not signed in to Google Drive -> intimation dialog offering to
+  /// connect first, nothing restored yet; (2) signed in but the Drive
+  /// backup folder has no file yet -> plain "no backup found" info dialog;
+  /// (3) a backup file exists -> confirm (showing which file/date, and the
+  /// same overwrite warning as every other restore path here), then
+  /// download + restore it automatically.
+  Future<void> _restoreFromDrive() async {
+    if (!_driveLinked) {
+      if (!mounted) return;
+      final connect = await showDialog<bool>(
+        context: context,
+        builder: (context) => AlertDialog(
+          title: const Text('Not Connected to Google Drive'),
+          content: const Text(
+            'You are not logged in to Google Drive yet, so there is no backup to restore from here. Connect Google Drive first, then tap "Restore Backup" again.',
+          ),
+          actions: [
+            TextButton(onPressed: () => Navigator.pop(context, false), child: const Text('Cancel')),
+            ElevatedButton(onPressed: () => Navigator.pop(context, true), child: const Text('Connect Google Drive')),
+          ],
+        ),
+      );
+      if (connect == true) await _linkDrive();
+      return;
+    }
+
+    setState(() => _working = true);
+    DriveBackupFileInfo? file;
+    try {
+      file = await _backupService.findLatestGoogleDriveBackup();
+    } catch (e) {
+      if (mounted) setState(() => _working = false);
+      _showError('Could not check Google Drive', e);
+      return;
+    }
+    if (mounted) setState(() => _working = false);
+
+    if (file == null) {
+      if (!mounted) return;
+      await showDialog<void>(
+        context: context,
+        builder: (context) => AlertDialog(
+          title: const Text('No Backup Found'),
+          content: const Text(
+            'There is no backup file in your Google Drive yet. Tap "Backup to Drive" above first to create one - after that, "Restore Backup" will be able to restore from it.',
+          ),
+          actions: [TextButton(onPressed: () => Navigator.pop(context), child: const Text('OK'))],
+        ),
+      );
+      return;
+    }
+
+    if (!mounted) return;
+    final modified = file.modifiedTime;
+    final confirm = await showDialog<bool>(
+      context: context,
+      builder: (context) => AlertDialog(
+        title: const Text('Restore from Google Drive?'),
+        content: Text(
+          'This will download "${file!.name}"${modified != null ? ' (last updated ${formatDateTime(modified)})' : ''} from Google Drive and replace your current data with it. The app must be restarted after restoring.',
+        ),
+        actions: [
+          TextButton(onPressed: () => Navigator.pop(context, false), child: const Text('Cancel')),
+          ElevatedButton(onPressed: () => Navigator.pop(context, true), child: const Text('Restore')),
+        ],
+      ),
+    );
+    if (confirm != true) return;
+
+    setState(() => _working = true);
+    try {
+      await _backupService.restoreFromGoogleDriveFile(file);
+      if (mounted) {
+        ScaffoldMessenger.of(context).showSnackBar(const SnackBar(content: Text('Restored from Google Drive. Please close and reopen the app.')));
+      }
+    } catch (e) {
+      _showError('Restore from Google Drive failed', e);
+    } finally {
+      if (mounted) setState(() => _working = false);
+    }
   }
 
   Future<void> _restore(File file) async {
