@@ -1,5 +1,6 @@
 import 'dart:io';
 
+import 'package:flutter_local_notifications/flutter_local_notifications.dart';
 import 'package:path/path.dart' as p;
 import 'package:path_provider/path_provider.dart';
 import 'package:googleapis/drive/v3.dart' as drive;
@@ -10,10 +11,37 @@ import '../db/database_helper.dart';
 import '../repositories/settings_repository.dart';
 import '../utils/id_gen.dart';
 
-/// Manual + weekly-automatic local backup, and optional Google Drive backup
-/// (spec: "Google Drive backup, Weekly automatic backup, Manual backup,
-/// Restore"). The whole app stays fully offline-first - Drive backup is the
-/// one deliberately optional, internet-requiring feature.
+/// Manual local backup, and automatic + on-demand Google Drive backup (spec:
+/// "Google Drive backup, Manual backup, Restore"). The whole app stays fully
+/// offline-first - Drive backup is the one deliberately optional,
+/// internet-requiring feature.
+///
+/// DATA-LOSS INCIDENT FIX (2026-08): a shop owner lost real business data
+/// after an uninstall/reinstall because a Drive backup silently failed with
+/// zero visibility - the old runDailyGoogleDriveBackupIfDue() caught every
+/// error with a bare `catch (_) {}` and just waited for the next calendar
+/// day, so nothing ever told the owner their data wasn't actually protected
+/// (spec: "backup missing aagi erukku pola ethu periya problem so care full
+/// ah handle pannu ple many data missing"). This class was redesigned around
+/// three rules instead: (1) every failure is now logged to the `backups`
+/// table AND remembered in Settings (driveBackupPending/driveBackupLastError)
+/// so Backup & Restore can always show the truth; (2) a failure immediately
+/// queues a network-constrained WorkManager retry (see
+/// schedulePendingDriveBackupRetry in background_tasks.dart) so the backup
+/// uploads automatically the instant the phone has internet again, without
+/// needing the app to be open; (3) a non-dismissible ("ongoing") notification
+/// stays up the entire time a backup is pending, so the owner always has a
+/// visible signal something needs attention (spec: "notification la
+/// kattanum na thalli vitta kuda poga kudathu"). The old "weekly automatic
+/// LOCAL backup" feature has been removed entirely (spec: "weekly automatic
+/// backup remove pannittu daily automatic back up create pannu google
+/// drive ku") - daily Google Drive backup (with the retry-until-success
+/// behaviour above) is now the one and only automatic backup story; manual
+/// local "Backup Now" still exists purely as an extra, on-demand safety copy
+/// kept on the phone itself, and is clearly labelled as NOT reaching Google
+/// Drive on its own (see BackupScreen) - confusing the two was very likely
+/// what caused the incident, since "Backup Now" was mistaken for something
+/// that also updated the Drive copy.
 ///
 /// GOOGLE DRIVE SETUP (do this once, see README "Google Drive Backup
 /// Setup"): create your own OAuth 2.0 Android client in Google Cloud
@@ -109,36 +137,6 @@ class BackupService {
     });
     await _settings.set(SettingsRepository.lastBackupAt, DateTime.now().toIso8601String());
     return copy;
-  }
-
-  /// Call this once on app startup. If more than 7 days have passed since
-  /// the last backup (of any type), a fresh local backup is taken
-  /// automatically (spec "Weekly automatic backup").
-  Future<void> runWeeklyAutoBackupIfDue() async {
-    final enabled = await _settings.get(SettingsRepository.weeklyAutoBackupEnabled);
-    if (enabled == 'false') return;
-
-    final lastBackupStr = await _settings.get(SettingsRepository.lastBackupAt);
-    final due = lastBackupStr == null ||
-        DateTime.now().difference(DateTime.parse(lastBackupStr)) > const Duration(days: 7);
-    if (!due) return;
-
-    final dbFile = await _dbHelper.dbFile();
-    final dir = await _backupDir();
-    final stamp = DateTime.now().toIso8601String().replaceAll(':', '-');
-    final dest = File(p.join(dir.path, 'pms_weekly_$stamp.db'));
-    final copy = await dbFile.copy(dest.path);
-
-    final db = await _dbHelper.database;
-    await db.insert('backups', {
-      'id': newId(),
-      'backup_date': DateTime.now().toIso8601String(),
-      'type': 'weekly_auto',
-      'file_path': copy.path,
-      'status': 'success',
-      'notes': null,
-    });
-    await _settings.set(SettingsRepository.lastBackupAt, DateTime.now().toIso8601String());
   }
 
   Future<List<File>> listLocalBackups() async {
@@ -326,6 +324,11 @@ class BackupService {
     await _ensureInitialized();
     await _googleSignIn.signOut();
     await _settings.set(SettingsRepository.googleDriveLinked, 'false');
+    // Nothing left to retry against once Drive is unlinked - clear any
+    // pending-backup state/notification and cancel the queued WorkManager
+    // retry so it doesn't keep waking up for an account that's no longer
+    // connected.
+    await _clearPendingDriveBackup(showRecoveredNotification: false);
   }
 
   Future<bool> get isGoogleDriveLinked async =>
@@ -399,7 +402,7 @@ class BackupService {
   /// both by the "Backup to Drive" button and the automatic daily backup
   /// (see [runDailyGoogleDriveBackupIfDue]) - both write to the exact same
   /// monthly file, so pressing the button never creates extra clutter.
-  /// Unlike [createManualBackup]/[runWeeklyAutoBackupIfDue], this does NOT
+  /// Unlike [createManualBackup], this does NOT
   /// add anything to the Local Backups list - it works from a throwaway
   /// temp copy of the database that's deleted right after the upload, so
   /// backing up to Drive every single day forever never piles up local
@@ -478,18 +481,34 @@ class BackupService {
     }
   }
 
-  /// Called both from the WorkManager background task (once daily, aimed at
-  /// ~10 PM - see [scheduleDailyGoogleDriveBackup] in background_tasks.dart)
-  /// and every time the app is opened (see main.dart). Backs up to Google
-  /// Drive at most once per calendar day - and because this compares
-  /// calendar dates rather than a fixed 24-hour duration, and only advances
-  /// [SettingsRepository.lastDriveBackupAt] after an upload actually
-  /// succeeds, a day that failed (no internet, sign-in hiccup, etc.) simply
-  /// stays "due" and is automatically picked up by the very next successful
-  /// attempt - nothing extra to implement, since backupToGoogleDrive()
-  /// always uploads a fresh full snapshot of the database, not an
-  /// incremental diff, so that next attempt captures everything regardless
-  /// of how many days were missed.
+  /// Called from the WorkManager background task (once daily, aimed at ~10
+  /// PM - see [scheduleDailyGoogleDriveBackup] in background_tasks.dart),
+  /// every time the app is opened (see main.dart), AND from the dedicated
+  /// pending-retry WorkManager task queued by [_recordDriveBackupFailure]
+  /// (see [schedulePendingDriveBackupRetry] in background_tasks.dart) - the
+  /// same due-check safely covers all three callers.
+  ///
+  /// Backs up to Google Drive at most once per calendar day UNLESS a
+  /// previous attempt is still [SettingsRepository.driveBackupPending] -
+  /// in that case the same-day gate is skipped entirely and this always
+  /// tries again right now, because a pending/failed backup must never wait
+  /// for "tomorrow" when it could instead succeed in the next few minutes
+  /// (spec: "internet ellana file load aagi waite pannanum eppo inter net
+  /// connect aagutho appo file upload aagidanum").
+  ///
+  /// DATA-LOSS INCIDENT FIX: this used to swallow every failure with a bare
+  /// `catch (_) {}` and simply wait for the next calendar day - completely
+  /// invisible to the shop owner, which is very likely what let a real
+  /// backup gap go unnoticed until data was actually lost. Every failure now
+  /// goes through [_recordDriveBackupFailure], which logs it, remembers it
+  /// in Settings so Backup & Restore can always show it, and shows a
+  /// notification that cannot be swiped away. Whichever caller invoked this
+  /// method then queues a network-constrained WorkManager retry (see
+  /// [schedulePendingDriveBackupRetry] in background_tasks.dart) so this
+  /// same method runs again automatically the moment the phone has internet
+  /// - see that function's and [_recordDriveBackupFailure]'s doc comments
+  /// for exactly why the queuing itself happens at the call site rather
+  /// than inside this method.
   ///
   /// Never throws - background execution must not crash the isolate, and a
   /// foreground caller on app open shouldn't see a Drive hiccup as an error.
@@ -502,12 +521,15 @@ class BackupService {
       final linked = await isGoogleDriveLinked;
       if (!linked) return false;
 
-      final now = DateTime.now();
-      final lastStr = await _settings.get(SettingsRepository.lastDriveBackupAt);
-      if (lastStr != null) {
-        final last = DateTime.parse(lastStr);
-        final sameDay = last.year == now.year && last.month == now.month && last.day == now.day;
-        if (sameDay) return false;
+      final pending = (await _settings.get(SettingsRepository.driveBackupPending)) == 'true';
+      if (!pending) {
+        final now = DateTime.now();
+        final lastStr = await _settings.get(SettingsRepository.lastDriveBackupAt);
+        if (lastStr != null) {
+          final last = DateTime.parse(lastStr);
+          final sameDay = last.year == now.year && last.month == now.month && last.day == now.day;
+          if (sameDay) return false;
+        }
       }
 
       // allowInteractiveSignIn: false - this can run from a background
@@ -516,15 +538,196 @@ class BackupService {
       // connection, never try to pop UI. See backupToGoogleDrive's doc
       // comment.
       await backupToGoogleDrive(allowInteractiveSignIn: false);
-      await _settings.set(SettingsRepository.lastDriveBackupAt, now.toIso8601String());
+      await _settings.set(SettingsRepository.lastDriveBackupAt, DateTime.now().toIso8601String());
+      await _clearPendingDriveBackup(showRecoveredNotification: pending);
       return true;
-    } catch (_) {
-      // Leave lastDriveBackupAt untouched so today stays "due" and the next
-      // attempt (next WorkManager run, or the next app open) retries - this
-      // is the "next day include panni back up aaganum" catch-up behaviour.
+    } catch (e) {
+      await _recordDriveBackupFailure(e);
       return false;
     }
   }
+
+  /// Records a failed Drive backup attempt so it's never silently lost:
+  /// logs a 'failed' row to the `backups` table, remembers the reason in
+  /// Settings (driveBackupPending/driveBackupLastError/
+  /// driveBackupPendingSince) so Backup & Restore can always show the shop
+  /// owner the true state, and posts a notification that cannot be swiped
+  /// away (spec: "notification la kattanum na thalli vitta kuda poga
+  /// kudathu"). Never throws - this runs from inside a catch block, both in
+  /// the foreground and from a background isolate.
+  ///
+  /// Deliberately does NOT queue the WorkManager retry itself - callers do
+  /// that (see [schedulePendingDriveBackupRetry] in background_tasks.dart,
+  /// called from main.dart on app open and from background_tasks.dart's own
+  /// daily-task case), because this method is also reached from inside the
+  /// dedicated retry task's own execution, and a WorkManager task must never
+  /// re-register/replace its own currently-running uniqueName (confirmed:
+  /// doing so can throw a native CancellationException back into that same
+  /// running task). That retry task instead relies purely on returning
+  /// false + its own configured backoffPolicy, which is the safe, idiomatic
+  /// way for a task to reschedule itself.
+  Future<void> _recordDriveBackupFailure(Object error) async {
+    final message = error.toString().replaceFirst('Exception: ', '');
+    try {
+      await _settings.set(SettingsRepository.driveBackupPending, 'true');
+      await _settings.set(SettingsRepository.driveBackupLastError, message);
+      final since = await _settings.get(SettingsRepository.driveBackupPendingSince);
+      if (since == null) {
+        await _settings.set(SettingsRepository.driveBackupPendingSince, DateTime.now().toIso8601String());
+      }
+
+      final db = await _dbHelper.database;
+      await db.insert('backups', {
+        'id': newId(),
+        'backup_date': DateTime.now().toIso8601String(),
+        'type': 'google_drive',
+        'file_path': null,
+        'status': 'failed',
+        'notes': message,
+      });
+
+      await _showPendingBackupNotification(message);
+    } catch (_) {
+      // Recording the failure must never itself throw back into the caller.
+    }
+  }
+
+  /// Clears the pending-backup state the moment a Drive backup actually
+  /// succeeds again - removes the non-dismissible "waiting" notification,
+  /// and (only when [showRecoveredNotification] is true, i.e. this really
+  /// was recovering from a prior failure rather than just an ordinary
+  /// successful day) briefly shows a normal, dismissible "Backup completed"
+  /// notification so the shop owner gets clear confirmation their data is
+  /// protected again without needing to open the app.
+  ///
+  /// Deliberately does NOT cancel the queued WorkManager retry itself - see
+  /// [_recordDriveBackupFailure]'s doc comment for why (same
+  /// self-cancel-while-running risk applies to cancelling as to
+  /// re-registering). A stray already-queued retry firing later after
+  /// success is harmless: it will find nothing pending and simply no-op.
+  /// Callers that can safely cancel it (main.dart on app open,
+  /// background_tasks.dart's own daily-task case) do so themselves via
+  /// [cancelPendingDriveBackupRetry].
+  Future<void> _clearPendingDriveBackup({required bool showRecoveredNotification}) async {
+    try {
+      await _settings.set(SettingsRepository.driveBackupPending, 'false');
+      await _settings.set(SettingsRepository.driveBackupLastError, '');
+      await _settings.set(SettingsRepository.driveBackupPendingSince, '');
+      await _ensureNotificationsInitialized();
+      await _notifications.cancel(_pendingBackupNotificationId);
+      if (showRecoveredNotification) {
+        const androidDetails = AndroidNotificationDetails(
+          'drive_backup_status',
+          'Google Drive Backup',
+          channelDescription: 'Tells you when a Google Drive backup succeeds or is waiting for internet',
+          importance: Importance.high,
+          priority: Priority.high,
+          playSound: true,
+          enableVibration: true,
+        );
+        await _notifications.show(
+          _backupRecoveredNotificationId,
+          'Backup Completed',
+          'Your data has been backed up to Google Drive successfully.',
+          const NotificationDetails(android: androidDetails),
+        );
+      }
+    } catch (_) {
+      // Never let clearing/notifying about a success turn into an error.
+    }
+  }
+
+  static final FlutterLocalNotificationsPlugin _notifications = FlutterLocalNotificationsPlugin();
+  static bool _notificationsInitialized = false;
+  static const _pendingBackupNotificationId = 2001;
+  static const _backupRecoveredNotificationId = 2002;
+
+  Future<void> _ensureNotificationsInitialized() async {
+    if (_notificationsInitialized) return;
+    const androidInit = AndroidInitializationSettings('@drawable/ic_notification');
+    const settings = InitializationSettings(android: androidInit);
+    await _notifications.initialize(settings);
+    _notificationsInitialized = true;
+  }
+
+  /// Posts (or, on a later retry, silently updates in place - same
+  /// notification id) a notification the shop owner cannot swipe away
+  /// (ongoing: true, autoCancel: false) explaining a Drive backup is waiting
+  /// for internet and will finish automatically - directly answers "na
+  /// thalli vitta kuda poga kudathu" (even if I try to dismiss it, it
+  /// shouldn't go away). Cleared automatically the moment the backup
+  /// actually succeeds - see [_clearPendingDriveBackup].
+  Future<void> _showPendingBackupNotification(String reason) async {
+    try {
+      await _ensureNotificationsInitialized();
+      const androidDetails = AndroidNotificationDetails(
+        'drive_backup_status',
+        'Google Drive Backup',
+        channelDescription: 'Tells you when a Google Drive backup succeeds or is waiting for internet',
+        importance: Importance.high,
+        priority: Priority.high,
+        ongoing: true,
+        autoCancel: false,
+        playSound: false,
+        enableVibration: false,
+      );
+      await _notifications.show(
+        _pendingBackupNotificationId,
+        'Backup Waiting for Internet',
+        "Your latest data couldn't reach Google Drive yet ($reason). "
+            "It will upload automatically the moment this phone is online - no action needed.",
+        const NotificationDetails(android: androidDetails),
+      );
+    } catch (_) {
+      // A notification failing to show must never break the retry logic
+      // itself - the Settings screen still shows the true pending state.
+    }
+  }
+
+  /// Call after a successful manual "Backup to Drive" button press (see
+  /// BackupScreen) so a manual retry immediately clears any "waiting for
+  /// internet" pending state/notification too, instead of the shop owner
+  /// having to wait for the next automatic due-check to notice their manual
+  /// upload already fixed things. Safe/harmless no-op if nothing was
+  /// pending.
+  Future<void> markManualDriveBackupSucceeded() async {
+    final wasPending = (await _settings.get(SettingsRepository.driveBackupPending)) == 'true';
+    await _settings.set(SettingsRepository.lastDriveBackupAt, DateTime.now().toIso8601String());
+    if (wasPending) {
+      await _clearPendingDriveBackup(showRecoveredNotification: true);
+    }
+  }
+
+  /// Current Google Drive backup health, for Backup & Restore to show the
+  /// shop owner the plain truth instead of them having to guess (spec item
+  /// 5: a correct, transparent workflow designed end-to-end).
+  Future<DriveBackupStatus> driveBackupStatus() async {
+    final lastStr = await _settings.get(SettingsRepository.lastDriveBackupAt);
+    final pending = (await _settings.get(SettingsRepository.driveBackupPending)) == 'true';
+    final error = await _settings.get(SettingsRepository.driveBackupLastError);
+    final sinceStr = await _settings.get(SettingsRepository.driveBackupPendingSince);
+    return DriveBackupStatus(
+      lastSuccessAt: (lastStr == null || lastStr.isEmpty) ? null : DateTime.parse(lastStr),
+      pending: pending,
+      lastError: (error == null || error.isEmpty) ? null : error,
+      pendingSince: (sinceStr == null || sinceStr.isEmpty) ? null : DateTime.parse(sinceStr),
+    );
+  }
+}
+
+/// See [BackupService.driveBackupStatus].
+class DriveBackupStatus {
+  final DateTime? lastSuccessAt;
+  final bool pending;
+  final String? lastError;
+  final DateTime? pendingSince;
+
+  const DriveBackupStatus({
+    required this.lastSuccessAt,
+    required this.pending,
+    required this.lastError,
+    required this.pendingSince,
+  });
 }
 
 class _GoogleAuthClient extends http.BaseClient {

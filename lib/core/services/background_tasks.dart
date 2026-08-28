@@ -29,6 +29,21 @@ const dailyDriveBackupUniqueName = 'daily_google_drive_backup';
 const dailyOrderReminderTaskName = 'daily_order_reminder_task';
 const dailyOrderReminderUniqueName = 'daily_order_reminder';
 
+// Data-loss incident fix (2026-08): a ONE-OFF, network-constrained retry
+// queued (from a safe, non-self-referential caller - see
+// schedulePendingDriveBackupRetry below) whenever a Drive backup attempt
+// actually fails. Unlike the main daily task above (which always reports
+// success back to WorkManager for that periodic slot regardless of the
+// backup's real outcome), THIS task's result is reported honestly - see
+// callbackDispatcher below - so returning false makes WorkManager itself
+// keep retrying with its own backoff policy, and because it's constrained
+// to NetworkType.connected it can only ever actually run once the phone
+// genuinely has internet again. That's what makes "eppo internet varutho
+// appo automatic ah upload aaganum" (upload automatically the moment
+// internet comes back) true even if the shop owner never reopens the app.
+const pendingDriveBackupRetryTaskName = 'pending_google_drive_backup_retry_task';
+const pendingDriveBackupRetryUniqueName = 'pending_google_drive_backup_retry';
+
 /// WorkManager entry point - runs in its own background isolate, completely
 /// separate from the app's UI isolate, whenever Android decides to execute
 /// one of the periodic tasks registered below. Must stay a top-level
@@ -37,24 +52,84 @@ const dailyOrderReminderUniqueName = 'daily_order_reminder';
 @pragma('vm:entry-point')
 void callbackDispatcher() {
   Workmanager().executeTask((task, inputData) async {
-    try {
-      switch (task) {
-        case dailyDriveBackupTaskName:
+    switch (task) {
+      case dailyDriveBackupTaskName:
+        // Always reports success to WorkManager for THIS periodic slot
+        // regardless of the actual backup outcome - a failure here queues
+        // the separate, dedicated pendingDriveBackupRetryTaskName below
+        // (a different uniqueName, so this is safe to register from here -
+        // see that task's own doc comment for why it must never do the same
+        // to itself), which is the task that actually gets retried.
+        try {
           await BackupService().runDailyGoogleDriveBackupIfDue();
-          break;
-        case dailyOrderReminderTaskName:
+          if ((await BackupService().driveBackupStatus()).pending) {
+            await schedulePendingDriveBackupRetry();
+          }
+        } catch (_) {}
+        return Future.value(true);
+      case dailyOrderReminderTaskName:
+        try {
           await OrderReminderService().checkAndNotifyIfDue();
-          break;
-      }
-    } catch (_) {
-      // Swallow - WorkManager retries failed tasks on its own backoff
-      // policy anyway, and each service's own calendar-date due-check
-      // makes sure a missed/failed run is simply picked up by the next
-      // successful one (background retry, or the moment the app is next
-      // opened - see main.dart).
+        } catch (_) {}
+        return Future.value(true);
+      case pendingDriveBackupRetryTaskName:
+        // Reports the REAL outcome (true/false) instead of always true -
+        // that's what makes WorkManager retry THIS SAME task automatically,
+        // honouring its own backoffPolicy below, until it actually succeeds.
+        // Deliberately does NOT itself call schedulePendingDriveBackupRetry
+        // or cancelPendingDriveBackupRetry - a WorkManager task must never
+        // re-register/replace or cancel its own currently-running
+        // uniqueName (confirmed: doing so can throw a native
+        // CancellationException back into that same running task).
+        // Returning false + its own backoffPolicy is the safe, idiomatic
+        // way for a task to reschedule itself.
+        try {
+          final ok = await BackupService().runDailyGoogleDriveBackupIfDue();
+          return Future.value(ok);
+        } catch (_) {
+          return Future.value(false);
+        }
+      default:
+        return Future.value(true);
     }
-    return Future.value(true);
   });
+}
+
+/// Queues (or replaces an already-queued) one-off retry for the very next
+/// moment the phone has internet, via WorkManager's NetworkType.connected
+/// constraint - the actual mechanism behind the "wait for internet, then
+/// upload automatically" requirement. Safe/idempotent to call repeatedly
+/// (existingWorkPolicy.replace keeps only one retry queued at a time, always
+/// reflecting the latest failure).
+///
+/// IMPORTANT: only ever call this from a context that is NOT the
+/// pendingDriveBackupRetryTaskName task's own execution (i.e. from
+/// main.dart on app open, or from callbackDispatcher's dailyDriveBackupTaskName
+/// case above) - registering/replacing a WorkManager task while it is its
+/// own currently-running instance can throw a native CancellationException.
+/// If the retry task itself fails again, it relies purely on returning
+/// false + its own backoffPolicy (see callbackDispatcher) to reschedule
+/// itself instead of calling this.
+Future<void> schedulePendingDriveBackupRetry() async {
+  await _ensureWorkManagerInitialized();
+  await Workmanager().registerOneOffTask(
+    pendingDriveBackupRetryUniqueName,
+    pendingDriveBackupRetryTaskName,
+    constraints: Constraints(networkType: NetworkType.connected),
+    existingWorkPolicy: ExistingWorkPolicy.replace,
+    backoffPolicy: BackoffPolicy.exponential,
+    backoffPolicyDelay: const Duration(minutes: 15),
+  );
+}
+
+/// Cancels a queued pending-backup retry - called once a Drive backup
+/// actually succeeds again, and when the shop disconnects Google Drive
+/// entirely (nothing left to retry against). Safe to call even if nothing
+/// is queued. Same self-reference caution as
+/// [schedulePendingDriveBackupRetry] above applies here too.
+Future<void> cancelPendingDriveBackupRetry() async {
+  await _ensureWorkManagerInitialized();
+  await Workmanager().cancelByUniqueName(pendingDriveBackupRetryUniqueName);
 }
 
 bool _wmInitialized = false;
