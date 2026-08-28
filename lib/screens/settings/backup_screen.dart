@@ -24,6 +24,7 @@ class _BackupScreenState extends State<BackupScreen> {
   bool _loading = true;
   bool _driveLinked = false;
   bool _working = false;
+  DriveBackupStatus? _driveStatus;
 
   @override
   void initState() {
@@ -36,10 +37,12 @@ class _BackupScreenState extends State<BackupScreen> {
     final backups = await _backupService.listLocalBackups();
     final linked = await _backupService.isGoogleDriveLinked;
     final dirPath = await _backupService.backupDirPath();
+    final driveStatus = await _backupService.driveBackupStatus();
     setState(() {
       _backups = backups;
       _driveLinked = linked;
       _backupDirPath = dirPath;
+      _driveStatus = driveStatus;
       _loading = false;
     });
   }
@@ -53,8 +56,13 @@ class _BackupScreenState extends State<BackupScreen> {
           : ListView(
               padding: const EdgeInsets.all(14),
               children: [
-                SectionCard(title: 'Manual Backup', icon: Icons.save_rounded, children: [
-                  Text('Creates a local copy of your entire database right now.', style: TextStyle(color: AppColors.textSecondaryOf(context), fontSize: 12.5)),
+                SectionCard(title: 'Manual Backup (This Phone Only)', icon: Icons.save_rounded, children: [
+                  Text(
+                    'Creates an extra copy of your entire database, saved on THIS phone right now (in the app\'s own storage, and optionally also to a folder you choose). '
+                    'This does NOT upload to Google Drive by itself - it is just an extra local copy, not a replacement for the automatic Google Drive backup below. '
+                    'If this phone is lost, damaged, or uninstalled, a purely local copy cannot help you - only a Google Drive backup can.',
+                    style: TextStyle(color: AppColors.textSecondaryOf(context), fontSize: 12.5),
+                  ),
                   const SizedBox(height: 10),
                   Wrap(spacing: 8, runSpacing: 8, children: [
                     ElevatedButton.icon(
@@ -85,13 +93,7 @@ class _BackupScreenState extends State<BackupScreen> {
                       ),
                     ),
                 ]),
-                SectionCard(title: 'Weekly Automatic Backup', icon: Icons.auto_mode_rounded, children: [
-                  Text(
-                    'A local backup is taken automatically whenever the app is opened and more than 7 days have passed since the last one.',
-                    style: TextStyle(color: AppColors.textSecondaryOf(context), fontSize: 12.5),
-                  ),
-                ]),
-                SectionCard(title: 'Google Drive Backup (Optional)', icon: Icons.cloud_rounded, children: [
+                SectionCard(title: 'Google Drive Backup - Automatic, Every Day', icon: Icons.cloud_rounded, children: [
                   Text(_driveLinked ? 'Linked to Google Drive.' : 'Not linked yet.', style: const TextStyle(fontWeight: FontWeight.w600)),
                   const SizedBox(height: 8),
                   Text(
@@ -99,11 +101,16 @@ class _BackupScreenState extends State<BackupScreen> {
                     style: TextStyle(color: AppColors.textSecondaryOf(context), fontSize: 12),
                   ),
                   const SizedBox(height: 8),
-                  if (_driveLinked)
+                  if (_driveLinked) ...[
                     Text(
-                      "Once connected, all your data (except photos) backs up to Google Drive automatically every day, aimed at around 10 PM - no need to tap anything, and no permission popups. Android doesn't guarantee the exact minute, so as a safety net this also runs the moment you open the app if that day's backup hasn't happened yet. If a day is missed (no internet, phone off, etc.), it's simply included in the next successful backup - nothing is lost.\n\nSaved into a normal, visible \"Professional Mobiles Backups\" folder in your own Google Drive - open the Drive app any time to see it. One file per month, always holding that month's latest complete data (today's data is automatically included with everything noted earlier that month), so you can open whichever month you need.",
+                      "Once connected, this is the ONLY automatic backup this app takes, and it protects your data even if this phone is lost, damaged, or the app is uninstalled and reinstalled - that is exactly what a purely local backup cannot do.\n\n"
+                      "All your data (except photos) backs up to Google Drive automatically every day, aimed at around 10 PM. If there is no internet right then (or the phone is off), the backup simply waits - it does NOT wait for tomorrow. The moment this phone gets internet again, it uploads automatically on its own, with a notification staying up the whole time it's waiting so you always know. Opening the app also always double-checks and retries immediately if anything is still pending.\n\n"
+                      "Saved into a normal, visible \"Professional Mobiles Backups\" folder in your own Google Drive - open the Drive app any time to see it. One file per month, always holding that month's latest complete data, so you can open whichever month you need.",
                       style: TextStyle(color: AppColors.textSecondaryOf(context), fontSize: 12),
                     ),
+                    const SizedBox(height: 10),
+                    _buildDriveStatusBanner(context),
+                  ],
                   const SizedBox(height: 10),
                   Row(children: [
                     if (!_driveLinked)
@@ -158,6 +165,65 @@ class _BackupScreenState extends State<BackupScreen> {
                 ]),
               ],
             ),
+    );
+  }
+
+  /// Plain-truth status banner (spec item 5: a correct, transparent backup
+  /// workflow, not a silent one) - shows exactly what BackupService itself
+  /// knows: when the last Google Drive backup actually succeeded, and - if
+  /// one is currently pending/failed - the reason and how long it's been
+  /// waiting, so the shop owner never has to wonder whether their data is
+  /// actually protected.
+  Widget _buildDriveStatusBanner(BuildContext context) {
+    final status = _driveStatus;
+    if (status == null) return const SizedBox.shrink();
+
+    if (status.pending) {
+      final since = status.pendingSince;
+      return Container(
+        width: double.infinity,
+        padding: const EdgeInsets.all(10),
+        decoration: BoxDecoration(
+          color: Colors.orange.withOpacity(0.12),
+          borderRadius: BorderRadius.circular(8),
+          border: Border.all(color: Colors.orange),
+        ),
+        child: Column(crossAxisAlignment: CrossAxisAlignment.start, children: [
+          const Row(children: [
+            Icon(Icons.cloud_off_rounded, color: Colors.orange, size: 18),
+            SizedBox(width: 6),
+            Text('Backup waiting for internet', style: TextStyle(fontWeight: FontWeight.w700, color: Colors.orange)),
+          ]),
+          const SizedBox(height: 6),
+          Text(
+            'Reason: ${status.lastError ?? "unknown"}${since != null ? '\nWaiting since: ${formatDateTime(since)}' : ''}\n'
+            'This will upload automatically the moment this phone is online - no action needed, but you can also tap "Backup to Drive" below to try right now.',
+            style: TextStyle(color: AppColors.textSecondaryOf(context), fontSize: 12),
+          ),
+        ]),
+      );
+    }
+
+    return Container(
+      width: double.infinity,
+      padding: const EdgeInsets.all(10),
+      decoration: BoxDecoration(
+        color: Colors.green.withOpacity(0.10),
+        borderRadius: BorderRadius.circular(8),
+        border: Border.all(color: Colors.green),
+      ),
+      child: Row(children: [
+        const Icon(Icons.cloud_done_rounded, color: Colors.green, size: 18),
+        const SizedBox(width: 6),
+        Expanded(
+          child: Text(
+            status.lastSuccessAt != null
+                ? 'Last successful backup: ${formatDateTime(status.lastSuccessAt!)}'
+                : 'No successful Google Drive backup yet - tap "Backup to Drive" below to start.',
+            style: const TextStyle(fontWeight: FontWeight.w600, color: Colors.green),
+          ),
+        ),
+      ]),
     );
   }
 
@@ -357,6 +423,12 @@ class _BackupScreenState extends State<BackupScreen> {
     setState(() => _working = true);
     try {
       final id = await _backupService.backupToGoogleDrive();
+      if (id != null) {
+        // Lets a manual retry immediately clear any "waiting for internet"
+        // pending state/notification too, instead of only the next
+        // automatic due-check noticing - see BackupService's doc comment.
+        await _backupService.markManualDriveBackupSucceeded();
+      }
       if (mounted) {
         ScaffoldMessenger.of(context).showSnackBar(
           SnackBar(content: Text(id != null ? 'Uploaded to Google Drive' : 'Google Drive backup failed')),

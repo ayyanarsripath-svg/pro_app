@@ -475,7 +475,7 @@ class _SettingsScreenState extends State<SettingsScreen> {
           child: ListTile(
             leading: const Icon(Icons.backup_rounded, color: AppColors.primaryBlue),
             title: const Text('Backup & Restore'),
-            subtitle: const Text('Manual backup, weekly auto-backup, Google Drive, restore'),
+            subtitle: const Text('Manual backup, automatic daily Google Drive backup, restore'),
             trailing: const Icon(Icons.chevron_right),
             onTap: () => Navigator.push(context, MaterialPageRoute(builder: (_) => const BackupScreen())),
           ),
