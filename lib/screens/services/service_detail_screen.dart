@@ -723,6 +723,10 @@ class _ServiceDetailScreenState extends State<ServiceDetailScreen> {
             mobileName: s.model?.trim().isNotEmpty == true ? s.model : s.mobileName,
             amount: s.billTotal,
             billNo: s.billNo,
+            complaint: s.complaint,
+            imei: s.imei,
+            technician: s.technician,
+            balance: s.displayBalance,
           );
           await _waService.sendWhatsApp(phone: _customer!.phone!, message: msg);
         } catch (_) {}
@@ -850,6 +854,10 @@ class _ServiceDetailScreenState extends State<ServiceDetailScreen> {
             mobileName: s.mobileName,
             totalAmount: freshTotal,
             paidAmount: freshPaid,
+            complaint: s.complaint,
+            imei: s.imei,
+            technician: s.technician,
+            deliveryPerson: personCtrl.text.trim(),
           );
           await _waService.sendWhatsApp(phone: _customer!.phone!, message: msg);
         } catch (_) {}
@@ -984,7 +992,18 @@ class _ServiceDetailScreenState extends State<ServiceDetailScreen> {
       ),
     );
     if (ok == true && descCtrl.text.trim().isNotEmpty) {
-      await _warrantyRepo.fileClaim(claimType: 'service', referenceId: widget.serviceId, description: descCtrl.text.trim()); if (_customer?.phone != null && _customer!.phone!.trim().isNotEmpty) { final waMsg = _waService.warrantyClaimMessage(customerName: _customer!.name, referenceLabel: 'Service ${_service!.billNo}', description: descCtrl.text.trim()); try { await _waService.sendWhatsApp(phone: _customer!.phone!, message: waMsg); } catch (_) {} try { await _waService.sendSms(phone: _customer!.phone!, message: waMsg); } catch (_) {} }
+      await _warrantyRepo.fileClaim(claimType: 'service', referenceId: widget.serviceId, description: descCtrl.text.trim());
+      if (_customer?.phone != null && _customer!.phone!.trim().isNotEmpty) {
+        // WhatsApp (Business by preference) first; SMS only as a fallback
+        // when WhatsApp itself couldn't be launched - see the same fix in
+        // ServiceFormScreen._submit for the full spec reference.
+        final waMsg = _waService.warrantyClaimMessage(customerName: _customer!.name, referenceLabel: 'Service ${_service!.billNo}', description: descCtrl.text.trim());
+        var waSent = false;
+        try { waSent = await _waService.sendWhatsApp(phone: _customer!.phone!, message: waMsg); } catch (_) {}
+        if (!waSent) {
+          try { await _waService.sendSms(phone: _customer!.phone!, message: waMsg); } catch (_) {}
+        }
+      }
       await _serviceRepo.changeStatus(widget.serviceId, ServiceStatus.warranty, notes: descCtrl.text.trim());
       if (mounted) {
         ScaffoldMessenger.of(context).showSnackBar(const SnackBar(content: Text('Warranty claim filed')));

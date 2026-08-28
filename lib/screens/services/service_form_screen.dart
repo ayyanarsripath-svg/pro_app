@@ -1,4 +1,5 @@
 import 'package:flutter/material.dart';
+import 'package:flutter_contacts/flutter_contacts.dart';
 
 import '../../core/repositories/customer_repository.dart';
 import '../../core/repositories/service_repository.dart';
@@ -73,6 +74,53 @@ class _ServiceFormScreenState extends State<ServiceFormScreen> {
                 _conditionPresets = conditions;
                 _damagePresets = damages;
             });
+        }
+    }
+
+    /// Looks up an existing customer by exact phone match (10+ digits typed
+    /// or pasted/picked in) and, when found, auto-fills the Name field and
+    /// shows the "existing customer" hint - shared by the phone field's own
+    /// onChanged and by [_pickFromContacts] below, so picking a number from
+    /// Contacts links to that customer's history exactly the same way
+    /// typing it would.
+    Future<void> _checkExistingCustomer(String phone) async {
+        final trimmed = phone.trim();
+        if (trimmed.length < 10) return;
+        final results = await _customerRepo.search(trimmed);
+        final exact = results.where((c) => c.phone == trimmed).toList();
+        if (exact.isNotEmpty && mounted) {
+            setState(() {
+                _existingCustomer = exact.first;
+                _customerNameCtrl.text = exact.first.name;
+            });
+        }
+    }
+
+    /// Opens Android's native contact picker and fills the Customer
+    /// Phone/Name fields from the chosen contact - same pattern already
+    /// used on the Suppliers and Daily Order supplier phone fields.
+    Future<void> _pickFromContacts() async {
+        try {
+            final contact = await FlutterContacts.openExternalPick();
+            if (contact == null) return;
+            final phone = contact.phones.isNotEmpty ? contact.phones.first.number : '';
+            if (phone.isEmpty) {
+                if (mounted) {
+                    ScaffoldMessenger.of(context).showSnackBar(
+                        SnackBar(content: Text('${contact.displayName} has no phone number saved')),
+                        );
+                }
+                return;
+            }
+            _customerPhoneCtrl.text = phone;
+            if (contact.displayName.isNotEmpty) _customerNameCtrl.text = contact.displayName;
+            await _checkExistingCustomer(phone);
+        } catch (e) {
+            if (mounted) {
+                ScaffoldMessenger.of(context).showSnackBar(
+                    SnackBar(content: Text('Could not open Contacts: $e')),
+                    );
+            }
         }
     }
 
@@ -226,20 +274,26 @@ class _ServiceFormScreenState extends State<ServiceFormScreen> {
                                 controller: _customerPhoneCtrl,
                                 keyboardType: TextInputType.phone,
                                 decoration: const InputDecoration(labelText: 'Phone Number'),
-                                onChanged: (v) async {
-                                    if (v.trim().length >= 10) {
-                                        final results = await _customerRepo.search(v.trim());
-                                        final exact = results.where((c) => c.phone == v.trim()).toList();
-                                        if (exact.isNotEmpty) {
-                                            setState(() {
-                                                _existingCustomer = exact.first;
-                                                _customerNameCtrl.text = exact.first.name;
-                                            });
-                                        }
-                                    }
-                                },
+                                onChanged: (v) => _checkExistingCustomer(v),
                                 ),
-                            const SizedBox(height: 10),
+                            const SizedBox(height: 4),
+                            // Lets the shop pick the customer's number straight from
+                            // the phone's own saved Contacts instead of retyping it
+                            // (spec: "service bill la new service la customer aduthu
+                            // phone number nu erukku athula contact la erunthu phone
+                            // number add panramathiri venum") - same system contact
+                            // picker (openExternalPick) already used for Suppliers
+                            // and the Daily Order supplier field, which needs no
+                            // extra runtime permission prompt.
+                            Align(
+                                alignment: Alignment.centerLeft,
+                                child: TextButton.icon(
+                                    onPressed: _pickFromContacts,
+                                    icon: const Icon(Icons.contacts_rounded, size: 18),
+                                    label: const Text('Pick from Contacts'),
+                                    ),
+                                ),
+                            const SizedBox(height: 6),
                             TextFormField(
                                 controller: _customerNameCtrl,
                                 decoration: const InputDecoration(labelText: 'Customer Name'),
@@ -481,23 +535,35 @@ class _ServiceFormScreenState extends State<ServiceFormScreen> {
             final message = await _waService.serviceIntimationMessage(
                 customerName: customer.name,
                 customerPhone: customer.phone!,
+                billNo: service.billNo,
                 mobileModel: _modelCtrl.text.trim().isNotEmpty ? _modelCtrl.text.trim() : _mobileNameCtrl.text.trim(),
                 imei: _imeiCtrl.text.trim(),
                 complaint: _complaintCtrl.text.trim(),
+                technician: _technicianCtrl.text.trim(),
                 serviceCharge: double.tryParse(_estimatedCtrl.text.trim()) ?? 0,
                 status: service.status,
                 receivedDate: service.createdAt,
                 expectedDelivery: _expectedDate,
                 );
+            // WhatsApp (Business, per Settings -> WhatsApp Sending - see
+            // WhatsAppSmsService.sendWhatsApp) is now the sole first
+            // preference (spec: "sms la message open aaguthu, enakku first
+            // preference business whatsapp venum") - SMS only opens as a
+            // fallback when WhatsApp itself could not be launched at all
+            // (app not installed / launch failed), instead of unconditionally
+            // opening both every single time a job card is created.
+            bool waSent = false;
             try {
-                await _waService.sendWhatsApp(phone: customer.phone!, message: message);
+                waSent = await _waService.sendWhatsApp(phone: customer.phone!, message: message);
             } catch (_) {
-                // Ignore - WhatsApp app may be unavailable; the job card is still saved.
+                // Ignore - falls through to the SMS fallback below.
             }
-            try {
-                await _waService.sendSms(phone: customer.phone!, message: message);
-            } catch (_) {
-                // Ignore - SMS app may be unavailable; the job card is still saved.
+            if (!waSent) {
+                try {
+                    await _waService.sendSms(phone: customer.phone!, message: message);
+                } catch (_) {
+                    // Ignore - SMS app may be unavailable; the job card is still saved.
+                }
             }
         }
 
