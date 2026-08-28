@@ -541,7 +541,7 @@ class DatabaseHelper {
       CREATE TABLE backups (
         id TEXT PRIMARY KEY,
         backup_date TEXT NOT NULL,
-        type TEXT NOT NULL, -- manual | weekly_auto | google_drive
+        type TEXT NOT NULL, -- manual | google_drive
         file_path TEXT,
         status TEXT NOT NULL DEFAULT 'success',
         notes TEXT
@@ -580,6 +580,6 @@ class DatabaseHelper {
   }
 
   /// Full path to the live database file - used by BackupService for
-  /// manual export / Google Drive upload / weekly auto-backup.
+  /// manual export / Google Drive upload.
   Future<File> dbFile() async => File(await databaseFilePath());
 }
