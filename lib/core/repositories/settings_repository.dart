@@ -13,10 +13,26 @@ class SettingsRepository {
   static const shopPhone = 'shop_phone';
   static const adminPinHash = 'admin_pin_hash';
   static const lastBackupAt = 'last_backup_at';
-  static const weeklyAutoBackupEnabled = 'weekly_auto_backup_enabled';
   static const googleDriveLinked = 'google_drive_linked';
   static const lastDriveBackupAt = 'last_drive_backup_at';
   static const dailyDriveAutoBackupEnabled = 'daily_drive_auto_backup_enabled';
+  // Data-loss incident fix (2026-08): the daily Google Drive backup used to
+  // fail completely silently (bare catch, nothing logged, nothing shown) -
+  // a shop owner had no way to know a backup never actually reached Drive
+  // until they lost data restoring from a stale file. These three keys back
+  // the new "pending backup" story: driveBackupPending is set the moment an
+  // attempt fails and only cleared once a backup actually succeeds again;
+  // driveBackupLastError keeps the reason (shown in Settings -> Backup &
+  // Restore); driveBackupPendingSince keeps the first failure's timestamp so
+  // the UI/notification can say how long it's been waiting. See
+  // BackupService.runDailyGoogleDriveBackupIfDue and
+  // background_tasks.dart's pending-retry WorkManager task, which together
+  // guarantee a failed backup keeps retrying (network-constrained, so it
+  // only fires again once the phone actually has internet) until it
+  // succeeds, instead of silently waiting for the next calendar day.
+  static const driveBackupPending = 'drive_backup_pending';
+  static const driveBackupLastError = 'drive_backup_last_error';
+  static const driveBackupPendingSince = 'drive_backup_pending_since';
   static const complaintPresets = 'complaint_presets';
   static const conditionPresets = 'condition_presets';
   static const damagePresets = 'damage_presets';
