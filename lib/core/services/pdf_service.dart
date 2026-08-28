@@ -511,6 +511,61 @@ class PdfService {
   // -----------------------------------------------------------------
   // SERVICE JOB CARD / BILL RECEIPT (spec sections 19-25)
   // -----------------------------------------------------------------
+  /// A tiny, deliberately simple one-page test slip (spec: "app first time
+  /// open pannumpothu test print option onnu venum, first print poda late
+  /// aaguthu athu check panna, settings-layum add pannidu") - lets the shop
+  /// check the printer/print-dialog connection works BEFORE a real bill is
+  /// on the line, either from the one-time Dashboard prompt on first app
+  /// open or any time later from Settings -> Printing -> Test Print. Uses
+  /// the exact same shop header + font + logo path every real bill uses, so
+  /// this genuinely exercises (and warms up) the same cold-start cost a
+  /// first real bill print would otherwise pay.
+  Future<Uint8List> buildTestPrintPdf() async {
+    final shop = await _shopInfo();
+    final logo = await _logo();
+    final doc = pw.Document(theme: await _theme());
+    final now = DateTime.now();
+
+    doc.addPage(
+      pw.Page(
+        pageFormat: PdfPageFormat.a5,
+        margin: const pw.EdgeInsets.all(14),
+        build: (context) => pw.Column(
+          crossAxisAlignment: pw.CrossAxisAlignment.center,
+          children: [
+            _header(shop, logo, 'TEST PRINT'),
+            pw.SizedBox(height: 10),
+            pw.Container(
+              padding: const pw.EdgeInsets.all(10),
+              decoration: pw.BoxDecoration(
+                border: pw.Border.all(color: PdfColors.grey700, width: 0.7),
+                borderRadius: const pw.BorderRadius.all(pw.Radius.circular(4)),
+              ),
+              child: pw.Column(
+                crossAxisAlignment: pw.CrossAxisAlignment.start,
+                children: [
+                  pw.Text('This is only a test slip - not a real bill.', style: pw.TextStyle(fontSize: 10, fontWeight: pw.FontWeight.bold)),
+                  pw.SizedBox(height: 6),
+                  pw.Text(
+                    'If this printed clearly, your printer/print dialog is connected and working. '
+                    'The very first print after opening the app can take a few seconds longer than '
+                    'later ones (the printer connection and this app\'s bill-building caches are '
+                    'both cold) - running this Test Print first warms both of them up, so your next '
+                    'real bill print comes out faster.',
+                    style: const pw.TextStyle(fontSize: 9),
+                  ),
+                  pw.SizedBox(height: 8),
+                  pw.Text('Printed: ${formatDateTime(now)}', style: const pw.TextStyle(fontSize: 8.5)),
+                ],
+              ),
+            ),
+          ],
+        ),
+      ),
+    );
+    return doc.save();
+  }
+
   Future<Uint8List> buildServiceBill({
     required ServiceJob service,
     required Customer customer,

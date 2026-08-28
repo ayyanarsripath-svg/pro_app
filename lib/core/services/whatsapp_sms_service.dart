@@ -133,15 +133,18 @@ class WhatsAppSmsService {
   /// Uses the shop's own saved "Received" template (see
   /// WhatsAppTemplateScreen / SettingsRepository) when one has been
   /// customized, substituting {customerName}/{mobileName}/{complaint}/
-  /// {amount}/{shopName} tokens - falls back to the original built-in
-  /// wording when no custom template is saved yet.
+  /// {amount}/{shopName}/{billNo}/{imei}/{technician}/{status}/
+  /// {receivedDate}/{expectedDelivery} tokens - falls back to the original
+  /// built-in wording when no custom template is saved yet.
   Future<String> serviceIntimationMessage({
     required String customerName,
     required String customerPhone,
+    String? billNo,
     String? mobileModel,
     String? imei,
     String? complaint,
     String? workParts,
+    String? technician,
     double serviceCharge = 0,
     double sparePartsCharge = 0,
     required String status,
@@ -160,6 +163,12 @@ class WhatsAppSmsService {
       text = text.replaceAll('{complaint}', v(complaint));
       text = text.replaceAll('{amount}', formatCurrency(total));
       text = text.replaceAll('{shopName}', resolvedShopName);
+      text = text.replaceAll('{billNo}', v(billNo));
+      text = text.replaceAll('{imei}', v(imei));
+      text = text.replaceAll('{technician}', v(technician));
+      text = text.replaceAll('{status}', v(status));
+      text = text.replaceAll('{receivedDate}', formatDate(receivedDate));
+      text = text.replaceAll('{expectedDelivery}', expectedDelivery == null ? '-' : formatDate(expectedDelivery));
       return text;
     }
     return '📱 Mobile Service Received\n'
@@ -179,15 +188,22 @@ class WhatsAppSmsService {
   /// Uses the shop's own saved "Delivery" template (see
   /// WhatsAppTemplateScreen / SettingsRepository) when one has been
   /// customized, substituting {customerName}/{mobileName}/{amount}/
-  /// {paidAmount}/{billNo}/{shopName} tokens - falls back to the original
-  /// built-in wording when no custom template is saved yet.
+  /// {paidAmount}/{billNo}/{shopName}/{complaint}/{imei}/{technician}/
+  /// {deliveryPerson}/{balance} tokens - falls back to the original built-in
+  /// wording when no custom template is saved yet.
   Future<String> deliveryMessage({
     required String customerName,
     required String billNo,
     String? mobileName,
     required double totalAmount,
     required double paidAmount,
+    String? complaint,
+    String? imei,
+    String? technician,
+    String? deliveryPerson,
   }) async {
+    String v(String? s) => (s == null || s.trim().isEmpty) ? '-' : s.trim();
+    final balance = totalAmount - paidAmount;
     final shopName = (await _settingsRepo.get(SettingsRepository.shopName))?.trim();
     final resolvedShopName = (shopName == null || shopName.isEmpty) ? 'PROFESSIONAL MOBILES' : shopName;
     final custom = await _settingsRepo.getDeliveryIntimationTemplate();
@@ -199,6 +215,11 @@ class WhatsAppSmsService {
       text = text.replaceAll('{paidAmount}', formatCurrency(paidAmount));
       text = text.replaceAll('{billNo}', billNo);
       text = text.replaceAll('{shopName}', resolvedShopName);
+      text = text.replaceAll('{complaint}', v(complaint));
+      text = text.replaceAll('{imei}', v(imei));
+      text = text.replaceAll('{technician}', v(technician));
+      text = text.replaceAll('{deliveryPerson}', v(deliveryPerson));
+      text = text.replaceAll('{balance}', formatCurrency(balance > 0 ? balance : 0));
       return text;
     }
     return '📱 Mobile Service Delivered\n'
@@ -217,15 +238,21 @@ class WhatsAppSmsService {
   /// once the phone is actually handed back. Uses the shop's own saved
   /// template (see WhatsAppTemplateScreen / SettingsRepository) when one has
   /// been customized, substituting {customerName}/{mobileName}/{amount}/
-  /// {billNo}/{shopName} tokens - falls back to the original built-in
-  /// wording when no custom template is saved yet.
+  /// {billNo}/{shopName}/{complaint}/{imei}/{technician}/{balance} tokens -
+  /// falls back to the original built-in wording when no custom template is
+  /// saved yet.
   Future<String> readyForDeliveryMessage({
     required String customerName,
     String? mobileName,
     required double amount,
     required String billNo,
+    String? complaint,
+    String? imei,
+    String? technician,
+    double? balance,
   }) async {
     final modelLabel = (mobileName ?? '').trim();
+    String v(String? s) => (s == null || s.trim().isEmpty) ? '-' : s.trim();
     final shopName = (await _settingsRepo.get(SettingsRepository.shopName))?.trim();
     final resolvedShopName = (shopName == null || shopName.isEmpty) ? 'PROFESSIONAL MOBILES' : shopName;
     final custom = await _settingsRepo.getReadyIntimationTemplate();
@@ -236,6 +263,10 @@ class WhatsAppSmsService {
       text = text.replaceAll('{amount}', formatCurrency(amount));
       text = text.replaceAll('{billNo}', billNo);
       text = text.replaceAll('{shopName}', resolvedShopName);
+      text = text.replaceAll('{complaint}', v(complaint));
+      text = text.replaceAll('{imei}', v(imei));
+      text = text.replaceAll('{technician}', v(technician));
+      text = text.replaceAll('{balance}', formatCurrency(balance ?? 0));
       return text;
     }
     return '📱 PROFESSIONAL MOBILES\n'
