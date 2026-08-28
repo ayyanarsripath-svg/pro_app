@@ -410,50 +410,81 @@ class BackupService {
   ///
   /// [allowInteractiveSignIn] controls what happens if the silent/lightweight
   /// sign-in fails (token expired, access revoked from the Google Account
-  /// side, etc.): when true (the default, used by the foreground "Backup to
-  /// Drive" button) this opens the account picker right here and
-  /// re-authorizes automatically, so a stale connection quietly repairs
-  /// itself instead of just failing. When false (used by the background
-  /// daily auto-backup below) it never tries to show UI from a background
-  /// isolate - it simply throws, gets caught by the caller, and that day
-  /// stays "due" for the next successful attempt instead.
+  /// side, etc.): when true (the default, used by any foreground button)
+  /// this opens the account picker right here and re-authorizes
+  /// automatically, so a stale connection quietly repairs itself instead of
+  /// just failing. When false (used by the background daily auto-backup)
+  /// it never tries to show UI from a background isolate - it simply
+  /// throws, gets caught by the caller, and that day stays "due" for the
+  /// next successful attempt instead.
+  ///
+  /// Shared by [backupToGoogleDrive], [findLatestGoogleDriveBackup], and
+  /// [restoreFromGoogleDriveFile] - every place this app needs an
+  /// authorized Drive connection goes through this one method, so a stuck
+  /// "[16] Account reauth failed" gets the same automatic
+  /// disconnect-and-retry recovery (see [_authenticateAccount]) no matter
+  /// which of those three triggered it.
+  Future<drive.DriveApi> _authorizedDriveApi({required bool allowInteractiveSignIn}) async {
+    await _ensureInitialized();
+
+    // attemptLightweightAuthentication() itself can be a null Future (not
+    // just resolve to a null account) when lightweight auth isn't possible
+    // right now - both cases mean "not silently signed in".
+    final lightweight = _googleSignIn.attemptLightweightAuthentication();
+    GoogleSignInAccount? account = lightweight != null ? await lightweight : null;
+    if (account == null) {
+      if (!allowInteractiveSignIn) {
+        throw Exception('Not signed in to Google Drive - use "Connect Google Drive" first.');
+      }
+      // Silent sign-in didn't work any more (expired/revoked token) -
+      // re-open the account flow right here instead of failing outright,
+      // satisfying "reconnect automatically" without a separate trip to
+      // Settings first. Goes through the same retrying
+      // _authenticateAccount() as the "Connect Google Drive"/"Change
+      // Google Account" buttons, so a stuck "[16] Account reauth failed"
+      // hit from here gets the same automatic recovery instead of failing
+      // on the first try.
+      account = await _authenticateAccount();
+      if (account == null) {
+        throw Exception('Sign-in was cancelled.');
+      }
+    }
+
+    // Reuse a previously granted authorization silently if we still have
+    // one; only fall back to an interactive prompt if we don't.
+    GoogleSignInClientAuthorization? authorization =
+        await account.authorizationClient.authorizationForScopes(_driveScopes);
+    authorization ??= await account.authorizationClient.authorizeScopes(_driveScopes);
+
+    final authHeaders = {'Authorization': 'Bearer ${authorization.accessToken}'};
+    final client = _GoogleAuthClient(authHeaders);
+    return drive.DriveApi(client);
+  }
+
+  /// Runs `PRAGMA wal_checkpoint(TRUNCATE)` on the live database before a
+  /// backup copy is taken. Safe/no-op if the database isn't in WAL mode (it
+  /// isn't, by default, on this app) - kept as a defensive belt-and-braces
+  /// step regardless, so that IF a very recently saved record (e.g. a
+  /// service job just moved to "Ready for Delivery" or "Checking") were
+  /// ever sitting in a separate WAL file instead of the main .db file at
+  /// the exact moment a backup copy is taken, it gets folded into the main
+  /// file first and is never silently missing from the backup. Never
+  /// throws - a checkpoint failing must never block the backup itself from
+  /// proceeding with whatever is already safely in the main file.
+  Future<void> _checkpointBeforeBackup() async {
+    try {
+      final db = await _dbHelper.database;
+      await db.execute('PRAGMA wal_checkpoint(TRUNCATE)');
+    } catch (_) {
+      // Never let a checkpoint failure block the backup itself.
+    }
+  }
+
   Future<String?> backupToGoogleDrive({bool allowInteractiveSignIn = true}) async {
     try {
-      await _ensureInitialized();
+      final driveApi = await _authorizedDriveApi(allowInteractiveSignIn: allowInteractiveSignIn);
 
-      // attemptLightweightAuthentication() itself can be a null Future (not
-      // just resolve to a null account) when lightweight auth isn't
-      // possible right now - both cases mean "not silently signed in".
-      final lightweight = _googleSignIn.attemptLightweightAuthentication();
-      GoogleSignInAccount? account = lightweight != null ? await lightweight : null;
-      if (account == null) {
-        if (!allowInteractiveSignIn) {
-          throw Exception('Not signed in to Google Drive - use "Connect Google Drive" first.');
-        }
-        // Silent sign-in didn't work any more (expired/revoked token) -
-        // re-open the account flow right here instead of failing outright,
-        // satisfying "reconnect automatically" without a separate trip to
-        // Settings first. Goes through the same retrying
-        // _authenticateAccount() as the "Connect Google Drive"/"Change
-        // Google Account" buttons, so a stuck "[16] Account reauth failed"
-        // hit from the "Backup to Drive" button gets the same automatic
-        // recovery instead of failing on the first try.
-        account = await _authenticateAccount();
-        if (account == null) {
-          throw Exception('Sign-in was cancelled.');
-        }
-      }
-
-      // Reuse a previously granted authorization silently if we still have
-      // one; only fall back to an interactive prompt if we don't.
-      GoogleSignInClientAuthorization? authorization =
-          await account.authorizationClient.authorizationForScopes(_driveScopes);
-      authorization ??= await account.authorizationClient.authorizeScopes(_driveScopes);
-
-      final authHeaders = {'Authorization': 'Bearer ${authorization.accessToken}'};
-      final client = _GoogleAuthClient(authHeaders);
-      final driveApi = drive.DriveApi(client);
-
+      await _checkpointBeforeBackup();
       final dbFile = await _dbHelper.dbFile();
       final tempDir = await getTemporaryDirectory();
       final snapshot = await dbFile.copy(p.join(tempDir.path, 'pms_drive_upload_${DateTime.now().millisecondsSinceEpoch}.db'));
@@ -476,6 +507,66 @@ class BackupService {
       });
 
       return uploadedId;
+    } on GoogleSignInException catch (e) {
+      throw Exception(_friendlyGoogleError(e));
+    }
+  }
+
+  /// Finds the single most recently modified backup file anywhere in the
+  /// "Professional Mobiles Backups" Drive folder (across every month, not
+  /// just the current one) - this is "the already-backed-up file" the
+  /// "Restore from Drive" button (see BackupScreen) restores from. Returns
+  /// null only when the folder genuinely has no backup files yet; any
+  /// sign-in problem throws (same friendly-error translation as every other
+  /// Drive operation) so the button can show it.
+  Future<DriveBackupFileInfo?> findLatestGoogleDriveBackup() async {
+    try {
+      final driveApi = await _authorizedDriveApi(allowInteractiveSignIn: true);
+      final folderId = await _findOrCreateBackupFolder(driveApi);
+      final result = await driveApi.files.list(
+        q: "'$folderId' in parents and trashed=false",
+        spaces: 'drive',
+        orderBy: 'modifiedTime desc',
+        $fields: 'files(id,name,modifiedTime)',
+      );
+      final files = result.files;
+      if (files == null || files.isEmpty) return null;
+      final latest = files.first;
+      return DriveBackupFileInfo(
+        id: latest.id!,
+        name: latest.name ?? _monthlyBackupFileName(DateTime.now()),
+        modifiedTime: latest.modifiedTime,
+      );
+    } on GoogleSignInException catch (e) {
+      throw Exception(_friendlyGoogleError(e));
+    }
+  }
+
+  /// Downloads [file] from Google Drive and restores the local database
+  /// from it - the actual "Restore from Drive" action (spec: "earkanavey
+  /// back up aana file automatically restore aakanum"). Reuses the exact
+  /// same [restoreFrom] every other restore flow (local file picker,
+  /// per-item Local Backups restore) already uses, so the app must be
+  /// restarted afterwards for a fresh, clean database connection - same as
+  /// every other restore path in this app.
+  Future<void> restoreFromGoogleDriveFile(DriveBackupFileInfo file) async {
+    try {
+      final driveApi = await _authorizedDriveApi(allowInteractiveSignIn: true);
+      final media = await driveApi.files.get(file.id, downloadOptions: drive.DownloadOptions.fullMedia) as drive.Media;
+
+      final bytes = <int>[];
+      await for (final chunk in media.stream) {
+        bytes.addAll(chunk);
+      }
+
+      final tempDir = await getTemporaryDirectory();
+      final tempFile = File(p.join(tempDir.path, 'pms_drive_restore_${DateTime.now().millisecondsSinceEpoch}.db'));
+      await tempFile.writeAsBytes(bytes);
+      try {
+        await restoreFrom(tempFile);
+      } finally {
+        if (await tempFile.exists()) await tempFile.delete();
+      }
     } on GoogleSignInException catch (e) {
       throw Exception(_friendlyGoogleError(e));
     }
@@ -727,6 +818,20 @@ class DriveBackupStatus {
     required this.pending,
     required this.lastError,
     required this.pendingSince,
+  });
+}
+
+/// See [BackupService.findLatestGoogleDriveBackup] and
+/// [BackupService.restoreFromGoogleDriveFile].
+class DriveBackupFileInfo {
+  final String id;
+  final String name;
+  final DateTime? modifiedTime;
+
+  const DriveBackupFileInfo({
+    required this.id,
+    required this.name,
+    required this.modifiedTime,
   });
 }
 
