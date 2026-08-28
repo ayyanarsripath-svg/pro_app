@@ -3,6 +3,8 @@ import 'dart:io';
 import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
 import 'package:image_picker/image_picker.dart';
+import 'package:pdf/pdf.dart';
+import 'package:printing/printing.dart';
 import 'package:provider/provider.dart';
 import 'package:url_launcher/url_launcher.dart';
 
@@ -10,6 +12,7 @@ import '../../core/repositories/settings_repository.dart';
 import '../../core/repositories/staff_repository.dart';
 import '../../core/services/auth_service.dart';
 import '../../core/services/logo_service.dart';
+import '../../core/services/pdf_service.dart';
 import '../../core/services/theme_service.dart';
 import '../../core/theme/app_theme.dart';
 import '../../widgets/section_card.dart';
@@ -46,11 +49,13 @@ class _SettingsScreenState extends State<SettingsScreen> {
   static const _testUsersUrl = 'https://console.cloud.google.com/auth/audience?project=$_gcpProjectId';
 
   final _settingsRepo = SettingsRepository();
+  final _pdfService = PdfService();
   final _nameCtrl = TextEditingController();
   final _taglineCtrl = TextEditingController();
   final _addressCtrl = TextEditingController();
   final _phoneCtrl = TextEditingController();
   bool _loading = true;
+  bool _testPrinting = false;
   String _whatsappSendApp = 'auto';
 
   @override
@@ -73,6 +78,25 @@ class _SettingsScreenState extends State<SettingsScreen> {
     setState(() => _whatsappSendApp = value);
     await _settingsRepo.saveWhatsAppSendApp(value);
     if (mounted) ScaffoldMessenger.of(context).showSnackBar(const SnackBar(content: Text('WhatsApp sending preference saved')));
+  }
+
+  /// Test Print (spec: "app first time open pannumpothu test print option
+  /// onnu venum ... athukku settings-layum add pannidu") - same test slip +
+  /// print flow as the one-time Dashboard prompt (see DashboardScreen's
+  /// _runTestPrint), reachable here any time afterwards, not just once.
+  Future<void> _testPrint() async {
+    if (_testPrinting) return;
+    setState(() => _testPrinting = true);
+    try {
+      final bytes = await _pdfService.buildTestPrintPdf();
+      await Printing.layoutPdf(format: PdfPageFormat.a5, name: 'Test_Print', onLayout: (format) async => bytes);
+    } catch (e) {
+      if (mounted) {
+        ScaffoldMessenger.of(context).showSnackBar(SnackBar(content: Text('Test print failed: $e')));
+      }
+    } finally {
+      if (mounted) setState(() => _testPrinting = false);
+    }
   }
 
   Future<void> _saveShopInfo() async {
@@ -374,6 +398,20 @@ class _SettingsScreenState extends State<SettingsScreen> {
                 ),
               ),
             ],
+          ),
+        ]),
+        SectionCard(title: 'Printing', icon: Icons.print_rounded, children: [
+          Text(
+            'The very first bill print after opening the app can take a few seconds longer than later ones (printer connection + this app\'s bill caches are both cold). Run a Test Print any time to warm both up before a real bill is on the line.',
+            style: TextStyle(color: AppColors.textSecondaryOf(context), fontSize: 12.5),
+          ),
+          const SizedBox(height: 10),
+          ElevatedButton.icon(
+            onPressed: _testPrinting ? null : _testPrint,
+            icon: _testPrinting
+                ? const SizedBox(width: 16, height: 16, child: CircularProgressIndicator(strokeWidth: 2, color: Colors.white))
+                : const Icon(Icons.print_rounded),
+            label: const Text('Test Print'),
           ),
         ]),
         SectionCard(title: 'Shop Details (shown on printed bills)', icon: Icons.storefront_rounded, children: [

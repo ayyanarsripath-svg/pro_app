@@ -183,47 +183,36 @@ class _BackupScreenState extends State<BackupScreen> {
       // Always takes the actual backup into the app's own private storage
       // first (that copy is what powers the "Local Backups" list and its
       // per-item Restore button below, and never depends on the shop
-      // picking anywhere) - then, on every "Backup Now" tap, asks where a
-      // second copy should also be saved via Android's own folder picker
-      // (spec: "backup now button click panna enga save aaganumnu
-      // kekkanum ... file manager choose panni local storage la folder la
-      // choose pannanum"), so a plain visible copy always lands in a
-      // folder the shop themselves picked (Downloads, a Drive-synced
-      // folder, an SD card, etc.) - not just inside private app storage
-      // that the phone's own Files app can't see.
+      // picking anywhere) - then, on every "Backup Now" tap, lets the shop
+      // save a second, real copy anywhere they choose (spec: "backup now
+      // button click panna file share option mattum than varuthu, local
+      // file la save aagura option kattala, local file la save aaganum").
+      //
+      // PREVIOUSLY this used getDirectoryPath() + a plain File.copy() to
+      // the chosen folder - but on Android's scoped storage, the folder
+      // picker returns a SAF content:// URI, not a real filesystem path,
+      // so File(...).copy() against it always threw and silently fell back
+      // to the share sheet every single time. That's exactly why the shop
+      // only ever saw "Share" and never a real local save. saveFile's
+      // `bytes` parameter has file_picker perform the actual write itself
+      // through SAF, so this now reliably lands as a genuine file at the
+      // name/folder the shop picks - no share sheet detour needed.
       final file = await _backupService.createManualBackup();
       if (!mounted) return;
 
-      final destDir = await FilePicker.getDirectoryPath(
-        dialogTitle: 'Choose a folder to save this backup copy',
+      final bytes = await file.readAsBytes();
+      final savedUri = await FilePicker.saveFile(
+        dialogTitle: 'Choose where to save this backup file',
+        fileName: p.basename(file.path),
+        bytes: bytes,
       );
 
-      String message;
-      if (destDir == null) {
-        // Shop cancelled the folder picker - still keep them informed
-        // exactly where the (private-storage) copy landed, same as
-        // before, since it wasn't lost, just not additionally copied.
-        message = 'Backup created - saved to ${file.path}';
-      } else {
-        try {
-          final destPath = p.join(destDir, p.basename(file.path));
-          final copy = await file.copy(destPath);
-          message = 'Backup saved to ${copy.path}';
-        } catch (_) {
-          // Some folders a shop can pick (e.g. an SD card, or certain
-          // Android 11+ "scoped storage" locations) don't allow a plain
-          // file copy even after being chosen in the picker. Rather than
-          // show a scary error for what the shop will read as "backup
-          // failed", fall back to the share sheet's own "Save a copy"
-          // flow, which reliably writes anywhere on Android regardless of
-          // scoped storage - same mechanism the Share button under Local
-          // Backups already uses.
-          if (mounted) {
-            await SharePlus.instance.share(ShareParams(files: [XFile(file.path)], text: 'Backup file'));
-          }
-          message = 'Could not write directly to that folder - use "Save a copy" in the share sheet that opened.';
-        }
-      }
+      final message = savedUri == null
+          // Shop cancelled the save dialog - still keep them informed
+          // exactly where the (private-storage) copy landed, since it
+          // wasn't lost, just not additionally saved elsewhere.
+          ? 'Backup created - saved to ${file.path}'
+          : 'Backup saved to your chosen location.';
       if (mounted) {
         ScaffoldMessenger.of(context).showSnackBar(
           SnackBar(content: Text(message), duration: const Duration(seconds: 6)),
