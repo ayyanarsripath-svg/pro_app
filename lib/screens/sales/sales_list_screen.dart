@@ -142,9 +142,30 @@ class _SalesListScreenState extends State<SalesListScreen> {
       final customer = bill.customerId != null ? await _customerRepo.byId(bill.customerId!) : null;
       final bytes = await _pdfService.buildSalesBill(bill: bill, items: items, customer: customer, warrantyClaimed: _claimedBillIds.contains(bill.id));
       await Printing.layoutPdf(format: PdfPageFormat.a5, name: 'Sales_${bill.billNo}', onLayout: (format) async => bytes);
+    } catch (e) {
+      // PREVIOUSLY no catch here at all - a failed PDF build/print just
+      // silently stopped the spinner with nothing shown (same "print
+      // varala" symptom fixed on the Service bill's print button - see
+      // ServiceDetailScreen._printBill).
+      _showError('Print failed', e);
     } finally {
       if (mounted) setState(() => _printingIds.remove(bill.id));
     }
+  }
+
+  /// Shows an error in a dialog (not just a snackbar, which can clip a
+  /// longer message) - same pattern as BackupScreen/ServiceDetailScreen.
+  void _showError(String title, Object error) {
+    if (!mounted) return;
+    final message = error.toString().replaceFirst('Exception: ', '');
+    showDialog(
+      context: context,
+      builder: (context) => AlertDialog(
+        title: Text(title),
+        content: Text(message),
+        actions: [TextButton(onPressed: () => Navigator.pop(context), child: const Text('OK'))],
+      ),
+    );
   }
 
   /// Admin/permission-gated Delete (soft-delete: sets active=0 and clears
