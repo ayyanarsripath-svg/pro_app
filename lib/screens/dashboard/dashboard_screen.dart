@@ -1,10 +1,14 @@
 import 'package:flutter/material.dart';
+import 'package:pdf/pdf.dart';
+import 'package:printing/printing.dart';
 import 'package:provider/provider.dart';
 
 import '../../core/theme/app_theme.dart';
 import '../../core/services/auth_service.dart';
+import '../../core/services/pdf_service.dart';
 import '../../core/services/pnl_service.dart';
 import '../../core/repositories/service_repository.dart';
+import '../../core/repositories/settings_repository.dart';
 import '../../core/repositories/spare_part_repository.dart';
 import '../../core/repositories/accessory_repository.dart';
 import '../../core/repositories/second_hand_repository.dart';
@@ -29,6 +33,9 @@ class _DashboardScreenState extends State<DashboardScreen> {
   final _spareParts = SparePartRepository();
   final _accessories = AccessoryRepository();
   final _secondHand = SecondHandRepository();
+  final _settingsRepo = SettingsRepository();
+  final _pdfService = PdfService();
+  bool _testPrinting = false;
 
   late Future<_DashboardData> _future;
 
@@ -36,6 +43,55 @@ class _DashboardScreenState extends State<DashboardScreen> {
   void initState() {
     super.initState();
     _future = _load();
+    // One-time "Test Print?" nudge on first-ever app open (spec: "app first
+    // time open pannumpothu test print option onnu venum, first print poda
+    // late aaguthu athu check panna") - scheduled for after the first frame
+    // so it never competes with this screen's own build/dialog context not
+    // being ready yet. Settings -> Printing -> Test Print stays available
+    // permanently afterwards; this is purely a one-time nudge, not the only
+    // way to reach it (see _maybeShowTestPrintPrompt).
+    WidgetsBinding.instance.addPostFrameCallback((_) => _maybeShowTestPrintPrompt());
+  }
+
+  Future<void> _maybeShowTestPrintPrompt() async {
+    final alreadyShown = await _settingsRepo.hasShownTestPrintPrompt();
+    if (alreadyShown || !mounted) return;
+    await _settingsRepo.markTestPrintPromptShown();
+    if (!mounted) return;
+    final doTest = await showDialog<bool>(
+      context: context,
+      builder: (context) => AlertDialog(
+        title: const Text('Test Print?'),
+        content: const Text(
+          'Oru bill-ku muthal murai print eduthaa, konjam late aagalam (printer warm-up '
+          'aaga time edukkum). Ippove oru chinna test slip print panni printer connection '
+          'check pannikonga - இது வேணும்னா Settings -> Printing -ல எப்பவும் use pannalam.',
+        ),
+        actions: [
+          TextButton(onPressed: () => Navigator.pop(context, false), child: const Text('Later')),
+          ElevatedButton(onPressed: () => Navigator.pop(context, true), child: const Text('Test Print Now')),
+        ],
+      ),
+    );
+    if (doTest == true) await _runTestPrint();
+  }
+
+  /// Shared by the first-launch prompt above and Settings -> Printing's own
+  /// Test Print button - builds and hands the same tiny test slip
+  /// (PdfService.buildTestPrintPdf) to the OS print dialog. Best-effort:
+  /// never throws out to the caller, since this is only a convenience check,
+  /// not something that should ever crash the Dashboard.
+  Future<void> _runTestPrint() async {
+    if (_testPrinting) return;
+    setState(() => _testPrinting = true);
+    try {
+      final bytes = await _pdfService.buildTestPrintPdf();
+      await Printing.layoutPdf(format: PdfPageFormat.a5, name: 'Test_Print', onLayout: (format) async => bytes);
+    } catch (_) {
+      // Best-effort only - see doc comment above.
+    } finally {
+      if (mounted) setState(() => _testPrinting = false);
+    }
   }
 
   Future<_DashboardData> _load() async {
