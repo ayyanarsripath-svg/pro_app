@@ -716,6 +716,13 @@ class _ServiceDetailScreenState extends State<ServiceDetailScreen> {
       // status dialog is re-opened while already Ready, and never blocks
       // the status change itself if WhatsApp isn't available.
       if (status == ServiceStatus.ready && !wasReady && _customer?.phone != null && _customer!.phone!.trim().isNotEmpty) {
+        // Status change itself must never be blocked by a WhatsApp hiccup,
+        // so this still never throws into the UI - but PREVIOUSLY a failed
+        // send here (WhatsApp not installed, launch failing, etc.) was
+        // completely silent, indistinguishable from "it was sent". Now the
+        // shop owner is told to message the customer manually instead of
+        // wrongly assuming the automatic notice went out.
+        var waSent = false;
         try {
           final s = _service!;
           final msg = await _waService.readyForDeliveryMessage(
@@ -728,8 +735,13 @@ class _ServiceDetailScreenState extends State<ServiceDetailScreen> {
             technician: s.technician,
             balance: s.displayBalance,
           );
-          await _waService.sendWhatsApp(phone: _customer!.phone!, message: msg);
+          waSent = await _waService.sendWhatsApp(phone: _customer!.phone!, message: msg);
         } catch (_) {}
+        if (!waSent && mounted) {
+          ScaffoldMessenger.of(context).showSnackBar(
+            const SnackBar(content: Text('Status updated, but WhatsApp could not be opened automatically - please message the customer manually.'), duration: Duration(seconds: 6)),
+          );
+        }
       }
 
       _load();
@@ -843,7 +855,13 @@ class _ServiceDetailScreenState extends State<ServiceDetailScreen> {
       await _serviceRepo.changeStatus(widget.serviceId, ServiceStatus.delivered);
 
       // Best-effort WhatsApp "delivered" notification - must never block the
-      // delivery from being recorded if WhatsApp isn't available.
+      // delivery from being recorded if WhatsApp isn't available. PREVIOUSLY
+      // a failed send here was completely silent (bare catch, no feedback at
+      // all) - the "Marked as Delivered" snackbar below always looked the
+      // same whether the customer was actually notified or not. Now a
+      // failure is folded into that same snackbar instead of pretending
+      // everything went out.
+      var waSent = false;
       if (_customer?.phone != null && _customer!.phone!.trim().isNotEmpty) {
         try {
           final freshTotal = s.billTotal;
@@ -859,15 +877,42 @@ class _ServiceDetailScreenState extends State<ServiceDetailScreen> {
             technician: s.technician,
             deliveryPerson: personCtrl.text.trim(),
           );
-          await _waService.sendWhatsApp(phone: _customer!.phone!, message: msg);
+          waSent = await _waService.sendWhatsApp(phone: _customer!.phone!, message: msg);
         } catch (_) {}
+      } else {
+        // No phone saved at all - nothing to send, not a failure worth
+        // warning about (same as before this fix).
+        waSent = true;
       }
 
       if (mounted) {
-        ScaffoldMessenger.of(context).showSnackBar(const SnackBar(content: Text('Marked as Delivered')));
+        ScaffoldMessenger.of(context).showSnackBar(SnackBar(
+          content: Text(waSent
+              ? 'Marked as Delivered'
+              : 'Marked as Delivered. WhatsApp could not be opened automatically - please message the customer manually.'),
+          duration: waSent ? const Duration(seconds: 4) : const Duration(seconds: 6),
+        ));
       }
       _load();
     }
+  }
+
+  /// Shows an error in a dialog (not just a snackbar, which can clip a
+  /// longer message) - the same pattern already used in BackupScreen, added
+  /// here so Print/WhatsApp/SMS failures on this screen become genuinely
+  /// visible to the shop owner instead of failing silently (see _printBill,
+  /// _sendWhatsApp, _sendSms).
+  void _showError(String title, Object error) {
+    if (!mounted) return;
+    final message = error.toString().replaceFirst('Exception: ', '');
+    showDialog(
+      context: context,
+      builder: (context) => AlertDialog(
+        title: Text(title),
+        content: Text(message),
+        actions: [TextButton(onPressed: () => Navigator.pop(context), child: const Text('OK'))],
+      ),
+    );
   }
 
   /// Admin/permission-gated Delete (spec: small confirmation dialog, hides
@@ -921,6 +966,16 @@ class _ServiceDetailScreenState extends State<ServiceDetailScreen> {
     try {
       final bytes = await _pdfService.buildServiceBill(service: _service!, customer: _customer!, partsUsed: _usages, warrantyClaimed: _warrantyClaimed);
       await Printing.layoutPdf(format: PdfPageFormat.a5, name: 'Service_${_service!.billNo}', onLayout: (format) async => bytes);
+    } catch (e) {
+      // PREVIOUSLY this had no catch at all - if PDF generation or the
+      // native print dialog failed for any reason (a corrupt logo/font
+      // asset, a plugin/OS hiccup, etc.), the Print button's spinner just
+      // silently stopped with nothing shown - exactly the "print kudutha
+      // varamattangithu" (asked for print, nothing comes) symptom reported
+      // with zero way to tell what went wrong. Now the real reason is
+      // always shown, so a genuine failure is at least visible/reportable
+      // instead of indistinguishable from "nothing happened".
+      _showError('Print failed', e);
     } finally {
       if (mounted) setState(() => _printing = false);
     }
@@ -952,26 +1007,64 @@ class _ServiceDetailScreenState extends State<ServiceDetailScreen> {
     }
   }
 
+  /// PREVIOUSLY this had no error handling and no success/failure feedback
+  /// at all - if sendWhatsApp() returned false (WhatsApp not installed, or
+  /// the launch failing for any other reason) or threw, the "WhatsApp"
+  /// Quick Action button just did nothing visible, exactly the "whatsapp
+  /// open aagala" (WhatsApp doesn't open) symptom reported with zero way
+  /// to tell why. Now every outcome is shown.
   Future<void> _sendWhatsApp() async {
-    if (_customer?.phone == null) return;
+    final phone = _customer?.phone?.trim();
+    if (phone == null || phone.isEmpty) {
+      if (mounted) {
+        ScaffoldMessenger.of(context).showSnackBar(
+          const SnackBar(content: Text('No phone number saved for this customer')),
+        );
+      }
+      return;
+    }
     final msg = _waService.serviceStatusMessage(
       shopName: 'Professional Mobiles',
       billNo: _service!.billNo,
       status: _service!.status,
       mobileName: _service!.mobileName ?? 'Device',
     );
-    await _waService.sendWhatsApp(phone: _customer!.phone!, message: msg);
+    try {
+      final sent = await _waService.sendWhatsApp(phone: phone, message: msg);
+      if (mounted && !sent) {
+        ScaffoldMessenger.of(context).showSnackBar(
+          const SnackBar(content: Text('Could not open WhatsApp - is it installed on this phone?')),
+        );
+      }
+    } catch (e) {
+      _showError('WhatsApp failed to open', e);
+    }
   }
 
   Future<void> _sendSms() async {
-    if (_customer?.phone == null) return;
+    final phone = _customer?.phone?.trim();
+    if (phone == null || phone.isEmpty) {
+      if (mounted) {
+        ScaffoldMessenger.of(context).showSnackBar(
+          const SnackBar(content: Text('No phone number saved for this customer')),
+        );
+      }
+      return;
+    }
     final msg = _waService.serviceStatusMessage(
       shopName: 'Professional Mobiles',
       billNo: _service!.billNo,
       status: _service!.status,
       mobileName: _service!.mobileName ?? 'Device',
     );
-    await _waService.sendSms(phone: _customer!.phone!, message: msg);
+    try {
+      final sent = await _waService.sendSms(phone: phone, message: msg);
+      if (mounted && !sent) {
+        ScaffoldMessenger.of(context).showSnackBar(const SnackBar(content: Text('Could not open the SMS app')));
+      }
+    } catch (e) {
+      _showError('SMS failed to open', e);
+    }
   }
 
   Future<void> _fileWarrantyClaim() async {
