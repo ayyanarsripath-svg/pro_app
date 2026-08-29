@@ -21,15 +21,20 @@ Future<void> main() async {
   // Warms up the offline SQLite database before the UI needs it.
   await DatabaseHelper.instance.database;
 
-  // Registers the ~10 PM daily Google Drive backup with Android's
-  // WorkManager (no permission prompt - see backup_service.dart), and also
-  // runs today's Drive backup right now if it's still due (e.g. the
-  // background run hasn't happened yet, ran late, or failed last time due
-  // to no internet) - this app-open catch-up is what guarantees a missed
-  // day never stays missed for long. This is now the app's ONE automatic
-  // backup mechanism (the old separate "weekly automatic local backup" was
-  // removed - spec: "weekly automatic backup remove pannittu daily
-  // automatic back up create pannu google drive ku").
+  // Registers BOTH the exact ~10 PM alarm (scheduleDailyBackupAlarm - the
+  // PRIMARY trigger, spec item 4) and the WorkManager fallback/retry task
+  // (scheduleDailyGoogleDriveBackup) for the daily Google Drive backup, and
+  // also runs today's Drive backup right now if it's still due (e.g.
+  // neither background trigger has fired yet, ran late, or failed last
+  // time due to no internet) - this app-open catch-up is what guarantees a
+  // missed day never stays missed for long. This is now the app's ONE
+  // automatic backup mechanism (the old separate "weekly automatic local
+  // backup" was removed - spec: "weekly automatic backup remove pannittu
+  // daily automatic back up create pannu google drive ku"). Both triggers
+  // - and this app-open catch-up - funnel through the exact same due-check
+  // (BackupService.runDailyGoogleDriveBackupIfDue), which is what stops
+  // more than one of them from ever creating a duplicate backup for the
+  // same day.
   //
   // If this attempt fails (no internet, sign-in hiccup, etc.),
   // runDailyGoogleDriveBackupIfDue itself already records the failure and
@@ -39,6 +44,7 @@ Future<void> main() async {
   // uploads automatically the moment this phone is back online, without
   // needing the app opened again. Fire-and-forget (not awaited) so a slow
   // or failing Drive attempt never delays the rest of app startup.
+  scheduleDailyBackupAlarm();
   scheduleDailyGoogleDriveBackup();
   BackupService().runDailyGoogleDriveBackupIfDue().then((_) async {
     try {

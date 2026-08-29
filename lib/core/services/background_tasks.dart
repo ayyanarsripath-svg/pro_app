@@ -1,5 +1,6 @@
 import 'dart:io';
 
+import 'package:android_alarm_manager_plus/android_alarm_manager_plus.dart';
 import 'package:android_intent_plus/android_intent.dart';
 import 'package:flutter/services.dart';
 import 'package:workmanager/workmanager.dart';
@@ -20,10 +21,12 @@ const _nativeChannel = MethodChannel('pro_app/whatsapp_share');
 /// callbackDispatcher per Flutter app - registering a second, separate
 /// Workmanager().initialize(...) callback anywhere else would silently
 /// break whichever one registered first. So every periodic background task
-/// this app needs (daily Google Drive backup, daily order reminder, and
-/// any future one) is registered through THIS file only, and dispatched by
-/// [task] name inside the single [callbackDispatcher] below - never add a
-/// second dispatcher elsewhere.
+/// this app needs (daily Google Drive backup FALLBACK - see
+/// [scheduleDailyBackupAlarm] below for the actual PRIMARY exact-time
+/// trigger, daily order reminder, and any future one) is registered
+/// through THIS file only, and dispatched by [task] name inside the
+/// single [callbackDispatcher] below - never add a second dispatcher
+/// elsewhere.
 const dailyDriveBackupTaskName = 'daily_google_drive_backup_task';
 const dailyDriveBackupUniqueName = 'daily_google_drive_backup';
 const dailyOrderReminderTaskName = 'daily_order_reminder_task';
@@ -43,6 +46,12 @@ const dailyOrderReminderUniqueName = 'daily_order_reminder';
 // internet comes back) true even if the shop owner never reopens the app.
 const pendingDriveBackupRetryTaskName = 'pending_google_drive_backup_retry_task';
 const pendingDriveBackupRetryUniqueName = 'pending_google_drive_backup_retry';
+
+/// Arbitrary but unique android_alarm_manager_plus alarm id for the exact
+/// ~10 PM daily Drive backup trigger (see [scheduleDailyBackupAlarm]) -
+/// only has to be unique among this app's own AndroidAlarmManager alarms
+/// (there is only this one today).
+const _dailyBackupAlarmId = 930100;
 
 /// WorkManager entry point - runs in its own background isolate, completely
 /// separate from the app's UI isolate, whenever Android decides to execute
@@ -142,10 +151,13 @@ Future<void> _ensureWorkManagerInitialized() async {
   _wmInitialized = true;
 }
 
-/// Registers the daily ~10 PM Google Drive backup with Android's
-/// WorkManager. Safe to call on every app startup - registerPeriodicTask()
-/// with ExistingPeriodicWorkPolicy.keep leaves an already-scheduled task
-/// alone instead of restarting its cycle. WorkManager needs no runtime
+/// Registers the FALLBACK ~10 PM Google Drive backup with Android's
+/// WorkManager (spec item 4: "Use WorkManager as fallback/retry
+/// mechanism. Do not depend only on WorkManager for exact 10 PM timing")
+/// - [scheduleDailyBackupAlarm] below is the PRIMARY, exact-time trigger.
+/// Safe to call on every app startup - registerPeriodicTask() with
+/// ExistingPeriodicWorkPolicy.keep leaves an already-scheduled task alone
+/// instead of restarting its cycle. WorkManager needs no runtime
 /// permission prompt for this (unlike exact-alarm scheduling), so the shop
 /// owner is never asked anything.
 ///
@@ -153,11 +165,15 @@ Future<void> _ensureWorkManagerInitialized() async {
 /// Android's WorkManager does not guarantee an exact run time, even though
 /// the initial delay below is computed to land on 10 PM - the OS can push
 /// it later for battery/Doze-mode reasons. That's a deliberate Android
-/// platform limitation, not a bug here, and it's exactly why
+/// platform limitation, not a bug here - it's exactly why this exists
+/// purely as a fallback alongside the exact alarm, and why
 /// runDailyGoogleDriveBackupIfDue() is *also* called every time the app is
-/// opened (see main.dart): even if the background trigger runs late, or
+/// opened (see main.dart): even if BOTH background triggers run late, or
 /// can't silently sign in, that day's backup still happens the moment the
-/// shop owner next opens the app.
+/// shop owner next opens the app. Both this task and the exact alarm
+/// funnel through the exact same due-check (runDailyGoogleDriveBackupIfDue
+/// in backup_service.dart), which is what stops them from ever creating
+/// two backups for the same day (spec item 4).
 Future<void> scheduleDailyGoogleDriveBackup() async {
   await _ensureWorkManagerInitialized();
 
@@ -177,6 +193,103 @@ Future<void> scheduleDailyGoogleDriveBackup() async {
     backoffPolicy: BackoffPolicy.exponential,
     backoffPolicyDelay: const Duration(minutes: 15),
   );
+}
+
+/// PRIMARY exact-time trigger for the daily Google Drive backup (spec item
+/// 4: "Use Android AlarmManager / exact alarm where permitted"). Unlike
+/// the Daily Order reminder's own exact alarm (DailyOrderAlarmReceiver.kt,
+/// a plain BroadcastReceiver that can only run native Kotlin - show a
+/// notification, nothing more), android_alarm_manager_plus's exact alarm
+/// re-enters the Dart VM in its own background isolate, so the REAL backup
+/// logic (BackupService.runDailyGoogleDriveBackupIfDue - snapshot, zip,
+/// Drive upload, verification, all of it) can run directly from the alarm
+/// itself instead of only being able to nudge the shop to open the app.
+///
+/// Fires once via [AndroidAlarmManager.oneShotAt] (NOT periodic - the exact
+/// time of day has to be recomputed fresh every time so it keeps landing on
+/// 10 PM local time across DST/timezone-offset changes, so
+/// [backupAlarmCallback] below re-arms tomorrow's firing itself once this
+/// one finishes) rather than [scheduleDailyGoogleDriveBackup]'s WorkManager
+/// task above, which stays registered alongside this purely as the
+/// required fallback/retry mechanism - see that function's doc comment for
+/// why relying on WorkManager alone isn't good enough for "around 10 PM".
+///
+/// Safe to call repeatedly (app startup, and from the callback itself) -
+/// oneShotAt with the same [_dailyBackupAlarmId] simply replaces whatever
+/// was scheduled before. Never throws: if the exact-alarm plugin can't be
+/// reached at all (a very old/unusual Android build), the WorkManager
+/// fallback above still gets the backup done, just without the exact-time
+/// guarantee - see [hasExactAlarmPermission]/[requestExactAlarmPermission]
+/// for the one-time permission this needs on Android 12+ to actually land
+/// exactly on time rather than being silently downgraded to inexact.
+Future<void> scheduleDailyBackupAlarm() async {
+  if (!Platform.isAndroid) return;
+  try {
+    await AndroidAlarmManager.initialize();
+    final now = DateTime.now();
+    var next10pm = DateTime(now.year, now.month, now.day, 22);
+    if (!next10pm.isAfter(now)) {
+      next10pm = next10pm.add(const Duration(days: 1));
+    }
+    await AndroidAlarmManager.oneShotAt(
+      next10pm,
+      _dailyBackupAlarmId,
+      backupAlarmCallback,
+      exact: true,
+      wakeup: true,
+      rescheduleOnReboot: true,
+    );
+  } catch (_) {
+    // WorkManager fallback above still covers the daily backup.
+  }
+}
+
+/// Cancels the exact daily backup alarm - called when the shop disconnects
+/// Google Drive entirely (nothing left to back up automatically) or turns
+/// off the daily auto-backup toggle. Safe to call even if nothing is
+/// currently scheduled.
+Future<void> cancelDailyBackupAlarm() async {
+  if (!Platform.isAndroid) return;
+  try {
+    await AndroidAlarmManager.initialize();
+    await AndroidAlarmManager.cancel(_dailyBackupAlarmId);
+  } catch (_) {}
+}
+
+/// android_alarm_manager_plus entry point for [scheduleDailyBackupAlarm]'s
+/// exact alarm - runs in its own fresh background isolate (a distinct Dart
+/// VM instance from both the app's UI isolate and WorkManager's own
+/// callbackDispatcher above), so it re-initializes AndroidAlarmManager
+/// itself before doing anything else. Must stay a top-level function
+/// annotated with @pragma('vm:entry-point') so the Android side can still
+/// find it after the app process is killed - same requirement as
+/// [callbackDispatcher] above.
+///
+/// Runs the exact same due-checked backup as the WorkManager fallback task
+/// (see [callbackDispatcher]'s dailyDriveBackupTaskName case) - both funnel
+/// through BackupService.runDailyGoogleDriveBackupIfDue()'s own
+/// once-per-verified-day gate plus its short-lived run lock, which
+/// together are what stop the exact alarm and the WorkManager fallback
+/// from ever creating two backups for the same day if they happen to land
+/// close together (spec item 4). Always re-arms tomorrow's exact alarm
+/// before returning, success or failure, since [AndroidAlarmManager.oneShotAt]
+/// only ever fires once.
+@pragma('vm:entry-point')
+void backupAlarmCallback() async {
+  try {
+    await AndroidAlarmManager.initialize();
+  } catch (_) {}
+  try {
+    await BackupService().runDailyGoogleDriveBackupIfDue();
+    if ((await BackupService().driveBackupStatus()).pending) {
+      await schedulePendingDriveBackupRetry();
+    } else {
+      await cancelPendingDriveBackupRetry();
+    }
+  } catch (_) {}
+  try {
+    await scheduleDailyBackupAlarm();
+  } catch (_) {}
 }
 
 /// Registers a background check that shows a local notification reminding

@@ -140,10 +140,12 @@ https://console.cloud.google.com for project `pro-app-drive-backup`:
    trigger any "unverified app" block for you - it just removes the
    7-day expiry. This is a one-time, ~30-second fix.
 
-Status: Drive API enabled. Backups now go to a normal, visible
+Status: Drive API enabled. Backups go to a normal, visible
 "Professional Mobiles Backups" folder in your own Drive (not the
-hidden App Data folder), one file per month - see `BackupService` in
-`lib/core/services/backup_service.dart`.
+hidden App Data folder). A brand new, independent, verified backup file
+is created every day (never overwritten in place), timed to an exact
+~10 PM alarm with a WorkManager fallback/retry - see `BackupService` and
+`background_tasks.dart` in `lib/core/services/`.
 
 ### If you build locally on your own machine
 
@@ -168,7 +170,8 @@ job cards with photos/status pipeline/warranty/payments/delivery, spare
 parts & accessories inventory with low-stock alerts, sales billing, 2nd
 hand mobile purchase → repair → sale pipeline, suppliers & purchases,
 expenses, warranty claims, returns (accessories/2nd hand/spare parts),
-Admin PIN + staff permissions, manual/weekly/Google Drive backup + restore.
+Admin PIN + staff permissions, manual local backup + daily automatic
+Google Drive backup/restore.
 
 **This module's additions:**
 - Full category-wise Profit & Loss engine (Service / Accessories / Spare
@@ -192,13 +195,12 @@ Admin PIN + staff permissions, manual/weekly/Google Drive backup + restore.
 
 ## 7. Honest limitations
 
-- **Weekly auto-backup** runs when the app is opened (checks "has it been
-  7+ days"), not via a true background OS job - Android kills background
-  tasks aggressively without extra plugins, so this keeps things reliable
-  without adding complexity. Manual backup is always one tap away.
-- **Google Drive backup** needs the one-time setup in section 5 - Google
-  requires every app to bring its own OAuth client, this can't be
-  pre-baked in for you.
+- **Daily Google Drive backup** fires from an exact ~10 PM alarm
+  (`android_alarm_manager_plus`), with a WorkManager fallback/retry and an
+  app-open catch-up so a missed day never stays missed - see
+  `BackupService.runDailyGoogleDriveBackupIfDue`. It needs the one-time
+  setup in section 5 - Google requires every app to bring its own OAuth
+  client, this can't be pre-baked in for you.
 - **"Other Sales"** is intentionally a quick manual entry (button on the
   P&L Dashboard) rather than a full inventory module, since it's meant to
   catch one-off income that doesn't fit the other categories.

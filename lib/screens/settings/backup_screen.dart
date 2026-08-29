@@ -6,9 +6,11 @@ import 'package:path/path.dart' as p;
 import 'package:share_plus/share_plus.dart';
 
 import '../../core/services/backup_service.dart';
+import '../../core/services/background_tasks.dart';
 import '../../core/theme/app_theme.dart';
 import '../../core/utils/formatters.dart';
 import '../../widgets/section_card.dart';
+import 'google_drive_restore_screen.dart';
 
 class BackupScreen extends StatefulWidget {
   const BackupScreen({super.key});
@@ -17,7 +19,7 @@ class BackupScreen extends StatefulWidget {
   State<BackupScreen> createState() => _BackupScreenState();
 }
 
-class _BackupScreenState extends State<BackupScreen> {
+class _BackupScreenState extends State<BackupScreen> with WidgetsBindingObserver {
   final _backupService = BackupService();
   List<File> _backups = [];
   String _backupDirPath = '';
@@ -26,10 +28,43 @@ class _BackupScreenState extends State<BackupScreen> {
   bool _working = false;
   DriveBackupStatus? _driveStatus;
 
+  // Total count of Drive backup files currently available (spec item 11:
+  // "Number of available Drive backups") - fetched separately/lazily since
+  // it needs its own Drive call, and must never block the rest of the
+  // screen from showing while it's in flight.
+  int? _driveBackupCount;
+
+  // True until proven otherwise (hasExactAlarmPermission() defaults to
+  // true on any check failure/non-Android platform) so this never flashes
+  // a false warning while the very first check is still in flight - same
+  // pattern as DailyOrderScreen's own exact-alarm check.
+  bool _exactAlarmOk = true;
+
   @override
   void initState() {
     super.initState();
+    WidgetsBinding.instance.addObserver(this);
     _load();
+    _recheckExactAlarm();
+  }
+
+  @override
+  void dispose() {
+    WidgetsBinding.instance.removeObserver(this);
+    super.dispose();
+  }
+
+  @override
+  void didChangeAppLifecycleState(AppLifecycleState state) {
+    // Catches the shop owner coming straight back from the "Allow Exact
+    // Alarm Timing" system Settings screen (see _requestExactAlarm below)
+    // without having to manually reopen this screen.
+    if (state == AppLifecycleState.resumed) _recheckExactAlarm();
+  }
+
+  Future<void> _recheckExactAlarm() async {
+    final ok = await hasExactAlarmPermission();
+    if (mounted) setState(() => _exactAlarmOk = ok);
   }
 
   Future<void> _load() async {
@@ -45,6 +80,21 @@ class _BackupScreenState extends State<BackupScreen> {
       _driveStatus = driveStatus;
       _loading = false;
     });
+    if (linked) _refreshDriveBackupCount();
+  }
+
+  /// Fetched separately from the rest of [_load] since it needs its own
+  /// Drive call - never blocks the screen from showing while it's still in
+  /// flight, and any failure here (offline, etc.) just leaves the count
+  /// blank rather than showing an error over the whole screen.
+  Future<void> _refreshDriveBackupCount() async {
+    try {
+      final list = await _backupService.listGoogleDriveBackups();
+      if (mounted) setState(() => _driveBackupCount = list.length);
+    } catch (_) {
+      // Leave it blank - Backup History still shows everything it already
+      // knows locally.
+    }
   }
 
   @override
@@ -104,12 +154,17 @@ class _BackupScreenState extends State<BackupScreen> {
                   if (_driveLinked) ...[
                     Text(
                       "Once connected, this is the ONLY automatic backup this app takes, and it protects your data even if this phone is lost, damaged, or the app is uninstalled and reinstalled - that is exactly what a purely local backup cannot do.\n\n"
-                      "All your data (except photos) backs up to Google Drive automatically every day, aimed at around 10 PM. If there is no internet right then (or the phone is off), the backup simply waits - it does NOT wait for tomorrow. The moment this phone gets internet again, it uploads automatically on its own, with a notification staying up the whole time it's waiting so you always know. Opening the app also always double-checks and retries immediately if anything is still pending.\n\n"
-                      "Saved into a normal, visible \"Professional Mobiles Backups\" folder in your own Google Drive - open the Drive app any time to see it. One file per month, always holding that month's latest complete data, so you can open whichever month you need.",
+                      "A complete new backup file - your entire database plus any photos - is created and uploaded every day, timed to fire exactly around 10 PM using the phone's own alarm clock (not just a background task, which Android can delay). Nothing is ever overwritten: every day gets its own independent, verified snapshot, so you can restore from any single day separately.\n\n"
+                      "If there is no internet right at 10 PM (or the phone is off), the backup simply waits - it does NOT wait for tomorrow. The moment this phone gets internet again, it uploads automatically on its own, with a notification staying up the whole time it's waiting so you always know. Opening the app also always double-checks and retries immediately if anything is still pending. \"Backup Successful\" is only ever shown after the file has been re-checked on Google Drive itself, never just because an upload started.\n\n"
+                      "Saved into a normal, visible \"Professional Mobiles Backups\" folder in your own Google Drive - open the Drive app any time to see every day's file. The last 30 daily backups are always kept, plus one older file per month further back, so Drive storage doesn't grow forever.",
                       style: TextStyle(color: AppColors.textSecondaryOf(context), fontSize: 12),
                     ),
                     const SizedBox(height: 10),
                     _buildDriveStatusBanner(context),
+                    if (!_exactAlarmOk) ...[
+                      const SizedBox(height: 10),
+                      _buildExactAlarmWarning(context),
+                    ],
                   ],
                   const SizedBox(height: 10),
                   Wrap(spacing: 8, runSpacing: 8, children: [
@@ -125,9 +180,11 @@ class _BackupScreenState extends State<BackupScreen> {
                     // aana file automatically restore aakanum") - shown even
                     // when not yet linked, since tapping it in that state is
                     // exactly how the shop gets told to connect first (spec:
-                    // "login pannalana intimation pannanum").
+                    // "login pannalana intimation pannanum"). Opens the full
+                    // Restore Screen (spec item 8) listing every daily backup
+                    // rather than only ever silently grabbing the latest one.
                     OutlinedButton.icon(
-                      onPressed: _working ? null : _restoreFromDrive,
+                      onPressed: _working ? null : _openRestoreScreen,
                       icon: const Icon(Icons.cloud_download_rounded),
                       label: const Text('Restore Backup'),
                     ),
@@ -146,6 +203,7 @@ class _BackupScreenState extends State<BackupScreen> {
                     ),
                   ],
                 ]),
+                if (_driveLinked) SectionCard(title: 'Backup History', icon: Icons.history_rounded, children: [_buildBackupHistory(context)]),
                 SectionCard(title: 'Local Backups (${_backups.length})', icon: Icons.folder_zip_rounded, children: [
                   if (_backupDirPath.isNotEmpty)
                     Padding(
@@ -233,6 +291,87 @@ class _BackupScreenState extends State<BackupScreen> {
                 : 'No successful Google Drive backup yet - tap "Backup to Drive" below to start.',
             style: const TextStyle(fontWeight: FontWeight.w600, color: Colors.green),
           ),
+        ),
+      ]),
+    );
+  }
+
+  /// Spec item 11's "Backup History": last successful backup's date/time,
+  /// file name/size, current pending status, and how many Drive backups
+  /// are available in total - everything Backup & Restore already knows
+  /// locally (driveBackupStatus) plus the lazily-fetched Drive count from
+  /// [_refreshDriveBackupCount], laid out as the plain "Last Backup /
+  /// Status / Latest Backup Size" example the spec shows.
+  Widget _buildBackupHistory(BuildContext context) {
+    final status = _driveStatus;
+    if (status == null) return const SizedBox.shrink();
+
+    Widget row(String label, String value, {Color? valueColor}) {
+      return Padding(
+        padding: const EdgeInsets.symmetric(vertical: 3),
+        child: Row(
+          crossAxisAlignment: CrossAxisAlignment.start,
+          children: [
+            SizedBox(
+              width: 130,
+              child: Text(label, style: TextStyle(color: AppColors.textSecondaryOf(context), fontSize: 12.5)),
+            ),
+            Expanded(
+              child: Text(value, style: TextStyle(fontWeight: FontWeight.w700, fontSize: 12.5, color: valueColor)),
+            ),
+          ],
+        ),
+      );
+    }
+
+    return Column(crossAxisAlignment: CrossAxisAlignment.start, children: [
+      row('Last Backup:', status.lastSuccessAt != null ? formatDateTime(status.lastSuccessAt!) : 'Never'),
+      row(
+        'Status:',
+        status.pending ? 'Pending - waiting for internet' : (status.lastSuccessAt != null ? 'Successfully backed up' : 'Not backed up yet'),
+        valueColor: status.pending ? Colors.orange : (status.lastSuccessAt != null ? Colors.green : null),
+      ),
+      if (status.lastFileName != null) row('Latest Backup File:', status.lastFileName!),
+      if (status.lastFileSize != null) row('Latest Backup Size:', formatFileSize(status.lastFileSize!)),
+      row('Available Backups:', _driveBackupCount != null ? '$_driveBackupCount on Google Drive' : 'Checking...'),
+    ]);
+  }
+
+  /// Nudges the shop owner to grant Android 12+'s "Alarms & reminders"
+  /// permission when it's missing (spec item 4: "If exact alarm
+  /// permission is required, guide the user to enable it") - without it,
+  /// the exact ~10 PM trigger silently falls back to an inexact (possibly
+  /// hours-late) alarm; the WorkManager fallback still gets that day's
+  /// backup done regardless, so this is a warning to fix timing, not a
+  /// "backup broken" error.
+  Widget _buildExactAlarmWarning(BuildContext context) {
+    return Container(
+      width: double.infinity,
+      padding: const EdgeInsets.all(10),
+      decoration: BoxDecoration(
+        color: Colors.orange.withOpacity(0.10),
+        borderRadius: BorderRadius.circular(8),
+        border: Border.all(color: Colors.orange),
+      ),
+      child: Column(crossAxisAlignment: CrossAxisAlignment.start, children: [
+        const Row(children: [
+          Icon(Icons.alarm_off_rounded, color: Colors.orange, size: 18),
+          SizedBox(width: 6),
+          Expanded(child: Text('Exact 10 PM timing not allowed yet', style: TextStyle(fontWeight: FontWeight.w700, color: Colors.orange))),
+        ]),
+        const SizedBox(height: 6),
+        Text(
+          'The daily backup will still happen (a fallback still runs it), but without this permission Android may delay it. Allow exact alarms for the most reliable ~10 PM timing.',
+          style: TextStyle(color: AppColors.textSecondaryOf(context), fontSize: 12),
+        ),
+        const SizedBox(height: 8),
+        OutlinedButton.icon(
+          onPressed: () async {
+            await requestExactAlarmPermission();
+            _recheckExactAlarm();
+          },
+          icon: const Icon(Icons.alarm_rounded, size: 18),
+          label: const Text('Allow Exact Alarm Timing'),
         ),
       ]),
     );
@@ -367,7 +506,13 @@ class _BackupScreenState extends State<BackupScreen> {
     setState(() => _working = true);
     try {
       final ok = await _backupService.signInToGoogleDrive();
-      if (mounted && !ok) {
+      if (ok) {
+        // Arms the exact ~10 PM alarm (+ the WorkManager fallback,
+        // already registered from app startup regardless) the moment
+        // Drive backup actually has something to back up TO - see
+        // background_tasks.dart's scheduleDailyBackupAlarm.
+        await scheduleDailyBackupAlarm();
+      } else if (mounted) {
         ScaffoldMessenger.of(context).showSnackBar(const SnackBar(content: Text('Google sign-in was cancelled')));
       }
     } catch (e) {
@@ -422,6 +567,11 @@ class _BackupScreenState extends State<BackupScreen> {
     setState(() => _working = true);
     try {
       await _backupService.signOutOfGoogleDrive();
+      // Nothing left to back up automatically once Drive is disconnected -
+      // stop the exact alarm (the WorkManager fallback task stays
+      // registered but is a fast no-op once isGoogleDriveLinked is false,
+      // see runDailyGoogleDriveBackupIfDue).
+      await cancelDailyBackupAlarm();
     } catch (e) {
       _showError('Could not disconnect', e);
     } finally {
@@ -433,16 +583,14 @@ class _BackupScreenState extends State<BackupScreen> {
   Future<void> _backupToDrive() async {
     setState(() => _working = true);
     try {
-      final id = await _backupService.backupToGoogleDrive();
-      if (id != null) {
-        // Lets a manual retry immediately clear any "waiting for internet"
-        // pending state/notification too, instead of only the next
-        // automatic due-check noticing - see BackupService's doc comment.
-        await _backupService.markManualDriveBackupSucceeded();
-      }
+      final info = await _backupService.backupToGoogleDrive();
+      // Lets a manual retry immediately clear any "waiting for internet"
+      // pending state/notification too, instead of only the next
+      // automatic due-check noticing - see BackupService's doc comment.
+      await _backupService.markManualDriveBackupSucceeded();
       if (mounted) {
         ScaffoldMessenger.of(context).showSnackBar(
-          SnackBar(content: Text(id != null ? 'Uploaded to Google Drive' : 'Google Drive backup failed')),
+          SnackBar(content: Text('Uploaded to Google Drive: ${info.name}')),
         );
       }
     } catch (e) {
@@ -453,18 +601,12 @@ class _BackupScreenState extends State<BackupScreen> {
     _load();
   }
 
-  /// "Restore Backup" under Google Drive Backup (spec: "google driver
-  /// backup la extra oru button create pannu athu restore backup nu name
-  /// vai atha click panna earkanavey back up aana file automatically
-  /// restore aakanum oruvela earkanavey backup pannalana inform pannanum
-  /// and login pannalana intimation pannanum") - three cases, in order:
-  /// (1) not signed in to Google Drive -> intimation dialog offering to
-  /// connect first, nothing restored yet; (2) signed in but the Drive
-  /// backup folder has no file yet -> plain "no backup found" info dialog;
-  /// (3) a backup file exists -> confirm (showing which file/date, and the
-  /// same overwrite warning as every other restore path here), then
-  /// download + restore it automatically.
-  Future<void> _restoreFromDrive() async {
+  /// "Restore Backup" under Google Drive Backup (spec item 8: a full
+  /// Restore Screen listing every daily backup, not just silently grabbing
+  /// the latest one) - offers to connect first if Drive isn't linked yet
+  /// (spec: "login pannalana intimation pannanum"), otherwise opens
+  /// [GoogleDriveRestoreScreen].
+  Future<void> _openRestoreScreen() async {
     if (!_driveLinked) {
       if (!mounted) return;
       final connect = await showDialog<bool>(
@@ -483,61 +625,9 @@ class _BackupScreenState extends State<BackupScreen> {
       if (connect == true) await _linkDrive();
       return;
     }
-
-    setState(() => _working = true);
-    DriveBackupFileInfo? file;
-    try {
-      file = await _backupService.findLatestGoogleDriveBackup();
-    } catch (e) {
-      if (mounted) setState(() => _working = false);
-      _showError('Could not check Google Drive', e);
-      return;
-    }
-    if (mounted) setState(() => _working = false);
-
-    if (file == null) {
-      if (!mounted) return;
-      await showDialog<void>(
-        context: context,
-        builder: (context) => AlertDialog(
-          title: const Text('No Backup Found'),
-          content: const Text(
-            'There is no backup file in your Google Drive yet. Tap "Backup to Drive" above first to create one - after that, "Restore Backup" will be able to restore from it.',
-          ),
-          actions: [TextButton(onPressed: () => Navigator.pop(context), child: const Text('OK'))],
-        ),
-      );
-      return;
-    }
-
     if (!mounted) return;
-    final modified = file.modifiedTime;
-    final confirm = await showDialog<bool>(
-      context: context,
-      builder: (context) => AlertDialog(
-        title: const Text('Restore from Google Drive?'),
-        content: Text(
-          'This will download "${file!.name}"${modified != null ? ' (last updated ${formatDateTime(modified)})' : ''} from Google Drive and replace your current data with it. The app must be restarted after restoring.',
-        ),
-        actions: [
-          TextButton(onPressed: () => Navigator.pop(context, false), child: const Text('Cancel')),
-          ElevatedButton(onPressed: () => Navigator.pop(context, true), child: const Text('Restore')),
-        ],
-      ),
-    );
-    if (confirm != true) return;
-
-    setState(() => _working = true);
-    try {
-      await _backupService.restoreFromGoogleDriveFile(file);
-      if (mounted) {
-        ScaffoldMessenger.of(context).showSnackBar(const SnackBar(content: Text('Restored from Google Drive. Please close and reopen the app.')));
-      }
-    } catch (e) {
-      _showError('Restore from Google Drive failed', e);
-    } finally {
-      if (mounted) setState(() => _working = false);
-    }
+    await Navigator.push(context, MaterialPageRoute(builder: (_) => const GoogleDriveRestoreScreen()));
+    _load();
   }
 
   Future<void> _restore(File file) async {

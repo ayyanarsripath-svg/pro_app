@@ -13,7 +13,7 @@ class DatabaseHelper {
   static final DatabaseHelper instance = DatabaseHelper._internal();
 
   static Database? _db;
-  static const int dbVersion = 7;
+  static const int dbVersion = 8;
   static const String dbFileName = 'professional_mobiles.db';
 
   Future<Database> get database async {
@@ -91,6 +91,26 @@ class DatabaseHelper {
     if (oldVersion < 7) {
       await db.execute('ALTER TABLE sales_bills ADD COLUMN warranty INTEGER NOT NULL DEFAULT 0');
       await db.execute('ALTER TABLE sales_bills ADD COLUMN warranty_period_days INTEGER');
+    }
+    // Daily Google Drive backup rewrite (2026-08, see BackupService's class
+    // doc comment) - the `backups` table used to only ever describe a
+    // manual local copy or a one-file-per-month Drive upload (file_path
+    // held either a local path or a bare Drive fileId, everything else
+    // about the upload lived only in Settings). Every automatic/manual
+    // Drive backup now gets a NEW independent file every time, so this
+    // history row needs to be able to stand entirely on its own - exactly
+    // which Drive fileId it is, how big it was, its checksum, which device
+    // made it, and enough version metadata to judge restore compatibility
+    // later - without depending on Settings (which only ever remembers the
+    // MOST RECENT backup) still agreeing with what an old row says.
+    if (oldVersion < 8) {
+      await db.execute('ALTER TABLE backups ADD COLUMN file_id TEXT');
+      await db.execute('ALTER TABLE backups ADD COLUMN file_size INTEGER');
+      await db.execute('ALTER TABLE backups ADD COLUMN checksum TEXT');
+      await db.execute('ALTER TABLE backups ADD COLUMN device_backup_id TEXT');
+      await db.execute('ALTER TABLE backups ADD COLUMN app_version TEXT');
+      await db.execute('ALTER TABLE backups ADD COLUMN schema_version INTEGER');
+      await db.execute('ALTER TABLE backups ADD COLUMN backup_format_version INTEGER');
     }
   }
 
@@ -541,10 +561,20 @@ class DatabaseHelper {
       CREATE TABLE backups (
         id TEXT PRIMARY KEY,
         backup_date TEXT NOT NULL,
-        type TEXT NOT NULL, -- manual | google_drive
+        type TEXT NOT NULL, -- manual | google_drive | google_drive_restore
         file_path TEXT,
         status TEXT NOT NULL DEFAULT 'success',
-        notes TEXT
+        notes TEXT,
+        -- Daily Google Drive backup rewrite (2026-08) - see _onUpgrade
+        -- oldVersion < 8 above for why a Drive backup row needs to be able
+        -- to fully describe itself instead of relying on Settings.
+        file_id TEXT,
+        file_size INTEGER,
+        checksum TEXT,
+        device_backup_id TEXT,
+        app_version TEXT,
+        schema_version INTEGER,
+        backup_format_version INTEGER
       )
     ''');
 

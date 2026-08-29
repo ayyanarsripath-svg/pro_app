@@ -130,6 +130,15 @@ jobs:
               # to a normal notification - a normal <uses-permission>, not
               # one the user is ever prompted for.
               '    <uses-permission android:name="android.permission.USE_FULL_SCREEN_INTENT"/>',
+              # Daily Google Drive backup rewrite (2026-08) - the exact
+              # ~10 PM backup alarm (android_alarm_manager_plus, see
+              # background_tasks.dart's scheduleDailyBackupAlarm) needs
+              # WAKE_LOCK to actually wake the device and keep it awake
+              # long enough to run the Drive upload from a `wakeup: true`
+              # alarm, same as RECEIVE_BOOT_COMPLETED/SCHEDULE_EXACT_ALARM
+              # above already cover for the Daily Order alarm. Not a
+              # runtime-prompted permission.
+              '    <uses-permission android:name="android.permission.WAKE_LOCK"/>',
           ]
           to_add = [line for line in needed if line.split('"')[1] not in content]
 
