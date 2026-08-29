@@ -115,7 +115,7 @@ dependencies:
   # "each backup must contain metadata: App version...") so an old backup
   # restored on a much newer/older app build can be told apart from a
   # schema/format problem.
-  package_info_plus: ^8.0.2
+     package_info_plus: ^10.2.1
 
   # Exact ~10 PM daily trigger for the Google Drive backup (spec: "Use
   # Android AlarmManager / exact alarm where permitted. Do not depend only
