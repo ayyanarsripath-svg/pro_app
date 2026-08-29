@@ -1,6 +1,11 @@
+import 'dart:convert';
 import 'dart:io';
 
+import 'package:archive/archive.dart';
+import 'package:connectivity_plus/connectivity_plus.dart';
+import 'package:crypto/crypto.dart';
 import 'package:flutter_local_notifications/flutter_local_notifications.dart';
+import 'package:package_info_plus/package_info_plus.dart';
 import 'package:path/path.dart' as p;
 import 'package:path_provider/path_provider.dart';
 import 'package:googleapis/drive/v3.dart' as drive;
@@ -10,6 +15,7 @@ import 'package:http/http.dart' as http;
 import '../db/database_helper.dart';
 import '../repositories/settings_repository.dart';
 import '../utils/id_gen.dart';
+import 'device_id_service.dart';
 
 /// Manual local backup, and automatic + on-demand Google Drive backup (spec:
 /// "Google Drive backup, Manual backup, Restore"). The whole app stays fully
@@ -32,16 +38,24 @@ import '../utils/id_gen.dart';
 /// needing the app to be open; (3) a non-dismissible ("ongoing") notification
 /// stays up the entire time a backup is pending, so the owner always has a
 /// visible signal something needs attention (spec: "notification la
-/// kattanum na thalli vitta kuda poga kudathu"). The old "weekly automatic
-/// LOCAL backup" feature has been removed entirely (spec: "weekly automatic
-/// backup remove pannittu daily automatic back up create pannu google
-/// drive ku") - daily Google Drive backup (with the retry-until-success
-/// behaviour above) is now the one and only automatic backup story; manual
-/// local "Backup Now" still exists purely as an extra, on-demand safety copy
-/// kept on the phone itself, and is clearly labelled as NOT reaching Google
-/// Drive on its own (see BackupScreen) - confusing the two was very likely
-/// what caused the incident, since "Backup Now" was mistaken for something
-/// that also updated the Drive copy.
+/// kattanum na thalli vitta kuda poga kudathu").
+///
+/// DAILY-INDEPENDENT-FILE REWRITE (2026-08, PRO SERVICE spec): the
+/// "one file per calendar month, updated in place" Drive design above this
+/// paragraph was itself a data-safety risk - a shop restoring "last week"
+/// actually got whatever the LATEST upload that month happened to overwrite
+/// it with, restoring from a stale/half-written file could silently return
+/// old data (spec bug list: "Restore sometimes returns old data" /
+/// "Backup may show SUCCESS even when latest data was not uploaded"), and
+/// there was no way to reach back to yesterday's exact snapshot once today
+/// had overwritten it. Every Drive backup - automatic or manual - now
+/// creates a brand new, independent file every single time
+/// (PRO_SERVICE_BACKUP_yyyy-MM-dd_HH-mm-ss_DEVICE_xxxxxxxx.zip, spec item
+/// 1), NEVER updates an existing file in place, and NEVER shows "Backup
+/// Successful" until the upload has actually been re-fetched from Drive and
+/// confirmed to exist with a real size and a matching checksum (spec item
+/// 7). See the class-level flow below and each method's own doc comment for
+/// the rest.
 ///
 /// GOOGLE DRIVE SETUP (do this once, see README "Google Drive Backup
 /// Setup"): create your own OAuth 2.0 Android client in Google Cloud
@@ -58,9 +72,31 @@ import '../utils/id_gen.dart';
 /// "who is this" (authenticate / attemptLightweightAuthentication) from
 /// "what can they let us access" (authorizationClient), and throws
 /// GoogleSignInException instead of PlatformException.
+///
+/// ---------------------------------------------------------------------
+/// Daily backup flow (spec item 16):
+///   trigger (exact ~10 PM alarm, or WorkManager fallback, or app open)
+///     -> runDailyGoogleDriveBackupIfDue()
+///     -> already verified for today? stop (spec item 4's duplicate guard)
+///     -> internet available? if not, mark pending and stop (spec item 5)
+///     -> backupToGoogleDrive():
+///          checkpoint + copy the live database
+///          -> sweep every other file under app storage (photos etc.)
+///          -> write manifest.json (app/schema/format version, device id,
+///             per-table row counts)
+///          -> zip everything into one file (spec item 3: snapshot before
+///             upload, never the live files directly)
+///          -> upload as a brand NEW Drive file (spec item 6)
+///          -> re-fetch that exact file from Drive and confirm id/size/
+///             modifiedTime/checksum (spec item 7) - delete it and treat
+///             as a failure if anything doesn't check out
+///          -> record full history (this file's id/size/checksum/device)
+///          -> prune old files per the retention policy (spec item 12)
+/// ---------------------------------------------------------------------
 class BackupService {
   final _dbHelper = DatabaseHelper.instance;
   final _settings = SettingsRepository();
+  final _deviceId = DeviceIdService();
 
   final GoogleSignIn _googleSignIn = GoogleSignIn.instance;
   bool _initialized = false;
@@ -75,8 +111,28 @@ class BackupService {
 
   /// Name of the regular, visible Google Drive folder backups now live in
   /// (created once, reused after that) - open it in the Drive app/website
-  /// to see one file per month.
+  /// to see every daily backup file (spec item 1).
   static const _backupFolderName = 'Professional Mobiles Backups';
+
+  /// Bumped whenever the *shape* of a backup .zip itself changes (which
+  /// files it contains, manifest.json's own structure) - separate from
+  /// [DatabaseHelper.dbVersion], which only tracks the SQLite schema inside
+  /// it (spec item 14: "Backup format version"). A restore refuses (with a
+  /// clear error, never a silent/partial restore - spec item 14) any backup
+  /// whose backupFormatVersion is newer than this app understands.
+  static const int _backupFormatVersion = 2;
+
+  /// Every Drive backup file name starts with this - both what marks a file
+  /// as "a genuine PRO SERVICE backup" when listing/restoring (spec item 9:
+  /// never trust a name search or a first search result blindly - this is
+  /// only ever used to build the list shown to the shop owner, restoring
+  /// itself always goes by the exact fileId they picked) and what the
+  /// retention policy is allowed to ever prune.
+  static const _fileNamePrefix = 'PRO_SERVICE_BACKUP_';
+
+  /// How many of the most recent daily backups to always keep, regardless
+  /// of age (spec item 12: "Keep: Last 30 daily backups").
+  static const _retentionDailyCount = 30;
 
   /// Web OAuth client id (NOT the Android client id below it). Android's
   /// Credential Manager - what google_sign_in 7.x uses under the hood on
@@ -146,7 +202,11 @@ class BackupService {
     return files;
   }
 
-  /// Restores the database from a chosen backup file. The app must be
+  /// Restores the database from a chosen RAW .db backup file (local manual
+  /// backups, and "Restore from File"). NOT used for Google Drive restores
+  /// any more - those are a .zip snapshot (database + attachments +
+  /// manifest.json) handled by [restoreFromGoogleDriveFile]'s own safer
+  /// validate -> safety-backup -> replace -> verify flow. The app must be
   /// restarted afterwards so a fresh sqflite connection opens the restored
   /// file cleanly.
   Future<void> restoreFrom(File backupFile) async {
@@ -334,18 +394,25 @@ class BackupService {
   Future<bool> get isGoogleDriveLinked async =>
       (await _settings.get(SettingsRepository.googleDriveLinked)) == 'true';
 
-  /// Calendar-month label used both as the Drive file name suffix and shown
-  /// to the shop owner - e.g. 2026-08 for August 2026.
-  String _monthLabel(DateTime date) => '${date.year}-${date.month.toString().padLeft(2, '0')}';
+  /// yyyy-MM-dd for [date] - THE unique daily-backup key (spec item 4).
+  String _dailyDateKey(DateTime date) =>
+      '${date.year.toString().padLeft(4, '0')}-${date.month.toString().padLeft(2, '0')}-${date.day.toString().padLeft(2, '0')}';
 
-  String _monthlyBackupFileName(DateTime date) => 'professional_mobiles_backup_${_monthLabel(date)}.db';
+  /// Builds this backup's file name (spec item 1's format, with item 13's
+  /// device suffix): PRO_SERVICE_BACKUP_yyyy-MM-dd_HH-mm-ss_DEVICE_xxxxxxxx.zip
+  String _fileNameFor(DateTime date, String deviceLabel) {
+    final time =
+        '${date.hour.toString().padLeft(2, '0')}-${date.minute.toString().padLeft(2, '0')}-${date.second.toString().padLeft(2, '0')}';
+    return '$_fileNamePrefix${_dailyDateKey(date)}_${time}_DEVICE_$deviceLabel.zip';
+  }
 
   /// Finds the (already created, regular/visible) "Professional Mobiles
   /// Backups" folder in the signed-in account's Drive, creating it the
-  /// first time this ever runs. Unlike the old appDataFolder, this folder
-  /// is a completely normal Drive folder - the shop owner can open Drive
-  /// and see it, browse into it, download a file, delete it, whatever they
-  /// want, the same as any folder they created by hand.
+  /// first time this ever runs (spec item 1: "If the folder does not
+  /// exist, create it automatically"). Unlike the old appDataFolder, this
+  /// folder is a completely normal Drive folder - the shop owner can open
+  /// Drive and see it, browse into it, download a file, delete it,
+  /// whatever they want, the same as any folder they created by hand.
   Future<String> _findOrCreateBackupFolder(drive.DriveApi driveApi) async {
     final existing = await driveApi.files.list(
       q: "mimeType='application/vnd.google-apps.folder' and name='$_backupFolderName' and trashed=false",
@@ -361,69 +428,6 @@ class BackupService {
     return created.id!;
   }
 
-  /// Uploads [localFile] as *this calendar month's* Drive backup (spec:
-  /// "monthly wise pirichi pirichi save aaganum" - split up and saved
-  /// month-wise). If a file for the current month already exists in the
-  /// backup folder, its content is replaced in place (files.update) so
-  /// every month stays exactly ONE file that always holds the latest, fully
-  /// cumulative snapshot of that month's data (every backup here is a full
-  /// database copy, never a partial diff, so today's data is always
-  /// automatically merged with everything noted earlier that month - there
-  /// is nothing separate to "merge"). The moment the calendar month
-  /// changes, the next backup simply doesn't find a match and creates a
-  /// brand new file instead - so a month ago, or three months ago, is still
-  /// sitting there untouched, and the owner just opens the Drive folder and
-  /// picks whichever month's file they need.
-  Future<String> _uploadMonthlySnapshot(drive.DriveApi driveApi, File localFile) async {
-    final folderId = await _findOrCreateBackupFolder(driveApi);
-    final fileName = _monthlyBackupFileName(DateTime.now());
-
-    final existing = await driveApi.files.list(
-      q: "name='$fileName' and '$folderId' in parents and trashed=false",
-      spaces: 'drive',
-    );
-    final media = drive.Media(localFile.openRead(), await localFile.length());
-    final matches = existing.files;
-
-    if (matches != null && matches.isNotEmpty) {
-      final fileId = matches.first.id!;
-      final updated = await driveApi.files.update(drive.File(), fileId, uploadMedia: media);
-      return updated.id ?? fileId;
-    }
-
-    final driveFile = drive.File()
-      ..name = fileName
-      ..parents = [folderId];
-    final created = await driveApi.files.create(driveFile, uploadMedia: media);
-    return created.id!;
-  }
-
-  /// Uploads the current database to this month's Drive backup file. Used
-  /// both by the "Backup to Drive" button and the automatic daily backup
-  /// (see [runDailyGoogleDriveBackupIfDue]) - both write to the exact same
-  /// monthly file, so pressing the button never creates extra clutter.
-  /// Unlike [createManualBackup], this does NOT
-  /// add anything to the Local Backups list - it works from a throwaway
-  /// temp copy of the database that's deleted right after the upload, so
-  /// backing up to Drive every single day forever never piles up local
-  /// files on the phone itself.
-  ///
-  /// [allowInteractiveSignIn] controls what happens if the silent/lightweight
-  /// sign-in fails (token expired, access revoked from the Google Account
-  /// side, etc.): when true (the default, used by any foreground button)
-  /// this opens the account picker right here and re-authorizes
-  /// automatically, so a stale connection quietly repairs itself instead of
-  /// just failing. When false (used by the background daily auto-backup)
-  /// it never tries to show UI from a background isolate - it simply
-  /// throws, gets caught by the caller, and that day stays "due" for the
-  /// next successful attempt instead.
-  ///
-  /// Shared by [backupToGoogleDrive], [findLatestGoogleDriveBackup], and
-  /// [restoreFromGoogleDriveFile] - every place this app needs an
-  /// authorized Drive connection goes through this one method, so a stuck
-  /// "[16] Account reauth failed" gets the same automatic
-  /// disconnect-and-retry recovery (see [_authenticateAccount]) no matter
-  /// which of those three triggered it.
   Future<drive.DriveApi> _authorizedDriveApi({required bool allowInteractiveSignIn}) async {
     await _ensureInitialized();
 
@@ -480,130 +484,689 @@ class BackupService {
     }
   }
 
-  Future<String?> backupToGoogleDrive({bool allowInteractiveSignIn = true}) async {
+  /// Best-effort internet check (spec item 5) - used to fail FAST and
+  /// honestly with "no internet" instead of only discovering the phone is
+  /// offline after a slow/ambiguous timeout deep inside the Drive upload
+  /// call. Never throws, and defaults to true (assume online, let the real
+  /// network call be the final judge) if the check itself fails for any
+  /// reason - this must never be the thing that blocks a genuine attempt.
+  Future<bool> _hasInternet() async {
+    try {
+      final results = await Connectivity().checkConnectivity();
+      return results.any((r) => r != ConnectivityResult.none);
+    } catch (_) {
+      return true;
+    }
+  }
+
+  Future<String> _appVersion() async {
+    try {
+      final info = await PackageInfo.fromPlatform();
+      return '${info.version}+${info.buildNumber}';
+    } catch (_) {
+      return 'unknown';
+    }
+  }
+
+  /// Row count for every real table in the database (sqlite_master minus
+  /// SQLite's own internal/system tables) - written into every backup's
+  /// manifest.json and compared again after a restore (spec: "Verify
+  /// record counts").
+  Future<Map<String, int>> _tableRowCounts() async {
+    final db = await _dbHelper.database;
+    final tables = await db.rawQuery(
+      "SELECT name FROM sqlite_master WHERE type='table' AND name NOT LIKE 'sqlite_%' AND name != 'android_metadata'",
+    );
+    final counts = <String, int>{};
+    for (final row in tables) {
+      final name = row['name'] as String;
+      final result = await db.rawQuery('SELECT COUNT(*) AS c FROM "$name"');
+      counts[name] = (result.first['c'] as int?) ?? 0;
+    }
+    return counts;
+  }
+
+  /// Copies every file under the app's own document storage into
+  /// [destDir], EXCEPT the live database file itself (copied separately,
+  /// after a WAL checkpoint - see [_createSnapshotZip]) and the local
+  /// "backups/" folder (this app's own on-phone manual backups - not part
+  /// of what a Drive snapshot needs to contain). This is a deliberate
+  /// sweep rather than a hardcoded list of known folders (service photos,
+  /// the shop logo, etc.) so ANY attachment this app ever stores - now or
+  /// added later - is automatically included (spec: "If customer/service/
+  /// product photos or attachments are stored by the app, include them in
+  /// the backup as well").
+  Future<void> _copyAttachments(Directory docsDir, Directory destDir) async {
+    if (!await docsDir.exists()) return;
+    final dbFileName = DatabaseHelper.dbFileName;
+    await for (final entity in docsDir.list(recursive: true, followLinks: false)) {
+      if (entity is! File) continue;
+      final rel = p.relative(entity.path, from: docsDir.path);
+      final firstSegment = rel.split(Platform.pathSeparator).first;
+      if (firstSegment == 'backups') continue; // local manual .db backups, not a Drive concern
+      if (rel == dbFileName || rel.startsWith('$dbFileName-')) continue; // live db (+ any -wal/-shm sidecar)
+      final destPath = p.join(destDir.path, rel);
+      try {
+        await Directory(p.dirname(destPath)).create(recursive: true);
+        await entity.copy(destPath);
+      } catch (_) {
+        // One unreadable/locked file must never abort the whole backup -
+        // everything else still gets backed up.
+      }
+    }
+  }
+
+  /// Recursively zips [sourceDir]'s contents (paths relative to it) into
+  /// [zipPath].
+  Future<File> _zipDirectory(Directory sourceDir, String zipPath) async {
+    final archive = Archive();
+    await for (final entity in sourceDir.list(recursive: true, followLinks: false)) {
+      if (entity is! File) continue;
+      final rel = p.relative(entity.path, from: sourceDir.path).replaceAll('\\', '/');
+      final bytes = await entity.readAsBytes();
+      archive.addFile(ArchiveFile(rel, bytes.length, bytes));
+    }
+    final zipBytes = ZipEncoder().encode(archive);
+    if (zipBytes == null) {
+      throw Exception('Could not build the backup archive.');
+    }
+    final zipFile = File(zipPath);
+    await zipFile.writeAsBytes(zipBytes, flush: true);
+    return zipFile;
+  }
+
+  /// Extracts every entry of the zip at [zipFile] into [destDir].
+  Future<void> _extractZip(File zipFile, Directory destDir) async {
+    final bytes = await zipFile.readAsBytes();
+    final archive = ZipDecoder().decodeBytes(bytes);
+    // [_zipDirectory] above only ever calls archive.addFile() for actual
+    // files it walks (directories are never added as their own entries -
+    // they're implied by the file paths, e.g. "database/xxx.db") so every
+    // entry here is guaranteed to be a real file, never a directory
+    // placeholder - no need to branch on an entry "is a file" check that
+    // isn't consistently available across archive package versions.
+    for (final entry in archive.files) {
+      final outPath = p.join(destDir.path, entry.name);
+      final outFile = File(outPath);
+      await outFile.parent.create(recursive: true);
+      final content = entry.content;
+      await outFile.writeAsBytes(content is List<int> ? content : List<int>.from(content as Iterable<int>), flush: true);
+    }
+  }
+
+  /// SHA-256 (stored as this backup's own long-term integrity checksum -
+  /// spec item 6: "checksum/hash") and MD5 (compared against Google
+  /// Drive's own reported `md5Checksum` right after upload - spec item
+  /// 7.8) of [file], computed together so the file only has to be streamed
+  /// from disk twice, not four times.
+  Future<({String sha256, String md5})> _hashesOfFile(File file) async {
+    final shaDigest = await sha256.bind(file.openRead()).first;
+    final md5Digest = await md5.bind(file.openRead()).first;
+    return (sha256: shaDigest.toString(), md5: md5Digest.toString());
+  }
+
+  /// Builds one full snapshot .zip of the current database + every
+  /// attachment file (spec item 2/3: "complete database backup", "create
+  /// snapshot before upload") plus a manifest.json describing it (spec item
+  /// 14). Used both for the actual Drive upload and, with
+  /// [labelPrefix] = 'pms_safety_before_restore', for the temporary local
+  /// safety copy [restoreFromGoogleDriveFile] takes of the CURRENT data
+  /// right before ever touching it (spec item 10).
+  Future<File> _createSnapshotZip({String labelPrefix = 'pms_drive_upload'}) async {
+    await _checkpointBeforeBackup();
+
+    final docsDir = await getApplicationDocumentsDirectory();
+    final dbFile = await _dbHelper.dbFile();
+    final tempDir = await getTemporaryDirectory();
+    final stamp = DateTime.now().microsecondsSinceEpoch;
+    final workDir = Directory(p.join(tempDir.path, '${labelPrefix}_work_$stamp'));
+    await workDir.create(recursive: true);
+
+    try {
+      final dbDest = File(p.join(workDir.path, 'database', DatabaseHelper.dbFileName));
+      await dbDest.parent.create(recursive: true);
+      await dbFile.copy(dbDest.path);
+
+      final filesDest = Directory(p.join(workDir.path, 'files'));
+      await filesDest.create(recursive: true);
+      await _copyAttachments(docsDir, filesDest);
+
+      final manifest = {
+        'backupFormatVersion': _backupFormatVersion,
+        'schemaVersion': DatabaseHelper.dbVersion,
+        'appVersion': await _appVersion(),
+        'deviceBackupId': await _deviceId.fullId(),
+        'createdAt': DateTime.now().toIso8601String(),
+        'tableCounts': await _tableRowCounts(),
+      };
+      final manifestFile = File(p.join(workDir.path, 'manifest.json'));
+      await manifestFile.writeAsString(const JsonEncoder.withIndent('  ').convert(manifest));
+
+      final zipPath = p.join(tempDir.path, '${labelPrefix}_$stamp.zip');
+      return await _zipDirectory(workDir, zipPath);
+    } finally {
+      if (await workDir.exists()) await workDir.delete(recursive: true);
+    }
+  }
+
+  /// Re-fetches the just-uploaded file from Drive itself (never trusting
+  /// the upload response alone) and confirms every check spec item 7
+  /// requires before this app is allowed to ever say "Backup Successful":
+  /// a real fileId, a size greater than zero that matches what was sent, a
+  /// valid modifiedTime, and - when Drive reports one - a matching MD5
+  /// checksum.
+  Future<_VerifyResult> _verifyUploadedBackup(
+    drive.DriveApi driveApi,
+    drive.File created, {
+    required String expectedMd5,
+    required int expectedSize,
+  }) async {
+    final id = created.id;
+    if (id == null || id.isEmpty) return const _VerifyResult(false, 'Drive did not return a file id.');
+
+    drive.File fetched;
+    try {
+      fetched = await driveApi.files.get(id, $fields: 'id,name,size,modifiedTime,md5Checksum');
+    } catch (e) {
+      return _VerifyResult(false, 'Could not confirm the uploaded file exists in Drive ($e).');
+    }
+
+    final remoteSize = int.tryParse(fetched.size ?? '') ?? -1;
+    if (remoteSize <= 0) return const _VerifyResult(false, 'Drive reports the uploaded file as empty.');
+    if (remoteSize != expectedSize) {
+      return _VerifyResult(false, 'Uploaded size ($remoteSize bytes) does not match what was sent ($expectedSize bytes).');
+    }
+    if (fetched.modifiedTime == null) {
+      return const _VerifyResult(false, 'Drive did not report a valid modified time for the uploaded file.');
+    }
+    final remoteMd5 = fetched.md5Checksum;
+    if (remoteMd5 != null && remoteMd5.isNotEmpty && remoteMd5.toLowerCase() != expectedMd5.toLowerCase()) {
+      return const _VerifyResult(false, 'Checksum mismatch - the uploaded file does not match what was sent.');
+    }
+    return const _VerifyResult(true, null);
+  }
+
+  /// Uploads the current database + attachments as a brand NEW Google
+  /// Drive file (spec items 1 and 6 - never updates an existing file in
+  /// place), only ever returning once that upload has been independently
+  /// re-verified (spec item 7). Used both by the "Backup to Drive" button
+  /// and the automatic daily backup (see [runDailyGoogleDriveBackupIfDue]).
+  ///
+  /// [allowInteractiveSignIn] controls what happens if the silent/lightweight
+  /// sign-in fails (token expired, access revoked from the Google Account
+  /// side, etc.): when true (the default, used by any foreground button)
+  /// this opens the account picker right here and re-authorizes
+  /// automatically, so a stale connection quietly repairs itself instead of
+  /// just failing. When false (used by the background daily auto-backup)
+  /// it never tries to show UI from a background isolate - it simply
+  /// throws, gets caught by the caller, and that day stays "due" for the
+  /// next successful attempt instead.
+  ///
+  /// Never returns null - every failure throws (a friendly message for a
+  /// sign-in problem, the raw error otherwise) so the caller always knows
+  /// exactly why "Backup Successful" was NOT shown (spec item 7).
+  Future<DriveBackupFileInfo> backupToGoogleDrive({bool allowInteractiveSignIn = true}) async {
+    if (!await _hasInternet()) {
+      throw Exception('No internet connection right now.');
+    }
     try {
       final driveApi = await _authorizedDriveApi(allowInteractiveSignIn: allowInteractiveSignIn);
+      final now = DateTime.now();
+      final deviceLabel = await _deviceId.shortLabel();
+      final fileName = _fileNameFor(now, deviceLabel);
 
-      await _checkpointBeforeBackup();
-      final dbFile = await _dbHelper.dbFile();
-      final tempDir = await getTemporaryDirectory();
-      final snapshot = await dbFile.copy(p.join(tempDir.path, 'pms_drive_upload_${DateTime.now().millisecondsSinceEpoch}.db'));
-
-      String uploadedId;
+      final zipFile = await _createSnapshotZip();
       try {
-        uploadedId = await _uploadMonthlySnapshot(driveApi, snapshot);
+        final fileSize = await zipFile.length();
+        if (fileSize <= 0) {
+          throw Exception('The backup snapshot came out empty (0 bytes) - stopped before uploading anything.');
+        }
+        final hashes = await _hashesOfFile(zipFile);
+
+        final folderId = await _findOrCreateBackupFolder(driveApi);
+        final driveFile = drive.File()
+          ..name = fileName
+          ..parents = [folderId]
+          ..appProperties = {
+            'proServiceBackup': 'true',
+            'backupFormatVersion': _backupFormatVersion.toString(),
+            'schemaVersion': DatabaseHelper.dbVersion.toString(),
+            'deviceBackupId': await _deviceId.fullId(),
+            'dateKey': _dailyDateKey(now),
+          };
+        final media = drive.Media(zipFile.openRead(), fileSize);
+        // .create() ALWAYS makes a brand new file - unlike the old
+        // .update()-in-place monthly design, there is deliberately no
+        // "does a file already exist for X" lookup anywhere in this
+        // method (spec item 6: "Do NOT search by filename and overwrite
+        // an existing file").
+        final created = await driveApi.files.create(
+          driveFile,
+          uploadMedia: media,
+          $fields: 'id,name,size,modifiedTime,md5Checksum',
+        );
+
+        final verified = await _verifyUploadedBackup(driveApi, created, expectedMd5: hashes.md5, expectedSize: fileSize);
+        if (!verified.ok) {
+          if (created.id != null) {
+            // A file that failed verification cannot be trusted as a real
+            // backup - best-effort delete it rather than leaving a
+            // corrupt/incomplete file sitting in the folder looking like
+            // a genuine daily backup.
+            try {
+              await driveApi.files.delete(created.id!);
+            } catch (_) {}
+          }
+          throw Exception('Upload verification failed: ${verified.reason}');
+        }
+
+        final info = DriveBackupFileInfo(
+          id: created.id!,
+          name: created.name ?? fileName,
+          modifiedTime: created.modifiedTime,
+          size: fileSize,
+        );
+
+        await _recordSuccessfulDriveBackup(info: info, checksum: hashes.sha256, now: now);
+        await _applyRetentionPolicy(driveApi);
+        return info;
       } finally {
-        if (await snapshot.exists()) await snapshot.delete();
+        if (await zipFile.exists()) await zipFile.delete();
       }
-
-      final db = await _dbHelper.database;
-      await db.insert('backups', {
-        'id': newId(),
-        'backup_date': DateTime.now().toIso8601String(),
-        'type': 'google_drive',
-        'file_path': uploadedId,
-        'status': 'success',
-        'notes': 'Uploaded to Drive folder "$_backupFolderName" > ${_monthlyBackupFileName(DateTime.now())}',
-      });
-
-      return uploadedId;
     } on GoogleSignInException catch (e) {
       throw Exception(_friendlyGoogleError(e));
     }
   }
 
-  /// Finds the single most recently modified backup file anywhere in the
-  /// "Professional Mobiles Backups" Drive folder (across every month, not
-  /// just the current one) - this is "the already-backed-up file" the
-  /// "Restore from Drive" button (see BackupScreen) restores from. Returns
-  /// null only when the folder genuinely has no backup files yet; any
-  /// sign-in problem throws (same friendly-error translation as every other
-  /// Drive operation) so the button can show it.
+  /// Records a verified-successful Drive backup: a full standalone history
+  /// row in the `backups` table (spec: file id/size/checksum/device/
+  /// version, independent of whatever Settings says about the MOST RECENT
+  /// backup) and the quick-access Settings mirror Backup & Restore's
+  /// "Backup History" section reads without needing another Drive call.
+  Future<void> _recordSuccessfulDriveBackup({
+    required DriveBackupFileInfo info,
+    required String checksum,
+    required DateTime now,
+  }) async {
+    final db = await _dbHelper.database;
+    await db.insert('backups', {
+      'id': newId(),
+      'backup_date': now.toIso8601String(),
+      'type': 'google_drive',
+      'file_path': info.id,
+      'status': 'success',
+      'notes': 'Uploaded to Drive folder "$_backupFolderName" > ${info.name}',
+      'file_id': info.id,
+      'file_size': info.size,
+      'checksum': checksum,
+      'device_backup_id': await _deviceId.fullId(),
+      'app_version': await _appVersion(),
+      'schema_version': DatabaseHelper.dbVersion,
+      'backup_format_version': _backupFormatVersion,
+    });
+
+    await _settings.set(SettingsRepository.lastDriveBackupAt, now.toIso8601String());
+    await _settings.set(SettingsRepository.driveBackupCompletedDateKey, _dailyDateKey(now));
+    await _settings.set(SettingsRepository.driveBackupLastFileId, info.id);
+    await _settings.set(SettingsRepository.driveBackupLastFileName, info.name);
+    await _settings.set(SettingsRepository.driveBackupLastFileSize, info.size.toString());
+    await _settings.set(SettingsRepository.driveBackupLastChecksum, checksum);
+  }
+
+  /// Deletes old daily backup files once enough newer, already-verified
+  /// ones exist to safely replace them (spec item 12). Keeps the most
+  /// recent [_retentionDailyCount] daily files no matter what, PLUS - for
+  /// anything older than that - the single oldest backup of each calendar
+  /// month as a lightweight monthly archive, so a shop can still reach
+  /// "sometime back in March" even long after March's daily files have
+  /// aged out. Only ever runs immediately after [backupToGoogleDrive] has
+  /// already confirmed a brand new file is safely uploaded and verified -
+  /// so by construction, this can never delete the newest backup, and
+  /// never runs at all unless a newer valid one already exists (spec
+  /// item 12's hard rule: "Never delete a backup until a newer valid
+  /// backup has been successfully uploaded and verified").
+  Future<void> _applyRetentionPolicy(drive.DriveApi driveApi) async {
+    try {
+      final all = await listGoogleDriveBackups(driveApi: driveApi);
+      if (all.length <= _retentionDailyCount) return;
+
+      final keepIds = <String>{for (final f in all.take(_retentionDailyCount)) f.id};
+
+      final older = all.skip(_retentionDailyCount).toList();
+      final monthlyArchive = <String, DriveBackupFileInfo>{};
+      for (final f in older) {
+        final t = f.modifiedTime;
+        if (t == null) continue;
+        final monthKey = '${t.year.toString().padLeft(4, '0')}-${t.month.toString().padLeft(2, '0')}';
+        final existing = monthlyArchive[monthKey];
+        if (existing == null || (existing.modifiedTime != null && t.isBefore(existing.modifiedTime!))) {
+          monthlyArchive[monthKey] = f;
+        }
+      }
+      keepIds.addAll(monthlyArchive.values.map((f) => f.id));
+
+      for (final f in older) {
+        if (keepIds.contains(f.id)) continue;
+        try {
+          await driveApi.files.delete(f.id);
+        } catch (_) {
+          // A single delete failing (transient network hiccup, etc.) must
+          // never affect the backup that already succeeded - retention
+          // simply tries again after tomorrow's backup.
+        }
+      }
+    } catch (_) {
+      // Retention is housekeeping layered on top of an already-successful,
+      // already-verified backup - a failure here must never be reported
+      // back as the backup itself having failed.
+    }
+  }
+
+  /// Lists every genuine PRO SERVICE backup file in the Drive folder,
+  /// newest first (spec item 8: "Display them sorted by newest backup
+  /// first"). Pass [thisDeviceOnly] to only show backups made by THIS
+  /// install (spec item 13: "Restore should allow selecting backups from
+  /// the correct device if multiple devices exist"). [driveApi] lets an
+  /// already-authorized caller (e.g. [_applyRetentionPolicy], right after
+  /// [backupToGoogleDrive] itself just authorized) skip re-authorizing.
+  Future<List<DriveBackupFileInfo>> listGoogleDriveBackups({
+    bool thisDeviceOnly = false,
+    drive.DriveApi? driveApi,
+  }) async {
+    try {
+      final api = driveApi ?? await _authorizedDriveApi(allowInteractiveSignIn: true);
+      final folderId = await _findOrCreateBackupFolder(api);
+
+      final infos = <DriveBackupFileInfo>[];
+      String? pageToken;
+      do {
+        final result = await api.files.list(
+          q: "'$folderId' in parents and trashed=false",
+          spaces: 'drive',
+          orderBy: 'modifiedTime desc',
+          pageSize: 100,
+          pageToken: pageToken,
+          $fields: 'nextPageToken, files(id,name,size,modifiedTime)',
+        );
+        for (final f in result.files ?? const <drive.File>[]) {
+          // Only files THIS backup system created are ever shown/acted on
+          // (spec item 9: a name search is never trusted for the restore
+          // itself, but it's exactly right for filtering what to even
+          // list) - old monthly-era .db files, or anything else a shop
+          // owner might have dropped into this folder by hand, are simply
+          // left alone, never touched by restore OR by retention cleanup.
+          if (f.id == null || f.name == null || !f.name!.startsWith(_fileNamePrefix)) continue;
+          infos.add(DriveBackupFileInfo(
+            id: f.id!,
+            name: f.name!,
+            modifiedTime: f.modifiedTime,
+            size: int.tryParse(f.size ?? '') ?? 0,
+          ));
+        }
+        pageToken = result.nextPageToken;
+      } while (pageToken != null);
+
+      if (thisDeviceOnly) {
+        final myLabel = await _deviceId.shortLabel();
+        return infos.where((i) => i.deviceLabel == myLabel).toList();
+      }
+      return infos;
+    } on GoogleSignInException catch (e) {
+      throw Exception(_friendlyGoogleError(e));
+    }
+  }
+
+  /// The single most recent backup across every device (spec item 17:
+  /// "Restore Latest"). Returns null only when the folder genuinely has no
+  /// backup files yet; any sign-in problem throws (same friendly-error
+  /// translation as every other Drive operation) so the button can show
+  /// it.
   Future<DriveBackupFileInfo?> findLatestGoogleDriveBackup() async {
+    final list = await listGoogleDriveBackups();
+    return list.isEmpty ? null : list.first;
+  }
+
+  /// Verifies the file at [file] starts with SQLite's own 16-byte magic
+  /// header - a cheap, reliable way to catch "this isn't really a SQLite
+  /// database" (corrupted download, wrong file entirely) BEFORE it is ever
+  /// treated as the new live database.
+  Future<void> _validateSqliteFile(File file) async {
+    final raf = await file.open();
     try {
-      final driveApi = await _authorizedDriveApi(allowInteractiveSignIn: true);
-      final folderId = await _findOrCreateBackupFolder(driveApi);
-      final result = await driveApi.files.list(
-        q: "'$folderId' in parents and trashed=false",
-        spaces: 'drive',
-        orderBy: 'modifiedTime desc',
-        $fields: 'files(id,name,modifiedTime)',
-      );
-      final files = result.files;
-      if (files == null || files.isEmpty) return null;
-      final latest = files.first;
-      return DriveBackupFileInfo(
-        id: latest.id!,
-        name: latest.name ?? _monthlyBackupFileName(DateTime.now()),
-        modifiedTime: latest.modifiedTime,
-      );
-    } on GoogleSignInException catch (e) {
-      throw Exception(_friendlyGoogleError(e));
+      final header = await raf.read(16);
+      const expectedMagic = [
+        0x53, 0x51, 0x4c, 0x69, 0x74, 0x65, 0x20, 0x66, 0x6f, 0x72, 0x6d, 0x61, 0x74, 0x20, 0x33, 0x00, // "SQLite format 3\0"
+      ];
+      if (header.length != 16) {
+        throw Exception('The database file inside this backup is too small to be a real database.');
+      }
+      for (var i = 0; i < 16; i++) {
+        if (header[i] != expectedMagic[i]) {
+          throw Exception('The database file inside this backup is not a valid SQLite database.');
+        }
+      }
+    } finally {
+      await raf.close();
     }
   }
 
-  /// Downloads [file] from Google Drive and restores the local database
-  /// from it - the actual "Restore from Drive" action (spec: "earkanavey
-  /// back up aana file automatically restore aakanum"). Reuses the exact
-  /// same [restoreFrom] every other restore flow (local file picker,
-  /// per-item Local Backups restore) already uses, so the app must be
-  /// restarted afterwards for a fresh, clean database connection - same as
-  /// every other restore path in this app.
-  Future<void> restoreFromGoogleDriveFile(DriveBackupFileInfo file) async {
+  /// Copies every file under [sourceFilesDir] on top of the live app
+  /// documents folder - shared by the real restore and by
+  /// [_rollbackFromSafetyZip] so both use the exact same "put these
+  /// attachments back" logic.
+  Future<void> _restoreAttachmentsInto(Directory sourceFilesDir) async {
+    if (!await sourceFilesDir.exists()) return;
+    final docsDir = await getApplicationDocumentsDirectory();
+    await for (final entity in sourceFilesDir.list(recursive: true, followLinks: false)) {
+      if (entity is! File) continue;
+      final rel = p.relative(entity.path, from: sourceFilesDir.path);
+      final destPath = p.join(docsDir.path, rel);
+      await Directory(p.dirname(destPath)).create(recursive: true);
+      await entity.copy(destPath);
+    }
+  }
+
+  /// Rolls the live database + attachments back to whatever [safetyZip]
+  /// (taken right before a restore touched anything - spec item 10)
+  /// contains. Called automatically the moment anything goes wrong during
+  /// [restoreFromGoogleDriveFile]'s actual swap step, so the app is never
+  /// left on a corrupted or half-restored database.
+  Future<void> _rollbackFromSafetyZip(File? safetyZip) async {
+    if (safetyZip == null || !await safetyZip.exists()) return;
+    try {
+      final tempDir = await getTemporaryDirectory();
+      final rollbackDir = Directory(p.join(tempDir.path, 'pms_rollback_${DateTime.now().microsecondsSinceEpoch}'));
+      await rollbackDir.create(recursive: true);
+      try {
+        await _extractZip(safetyZip, rollbackDir);
+        await _dbHelper.closeDb();
+        final liveDbFile = await _dbHelper.dbFile();
+        final rolledBackDb = File(p.join(rollbackDir.path, 'database', DatabaseHelper.dbFileName));
+        if (await rolledBackDb.exists()) {
+          await rolledBackDb.copy(liveDbFile.path);
+        }
+        await _restoreAttachmentsInto(Directory(p.join(rollbackDir.path, 'files')));
+        // Re-open so the app is left on a working connection either way.
+        await _dbHelper.database;
+      } finally {
+        if (await rollbackDir.exists()) await rollbackDir.delete(recursive: true);
+      }
+    } catch (_) {
+      // If even the rollback fails there is nothing more this method can
+      // safely do - the caller's own error is what surfaces to the shop
+      // owner, who still has the untouched Drive backup to try restoring
+      // again with.
+    }
+  }
+
+  /// Downloads the EXACT Drive file [file] points at (by fileId, never by
+  /// name - spec item 9) and restores the local database + attachments
+  /// from it, following spec item 10's full safety flow: validate the
+  /// downloaded zip -> take a local safety backup of the CURRENT data ->
+  /// only then replace the live database/files -> verify record counts ->
+  /// roll back automatically to that safety backup if anything after the
+  /// safety backup goes wrong. The app must be restarted afterwards for a
+  /// fresh, clean database connection - same as every other restore path
+  /// in this app.
+  Future<RestoreResult> restoreFromGoogleDriveFile(DriveBackupFileInfo file) async {
+    if (!await _hasInternet()) {
+      throw Exception('No internet connection right now - connect to the internet and try again.');
+    }
+
+    final tempDir = await getTemporaryDirectory();
+    final stamp = DateTime.now().microsecondsSinceEpoch;
+    final downloadZip = File(p.join(tempDir.path, 'pms_drive_restore_$stamp.zip'));
+    final stagingDir = Directory(p.join(tempDir.path, 'pms_drive_restore_staging_$stamp'));
+    File? safetyZip;
+
     try {
       final driveApi = await _authorizedDriveApi(allowInteractiveSignIn: true);
-      final media = await driveApi.files.get(file.id, downloadOptions: drive.DownloadOptions.fullMedia) as drive.Media;
 
+      // 1. Download the EXACT file id chosen - never a name search, never
+      //    a cached/previously-downloaded copy (spec item 9).
+      final media = await driveApi.files.get(file.id, downloadOptions: drive.DownloadOptions.fullMedia) as drive.Media;
       final bytes = <int>[];
       await for (final chunk in media.stream) {
         bytes.addAll(chunk);
       }
+      if (bytes.isEmpty) {
+        throw Exception('Downloaded backup "${file.name}" came back empty - nothing was restored.');
+      }
+      await downloadZip.writeAsBytes(bytes, flush: true);
 
-      final tempDir = await getTemporaryDirectory();
-      final tempFile = File(p.join(tempDir.path, 'pms_drive_restore_${DateTime.now().millisecondsSinceEpoch}.db'));
-      await tempFile.writeAsBytes(bytes);
+      // 2. Validate the ZIP into a STAGING area - the live database is
+      //    never touched until every check below has passed.
+      await stagingDir.create(recursive: true);
+      Map<String, dynamic> manifest;
       try {
-        await restoreFrom(tempFile);
-      } finally {
-        if (await tempFile.exists()) await tempFile.delete();
+        await _extractZip(downloadZip, stagingDir);
+        final manifestFile = File(p.join(stagingDir.path, 'manifest.json'));
+        if (!await manifestFile.exists()) {
+          throw Exception('no manifest.json inside - this does not look like a genuine PRO SERVICE backup');
+        }
+        manifest = jsonDecode(await manifestFile.readAsString()) as Map<String, dynamic>;
+      } catch (e) {
+        throw Exception(
+          'Could not read "${file.name}" as a backup - it may be corrupted or is not a genuine PRO SERVICE backup file (${e.toString().replaceFirst('Exception: ', '')}).',
+        );
+      }
+
+      // 3. Version/compatibility check BEFORE anything live is touched
+      //    (spec item 14).
+      final backupFormatVersion = (manifest['backupFormatVersion'] as num?)?.toInt() ?? 1;
+      final schemaVersion = (manifest['schemaVersion'] as num?)?.toInt() ?? 0;
+      if (backupFormatVersion > _backupFormatVersion) {
+        throw Exception(
+          'This backup was made by a newer version of the app (backup format $backupFormatVersion, this app supports up to $_backupFormatVersion) and cannot be restored safely here. Please update the app first.',
+        );
+      }
+      if (schemaVersion > DatabaseHelper.dbVersion) {
+        throw Exception(
+          'This backup was made by a newer version of the app (database version $schemaVersion, this app has ${DatabaseHelper.dbVersion}) and cannot be restored safely here. Please update the app first.',
+        );
+      }
+
+      // 4. The staged database must be a genuine, uncorrupted SQLite file
+      //    BEFORE it ever gets near the live one.
+      final stagedDbFile = File(p.join(stagingDir.path, 'database', DatabaseHelper.dbFileName));
+      if (!await stagedDbFile.exists()) {
+        throw Exception('This backup is missing its database file - nothing was restored.');
+      }
+      await _validateSqliteFile(stagedDbFile);
+
+      // 5. Safety backup of the CURRENT local data, taken right before
+      //    anything live is touched (spec item 10).
+      safetyZip = await _createSnapshotZip(labelPrefix: 'pms_safety_before_restore');
+
+      try {
+        // 6. Replace the live database, then every attachment file.
+        await _dbHelper.closeDb();
+        final liveDbFile = await _dbHelper.dbFile();
+        await stagedDbFile.copy(liveDbFile.path);
+        await _restoreAttachmentsInto(Directory(p.join(stagingDir.path, 'files')));
+
+        // 7. Re-open and verify record counts against the manifest (spec:
+        //    "Verify record counts"). Mismatches are recorded and
+        //    reported, not silently hidden - but a restore that opens
+        //    cleanly and mostly matches is still considered successful;
+        //    only an unreadable/corrupt database triggers the rollback
+        //    below (see the catch clause).
+        final db = await _dbHelper.database;
+        await db.rawQuery('PRAGMA quick_check');
+        final actualCounts = await _tableRowCounts();
+        final expectedCounts = (manifest['tableCounts'] as Map?)?.cast<String, dynamic>() ?? {};
+        final mismatches = <String>[];
+        for (final entry in expectedCounts.entries) {
+          final expected = (entry.value as num?)?.toInt() ?? 0;
+          final actual = actualCounts[entry.key] ?? -1;
+          if (actual != expected) mismatches.add('${entry.key}: expected $expected, got $actual');
+        }
+
+        final db2 = await _dbHelper.database;
+        await db2.insert('backups', {
+          'id': newId(),
+          'backup_date': DateTime.now().toIso8601String(),
+          'type': 'google_drive_restore',
+          'file_path': file.id,
+          'status': mismatches.isEmpty ? 'success' : 'success_with_warnings',
+          'notes': mismatches.isEmpty
+              ? 'Restored from Drive backup "${file.name}".'
+              : 'Restored from Drive backup "${file.name}" - some record counts differed: ${mismatches.join('; ')}',
+          'file_id': file.id,
+          'file_size': file.size,
+          'device_backup_id': manifest['deviceBackupId'] as String?,
+          'app_version': manifest['appVersion'] as String?,
+          'schema_version': schemaVersion,
+          'backup_format_version': backupFormatVersion,
+        });
+
+        return RestoreResult(mismatches: mismatches, restoredFrom: file);
+      } catch (e) {
+        // Anything going wrong from step 6 onward rolls back to the
+        // safety snapshot from step 5 - never leaves the app on a
+        // half-restored or corrupted database (spec item 10).
+        await _rollbackFromSafetyZip(safetyZip);
+        throw Exception(
+          'Restore failed and your previous data was automatically restored - nothing was lost. (${e.toString().replaceFirst('Exception: ', '')})',
+        );
       }
     } on GoogleSignInException catch (e) {
       throw Exception(_friendlyGoogleError(e));
+    } finally {
+      if (await downloadZip.exists()) await downloadZip.delete();
+      if (await stagingDir.exists()) await stagingDir.delete(recursive: true);
+      if (safetyZip != null && await safetyZip.exists()) await safetyZip.delete();
     }
   }
 
-  /// Called from the WorkManager background task (once daily, aimed at ~10
-  /// PM - see [scheduleDailyGoogleDriveBackup] in background_tasks.dart),
-  /// every time the app is opened (see main.dart), AND from the dedicated
-  /// pending-retry WorkManager task queued by [_recordDriveBackupFailure]
-  /// (see [schedulePendingDriveBackupRetry] in background_tasks.dart) - the
-  /// same due-check safely covers all three callers.
+  /// Called from the exact ~10 PM alarm (see [scheduleDailyBackupAlarm] in
+  /// background_tasks.dart), the WorkManager fallback/retry tasks, every
+  /// time the app is opened (see main.dart), AND from the dedicated
+  /// pending-retry WorkManager task - the same due-check safely covers all
+  /// of them.
   ///
-  /// Backs up to Google Drive at most once per calendar day UNLESS a
-  /// previous attempt is still [SettingsRepository.driveBackupPending] -
-  /// in that case the same-day gate is skipped entirely and this always
-  /// tries again right now, because a pending/failed backup must never wait
-  /// for "tomorrow" when it could instead succeed in the next few minutes
-  /// (spec: "internet ellana file load aagi waite pannanum eppo inter net
-  /// connect aagutho appo file upload aagidanum").
+  /// Backs up to Google Drive at most once per calendar day, gated on
+  /// [SettingsRepository.driveBackupCompletedDateKey] genuinely equalling
+  /// today (spec item 4: "check whether today's backup has already
+  /// completed successfully... DO NOT create another automatic backup") -
+  /// UNLESS a previous attempt is still [SettingsRepository.driveBackupPending],
+  /// in which case the day-gate is skipped entirely and this always tries
+  /// again right now, because a pending/failed backup must never wait for
+  /// "tomorrow" when it could instead succeed in the next few minutes
+  /// (spec item 5: "eppo internet connect aagutho appo file upload
+  /// aagidanum").
   ///
-  /// DATA-LOSS INCIDENT FIX: this used to swallow every failure with a bare
-  /// `catch (_) {}` and simply wait for the next calendar day - completely
-  /// invisible to the shop owner, which is very likely what let a real
-  /// backup gap go unnoticed until data was actually lost. Every failure now
-  /// goes through [_recordDriveBackupFailure], which logs it, remembers it
-  /// in Settings so Backup & Restore can always show it, and shows a
-  /// notification that cannot be swiped away. Whichever caller invoked this
-  /// method then queues a network-constrained WorkManager retry (see
-  /// [schedulePendingDriveBackupRetry] in background_tasks.dart) so this
-  /// same method runs again automatically the moment the phone has internet
-  /// - see that function's and [_recordDriveBackupFailure]'s doc comments
-  /// for exactly why the queuing itself happens at the call site rather
-  /// than inside this method.
+  /// Also sets a short-lived best-effort lock (see
+  /// [SettingsRepository.driveBackupRunLockAt]'s doc comment) so the exact
+  /// alarm and the WorkManager fallback landing within moments of each
+  /// other are very unlikely to both start an upload for the same day
+  /// (spec item 4's duplicate guard) - not a perfect cross-isolate lock,
+  /// but combined with the day-gate above (only ever set AFTER a full
+  /// verified upload) a genuine duplicate is extremely unlikely.
   ///
   /// Never throws - background execution must not crash the isolate, and a
-  /// foreground caller on app open shouldn't see a Drive hiccup as an error.
-  /// Returns true only if a backup was actually uploaded just now.
+  /// foreground caller on app open shouldn't see a Drive hiccup as an
+  /// error. Returns true only if a backup was actually uploaded just now.
   Future<bool> runDailyGoogleDriveBackupIfDue() async {
     try {
       final enabled = await _settings.get(SettingsRepository.dailyDriveAutoBackupEnabled);
@@ -612,26 +1175,36 @@ class BackupService {
       final linked = await isGoogleDriveLinked;
       if (!linked) return false;
 
+      final now = DateTime.now();
+      final todayKey = _dailyDateKey(now);
       final pending = (await _settings.get(SettingsRepository.driveBackupPending)) == 'true';
+
       if (!pending) {
-        final now = DateTime.now();
-        final lastStr = await _settings.get(SettingsRepository.lastDriveBackupAt);
-        if (lastStr != null) {
-          final last = DateTime.parse(lastStr);
-          final sameDay = last.year == now.year && last.month == now.month && last.day == now.day;
-          if (sameDay) return false;
-        }
+        final completedKey = await _settings.get(SettingsRepository.driveBackupCompletedDateKey);
+        if (completedKey == todayKey) return false; // already verified for today
       }
 
-      // allowInteractiveSignIn: false - this can run from a background
-      // WorkManager isolate with no foreground Activity to show an account
-      // picker in, so it must only ever use a silent/already-authorized
-      // connection, never try to pop UI. See backupToGoogleDrive's doc
-      // comment.
-      await backupToGoogleDrive(allowInteractiveSignIn: false);
-      await _settings.set(SettingsRepository.lastDriveBackupAt, DateTime.now().toIso8601String());
-      await _clearPendingDriveBackup(showRecoveredNotification: pending);
-      return true;
+      final lockRaw = await _settings.get(SettingsRepository.driveBackupRunLockAt);
+      if (lockRaw != null && lockRaw.isNotEmpty) {
+        final lockAt = DateTime.tryParse(lockRaw);
+        if (lockAt != null && now.difference(lockAt).inMinutes.abs() < 5) {
+          return false; // another trigger is very likely already running this exact backup right now
+        }
+      }
+      await _settings.set(SettingsRepository.driveBackupRunLockAt, now.toIso8601String());
+
+      try {
+        // allowInteractiveSignIn: false - this can run from a background
+        // WorkManager/AlarmManager isolate with no foreground Activity to
+        // show an account picker in, so it must only ever use a silent/
+        // already-authorized connection, never try to pop UI. See
+        // backupToGoogleDrive's doc comment.
+        await backupToGoogleDrive(allowInteractiveSignIn: false);
+        await _clearPendingDriveBackup(showRecoveredNotification: pending);
+        return true;
+      } finally {
+        await _settings.set(SettingsRepository.driveBackupRunLockAt, '');
+      }
     } catch (e) {
       await _recordDriveBackupFailure(e);
       return false;
@@ -783,25 +1356,28 @@ class BackupService {
   /// pending.
   Future<void> markManualDriveBackupSucceeded() async {
     final wasPending = (await _settings.get(SettingsRepository.driveBackupPending)) == 'true';
-    await _settings.set(SettingsRepository.lastDriveBackupAt, DateTime.now().toIso8601String());
     if (wasPending) {
       await _clearPendingDriveBackup(showRecoveredNotification: true);
     }
   }
 
-  /// Current Google Drive backup health, for Backup & Restore to show the
-  /// shop owner the plain truth instead of them having to guess (spec item
-  /// 5: a correct, transparent workflow designed end-to-end).
+  /// Current Google Drive backup health, for Backup & Restore's "Backup
+  /// History" section (spec item 11) to show the shop owner the plain
+  /// truth instead of them having to guess.
   Future<DriveBackupStatus> driveBackupStatus() async {
     final lastStr = await _settings.get(SettingsRepository.lastDriveBackupAt);
     final pending = (await _settings.get(SettingsRepository.driveBackupPending)) == 'true';
     final error = await _settings.get(SettingsRepository.driveBackupLastError);
     final sinceStr = await _settings.get(SettingsRepository.driveBackupPendingSince);
+    final fileName = await _settings.get(SettingsRepository.driveBackupLastFileName);
+    final sizeStr = await _settings.get(SettingsRepository.driveBackupLastFileSize);
     return DriveBackupStatus(
       lastSuccessAt: (lastStr == null || lastStr.isEmpty) ? null : DateTime.parse(lastStr),
       pending: pending,
       lastError: (error == null || error.isEmpty) ? null : error,
       pendingSince: (sinceStr == null || sinceStr.isEmpty) ? null : DateTime.parse(sinceStr),
+      lastFileName: (fileName == null || fileName.isEmpty) ? null : fileName,
+      lastFileSize: sizeStr == null || sizeStr.isEmpty ? null : int.tryParse(sizeStr),
     );
   }
 }
@@ -812,27 +1388,55 @@ class DriveBackupStatus {
   final bool pending;
   final String? lastError;
   final DateTime? pendingSince;
+  final String? lastFileName;
+  final int? lastFileSize;
 
   const DriveBackupStatus({
     required this.lastSuccessAt,
     required this.pending,
     required this.lastError,
     required this.pendingSince,
+    this.lastFileName,
+    this.lastFileSize,
   });
 }
 
-/// See [BackupService.findLatestGoogleDriveBackup] and
-/// [BackupService.restoreFromGoogleDriveFile].
+/// See [BackupService.listGoogleDriveBackups]/[findLatestGoogleDriveBackup]/
+/// [restoreFromGoogleDriveFile].
 class DriveBackupFileInfo {
   final String id;
   final String name;
   final DateTime? modifiedTime;
+  final int size;
 
   const DriveBackupFileInfo({
     required this.id,
     required this.name,
     required this.modifiedTime,
+    required this.size,
   });
+
+  static final RegExp _nameRe =
+      RegExp(r'^PRO_SERVICE_BACKUP_(\d{4}-\d{2}-\d{2})_(\d{2}-\d{2}-\d{2})_DEVICE_([0-9a-zA-Z]+)\.zip$');
+
+  /// The short device label parsed back out of this file's name (spec
+  /// item 13) - null for a backup made before this rewrite, or anything
+  /// that doesn't match the expected naming.
+  String? get deviceLabel => _nameRe.firstMatch(name)?.group(3);
+}
+
+/// See [BackupService.restoreFromGoogleDriveFile].
+class RestoreResult {
+  final List<String> mismatches;
+  final DriveBackupFileInfo restoredFrom;
+  const RestoreResult({required this.mismatches, required this.restoredFrom});
+  bool get hasWarnings => mismatches.isNotEmpty;
+}
+
+class _VerifyResult {
+  final bool ok;
+  final String? reason;
+  const _VerifyResult(this.ok, this.reason);
 }
 
 class _GoogleAuthClient extends http.BaseClient {

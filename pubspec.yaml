@@ -95,6 +95,41 @@ dependencies:
   # app la erunthu choose panramathiri panni kudu").
   flutter_contacts: ^1.1.9+2
 
+  # --- Daily Google Drive backup rewrite (2026-08) -----------------------
+  # See backup_service.dart's class doc comment for the full "why": the old
+  # one-file-per-month, update-in-place Drive backup was replaced with a
+  # brand new independent snapshot file every day, verified end-to-end
+  # before ever showing "Backup Successful".
+
+  # Zips the daily database + attachment snapshot into one .zip file before
+  # it ever reaches Google Drive (spec: "create snapshot before upload").
+  archive: ^3.6.1
+
+  # Lets a due-check / manual "Backup Now" fail fast and honestly as
+  # "Backup Pending - Waiting for Internet" instead of only discovering the
+  # phone is offline after a slow, ambiguous network timeout deep inside
+  # the Drive upload call.
+  connectivity_plus: ^6.0.5
+
+  # appVersion recorded inside every backup's manifest.json (spec item 14:
+  # "each backup must contain metadata: App version...") so an old backup
+  # restored on a much newer/older app build can be told apart from a
+  # schema/format problem.
+  package_info_plus: ^8.0.2
+
+  # Exact ~10 PM daily trigger for the Google Drive backup (spec: "Use
+  # Android AlarmManager / exact alarm where permitted. Do not depend only
+  # on WorkManager for exact 10 PM timing"). Unlike a raw AlarmManager +
+  # BroadcastReceiver (which can only run plain native Kotlin, e.g. show a
+  # notification - see DailyOrderAlarmReceiver.kt), this plugin's exact
+  # alarm actually re-enters the Dart VM in a background isolate, so the
+  # real backup logic (BackupService, Drive upload, sqflite, http) can run
+  # directly from the alarm instead of only being able to nudge the shop to
+  # open the app. WorkManager (see background_tasks.dart) stays registered
+  # alongside this as the required fallback/retry mechanism - see that
+  # file's doc comments for how the two avoid creating duplicate backups.
+  android_alarm_manager_plus: ^4.0.4
+
 dev_dependencies:
   flutter_test:
     sdk: flutter

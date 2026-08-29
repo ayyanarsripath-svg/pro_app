@@ -33,6 +33,35 @@ class SettingsRepository {
   static const driveBackupPending = 'drive_backup_pending';
   static const driveBackupLastError = 'drive_backup_last_error';
   static const driveBackupPendingSince = 'drive_backup_pending_since';
+
+  // Daily Google Drive backup rewrite (2026-08, see BackupService's class
+  // doc comment). driveBackupCompletedDateKey is THE unique daily-backup
+  // key (spec: "Use a unique daily backup key such as YYYY-MM-DD... Before
+  // starting a backup, check whether today's backup has already completed
+  // successfully") - set ONLY once a backup for that calendar day has been
+  // uploaded AND fully verified (never just "attempted"), so it is always
+  // safe to trust as "today is genuinely done". driveBackupRunLockAt is a
+  // short-lived best-effort guard against the exact-alarm and WorkManager
+  // triggers both landing at nearly the same moment and racing each other
+  // into two uploads for the same day - see runDailyGoogleDriveBackupIfDue.
+  // The remaining keys mirror the most recent successful upload so Backup
+  // & Restore's "Backup History" section (spec item 11) never has to go
+  // back out to Drive just to show what it already knows.
+  static const driveBackupCompletedDateKey = 'drive_backup_completed_date_key';
+  static const driveBackupRunLockAt = 'drive_backup_run_lock_at';
+  static const driveBackupLastFileId = 'drive_backup_last_file_id';
+  static const driveBackupLastFileName = 'drive_backup_last_file_name';
+  static const driveBackupLastFileSize = 'drive_backup_last_file_size';
+  static const driveBackupLastChecksum = 'drive_backup_last_checksum';
+  static const driveBackupCount = 'drive_backup_count';
+
+  // Random per-install identifier (spec item 13: "include a device
+  // identifier in metadata/file name... do not expose sensitive device
+  // information to the user") - a freshly generated UUID the very first
+  // time BackupService ever needs it, NOT the phone's IMEI/Android ID/serial
+  // number, so it never doubles as real hardware-tracking information. See
+  // DeviceIdService.
+  static const deviceBackupId = 'device_backup_id';
   static const complaintPresets = 'complaint_presets';
   static const conditionPresets = 'condition_presets';
   static const damagePresets = 'damage_presets';
