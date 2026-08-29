@@ -666,7 +666,7 @@ class BackupService {
 
     drive.File fetched;
     try {
-      fetched = await driveApi.files.get(id, $fields: 'id,name,size,modifiedTime,md5Checksum');
+      fetched = await driveApi.files.get(id, $fields: 'id,name,size,modifiedTime,md5Checksum') as drive.File;
     } catch (e) {
       return _VerifyResult(false, 'Could not confirm the uploaded file exists in Drive ($e).');
     }
