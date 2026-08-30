@@ -48,12 +48,33 @@ class SettingsRepository {
   // & Restore's "Backup History" section (spec item 11) never has to go
   // back out to Drive just to show what it already knows.
   static const driveBackupCompletedDateKey = 'drive_backup_completed_date_key';
+  // Bug fix (2026-08): driveBackupCompletedDateKey above is written by BOTH
+  // the automatic 10PM path and the manual "Backup to Drive" button (any
+  // successful upload counts as "today is done"). That is correct for
+  // Backup History but WRONG as the automatic due-check's gate: a shop
+  // owner who manually backs up at, say, 3PM would silently cause that
+  // evening's automatic run to see "already done today" and skip - even
+  // though hours of new data was added after the manual backup. This
+  // separate key is written ONLY by runDailyGoogleDriveBackupIfDue's own
+  // successful automatic run, so a manual backup can never satisfy or block
+  // the scheduled evening backup. See BackupService.runDailyGoogleDriveBackupIfDue.
+  static const driveAutoBackupCompletedDateKey =
+      'drive_auto_backup_completed_date_key';
   static const driveBackupRunLockAt = 'drive_backup_run_lock_at';
   static const driveBackupLastFileId = 'drive_backup_last_file_id';
   static const driveBackupLastFileName = 'drive_backup_last_file_name';
   static const driveBackupLastFileSize = 'drive_backup_last_file_size';
   static const driveBackupLastChecksum = 'drive_backup_last_checksum';
   static const driveBackupCount = 'drive_backup_count';
+  // Task (2026-08): pre-backup reminder so the shop owner gets a local
+  // notification a few minutes BEFORE the automatic Drive backup time,
+  // letting them do a manual "Backup Now" themselves if the automatic one
+  // ends up failing (e.g. no internet at 10PM). Disabled by default; the
+  // shop enables it and picks how many minutes of lead time from Settings.
+  // See BackgroundTasks/AlarmService for where this is scheduled.
+  static const preBackupReminderEnabled = 'pre_backup_reminder_enabled';
+  static const preBackupReminderLeadMinutes =
+      'pre_backup_reminder_lead_minutes';
 
   // Random per-install identifier (spec item 13: "include a device
   // identifier in metadata/file name... do not expose sensitive device
@@ -65,6 +86,10 @@ class SettingsRepository {
   static const complaintPresets = 'complaint_presets';
   static const conditionPresets = 'condition_presets';
   static const damagePresets = 'damage_presets';
+  // Shop-editable quick-pick list for the New Service Job "Offers" section
+  // (e.g. "Free Tempered Glass") - same pipe-separated preset pattern as
+  // complaint/condition/damage presets.
+  static const offerPresets = 'offer_presets';
   static const logoPath = 'logo_path';
   // Shop-editable text template for the WhatsApp intimation sent when a
   // service job's status is changed to "Ready for Delivery". Supports the
@@ -224,6 +249,24 @@ class SettingsRepository {
       ];
     }
     return raw.split('|').map((s) => s.trim()).where((s) => s.isNotEmpty).toList();
+  }
+
+  /// Shop-editable quick-pick list for the New Service Job "Offers" section
+  /// (spec: "offer nu oru puthu section add pannu... free temper glass apdinu
+  /// pre text add panni vai... vera ethana offer pottalum athula add
+  /// panramathiri option") - same pipe-separated storage/extend pattern as
+  /// complaint presets, seeded with "Free Tempered Glass" as the one
+  /// requested default.
+  Future<List<String>> getOfferPresets() async {
+    final raw = await get(offerPresets);
+    if (raw == null || raw.trim().isEmpty) {
+      return const ['Free Tempered Glass'];
+    }
+    return raw.split('|').map((s) => s.trim()).where((s) => s.isNotEmpty).toList();
+  }
+
+  Future<void> saveOfferPresets(List<String> presets) async {
+    await set(offerPresets, presets.join('|'));
   }
 
   Future<void> saveDamagePresets(List<String> presets) async {

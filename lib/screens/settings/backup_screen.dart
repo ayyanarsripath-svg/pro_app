@@ -5,6 +5,7 @@ import 'package:flutter/material.dart';
 import 'package:path/path.dart' as p;
 import 'package:share_plus/share_plus.dart';
 
+import '../../core/repositories/settings_repository.dart';
 import '../../core/services/backup_service.dart';
 import '../../core/services/background_tasks.dart';
 import '../../core/theme/app_theme.dart';
@@ -21,12 +22,22 @@ class BackupScreen extends StatefulWidget {
 
 class _BackupScreenState extends State<BackupScreen> with WidgetsBindingObserver {
   final _backupService = BackupService();
+  final _settingsRepo = SettingsRepository();
   List<File> _backups = [];
   String _backupDirPath = '';
   bool _loading = true;
   bool _driveLinked = false;
   bool _working = false;
   DriveBackupStatus? _driveStatus;
+
+  // Pre-backup reminder (spec: "google drive backup pannrathukku munnadi
+  // remider or alaram adikkiramathiri oru option add pannu settings la") -
+  // off by default; leadMinutes is how long before the ~10 PM automatic
+  // backup the reminder should fire. See background_tasks.dart's
+  // schedulePreBackupReminderAlarm and BackupService.showPreBackupReminderIfNeeded.
+  bool _preBackupReminderEnabled = false;
+  int _preBackupReminderLeadMinutes = 30;
+  static const _leadMinutesOptions = [15, 30, 60, 90];
 
   // Total count of Drive backup files currently available (spec item 11:
   // "Number of available Drive backups") - fetched separately/lazily since
@@ -73,14 +84,33 @@ class _BackupScreenState extends State<BackupScreen> with WidgetsBindingObserver
     final linked = await _backupService.isGoogleDriveLinked;
     final dirPath = await _backupService.backupDirPath();
     final driveStatus = await _backupService.driveBackupStatus();
+    final reminderEnabled = await _settingsRepo.get(SettingsRepository.preBackupReminderEnabled);
+    final reminderLeadStr = await _settingsRepo.get(SettingsRepository.preBackupReminderLeadMinutes);
     setState(() {
       _backups = backups;
       _driveLinked = linked;
       _backupDirPath = dirPath;
       _driveStatus = driveStatus;
+      _preBackupReminderEnabled = reminderEnabled == 'true';
+      _preBackupReminderLeadMinutes = int.tryParse(reminderLeadStr ?? '') ?? 30;
       _loading = false;
     });
     if (linked) _refreshDriveBackupCount();
+  }
+
+  /// Saves the reminder toggle/lead-time to Settings and immediately
+  /// re-arms (or cancels) the reminder alarm so a change takes effect right
+  /// away instead of waiting for the next app open.
+  Future<void> _updatePreBackupReminder({bool? enabled, int? leadMinutes}) async {
+    final newEnabled = enabled ?? _preBackupReminderEnabled;
+    final newLead = leadMinutes ?? _preBackupReminderLeadMinutes;
+    setState(() {
+      _preBackupReminderEnabled = newEnabled;
+      _preBackupReminderLeadMinutes = newLead;
+    });
+    await _settingsRepo.set(SettingsRepository.preBackupReminderEnabled, newEnabled.toString());
+    await _settingsRepo.set(SettingsRepository.preBackupReminderLeadMinutes, newLead.toString());
+    await schedulePreBackupReminderAlarm();
   }
 
   /// Fetched separately from the rest of [_load] since it needs its own
@@ -201,6 +231,35 @@ class _BackupScreenState extends State<BackupScreen> with WidgetsBindingObserver
                       icon: const Icon(Icons.sync_rounded, size: 18),
                       label: const Text('Change Google Account / Reconnect'),
                     ),
+                  ],
+                ]),
+                SectionCard(title: 'Backup Reminder', icon: Icons.notifications_active_rounded, children: [
+                  Text(
+                    'Get a reminder notification before tonight\'s automatic Google Drive backup, so you can back up manually yourself if the automatic one fails (no internet, sign-in issue, etc.).',
+                    style: TextStyle(color: AppColors.textSecondaryOf(context), fontSize: 12),
+                  ),
+                  const SizedBox(height: 8),
+                  SwitchListTile(
+                    contentPadding: EdgeInsets.zero,
+                    title: const Text('Remind me before backup time'),
+                    value: _preBackupReminderEnabled,
+                    onChanged: (v) => _updatePreBackupReminder(enabled: v),
+                  ),
+                  if (_preBackupReminderEnabled) ...[
+                    const SizedBox(height: 4),
+                    Row(children: [
+                      const Text('Remind me:'),
+                      const SizedBox(width: 10),
+                      DropdownButton<int>(
+                        value: _preBackupReminderLeadMinutes,
+                        items: _leadMinutesOptions
+                            .map((m) => DropdownMenuItem(value: m, child: Text('$m minutes before')))
+                            .toList(),
+                        onChanged: (v) {
+                          if (v != null) _updatePreBackupReminder(leadMinutes: v);
+                        },
+                      ),
+                    ]),
                   ],
                 ]),
                 if (_driveLinked) SectionCard(title: 'Backup History', icon: Icons.history_rounded, children: [_buildBackupHistory(context)]),

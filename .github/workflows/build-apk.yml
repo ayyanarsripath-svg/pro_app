@@ -319,10 +319,33 @@ jobs:
                       try {
                           val options = appWidgetManager.getAppWidgetOptions(appWidgetId)
                           val minWidth = options.getInt(AppWidgetManager.OPTION_APPWIDGET_MIN_WIDTH, 0)
-
-                          val layoutId = when {
-                              minWidth < 180 -> R.layout.daily_order_widget_mini
-                              minWidth < 300 -> R.layout.daily_order_widget_medium
+                          val minHeight = options.getInt(AppWidgetManager.OPTION_APPWIDGET_MIN_HEIGHT, 0)
+                          // BUG FIX: "widget la entry pottathukku aprom preview la
+                          // only 2 preview than kamikkuthu" - a widget resized (or
+                          // dropped) TALLER but not much wider was still being sized
+                          // off width alone, so a shop who stretched the widget
+                          // downward to fit 4 items still only ever saw 2. Take
+                          // whichever of width or height implies the bigger tier,
+                          // so a tall-narrow placement gets more rows too. The
+                          // width thresholds are also lower than before (180/300 ->
+                          // 140/220) since real-world launcher grids often report a
+                          // 2-cell-wide widget as under 180dp, which used to fall
+                          // back to "mini" (2 rows) on a completely normal-looking
+                          // widget size.
+                          val tierFromWidth = when {
+                              minWidth < 140 -> 0
+                              minWidth < 220 -> 1
+                              else -> 2
+                          }
+                          val tierFromHeight = when {
+                              minHeight < 110 -> 0
+                              minHeight < 180 -> 1
+                              else -> 2
+                          }
+                          val tier = maxOf(tierFromWidth, tierFromHeight)
+                          val layoutId = when (tier) {
+                              0 -> R.layout.daily_order_widget_mini
+                              1 -> R.layout.daily_order_widget_medium
                               else -> R.layout.daily_order_widget_maximum
                           }
                           // Mini used to show 0 item rows (title + count only), which
@@ -402,10 +425,10 @@ jobs:
 
           widget_info_xml = '''<?xml version="1.0" encoding="utf-8"?>
           <appwidget-provider xmlns:android="http://schemas.android.com/apk/res/android"
-              android:initialLayout="@layout/daily_order_widget_mini"
+              android:initialLayout="@layout/daily_order_widget_medium"
               android:previewImage="@mipmap/ic_launcher"
-              android:minWidth="110dp"
-              android:minHeight="40dp"
+              android:minWidth="180dp"
+              android:minHeight="140dp"
               android:minResizeWidth="110dp"
               android:minResizeHeight="40dp"
               android:maxResizeWidth="380dp"

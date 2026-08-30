@@ -13,7 +13,7 @@ class DatabaseHelper {
   static final DatabaseHelper instance = DatabaseHelper._internal();
 
   static Database? _db;
-  static const int dbVersion = 8;
+  static const int dbVersion = 9;
   static const String dbFileName = 'professional_mobiles.db';
 
   Future<Database> get database async {
@@ -111,6 +111,19 @@ class DatabaseHelper {
       await db.execute('ALTER TABLE backups ADD COLUMN app_version TEXT');
       await db.execute('ALTER TABLE backups ADD COLUMN schema_version INTEGER');
       await db.execute('ALTER TABLE backups ADD COLUMN backup_format_version INTEGER');
+    }
+    // Per-fault warranty periods + New Service Job "Offers" section. Before
+    // this, a service job had only ONE warranty period shared across every
+    // selected fault even though each fault can genuinely carry a different
+    // warranty length (e.g. Battery 6 months, Screen 1 month) - see
+    // ServiceJob.warrantyPeriods (same "Name:value|Name:value" encoding as
+    // the existing fault_amounts column, parsed by PdfService). offers holds
+    // the shop's selected quick-pick + custom offers (e.g. "Free Tempered
+    // Glass") printed on the bill, "+"-joined the same way complaint presets
+    // already are.
+    if (oldVersion < 9) {
+      await db.execute('ALTER TABLE services ADD COLUMN warranty_periods TEXT');
+      await db.execute('ALTER TABLE services ADD COLUMN offers TEXT');
     }
   }
 
@@ -330,6 +343,8 @@ class DatabaseHelper {
         labour_cost REAL NOT NULL DEFAULT 0,
         warranty INTEGER NOT NULL DEFAULT 0,
         warranty_period TEXT,
+        warranty_periods TEXT,
+        offers TEXT,
         estimated_amount REAL NOT NULL DEFAULT 0,
         final_amount REAL NOT NULL DEFAULT 0,
         discount REAL NOT NULL DEFAULT 0,

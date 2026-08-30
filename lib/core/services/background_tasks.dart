@@ -5,6 +5,7 @@ import 'package:android_intent_plus/android_intent.dart';
 import 'package:flutter/services.dart';
 import 'package:workmanager/workmanager.dart';
 
+import '../repositories/settings_repository.dart';
 import 'backup_service.dart';
 import 'daily_order_auto_send_signal.dart';
 import 'order_reminder_service.dart';
@@ -253,6 +254,91 @@ Future<void> cancelDailyBackupAlarm() async {
   try {
     await AndroidAlarmManager.initialize();
     await AndroidAlarmManager.cancel(_dailyBackupAlarmId);
+  } catch (_) {}
+}
+
+/// Arbitrary but unique android_alarm_manager_plus alarm id for the
+/// pre-backup reminder below - only has to differ from [_dailyBackupAlarmId].
+const _preBackupReminderAlarmId = 930200;
+
+/// Reminder alarm that fires a configurable number of minutes BEFORE the
+/// ~10 PM automatic Google Drive backup (see [scheduleDailyBackupAlarm] just
+/// above) - added so a shop owner has a chance to back up manually
+/// themselves if the automatic one is about to fail (spec: "google drive
+/// backup pannrathukku munnadi remider or alaram adikkiramathiri oru option
+/// add pannu settings la. suppose automatic backup aagalana na manual ah
+/// backup pannippan"). Off by default
+/// (SettingsRepository.preBackupReminderEnabled) - the owner turns it on
+/// from Settings and picks how many minutes of lead time
+/// (SettingsRepository.preBackupReminderLeadMinutes, default 30).
+///
+/// Same oneShotAt + self-rearm pattern as [scheduleDailyBackupAlarm] above -
+/// the exact minute has to be recomputed fresh every day (DST/timezone-safe)
+/// and re-armed for tomorrow from inside the callback itself. Safe to call
+/// repeatedly (app startup, right after the owner changes either Settings
+/// value, and from the callback itself) - a new call always replaces
+/// whatever was scheduled before under the same alarm id. If the setting is
+/// off, this cancels any previously-armed reminder instead of scheduling
+/// anything, so turning the toggle off takes effect immediately.
+Future<void> schedulePreBackupReminderAlarm() async {
+  if (!Platform.isAndroid) return;
+  try {
+    final settings = SettingsRepository();
+    final enabled = await settings.get(SettingsRepository.preBackupReminderEnabled);
+    if (enabled != 'true') {
+      await cancelPreBackupReminderAlarm();
+      return;
+    }
+    final leadStr = await settings.get(SettingsRepository.preBackupReminderLeadMinutes);
+    final leadMinutes = int.tryParse(leadStr ?? '') ?? 30;
+
+    await AndroidAlarmManager.initialize();
+    final now = DateTime.now();
+    var todays10pm = DateTime(now.year, now.month, now.day, 22);
+    var reminderTime = todays10pm.subtract(Duration(minutes: leadMinutes));
+    if (!reminderTime.isAfter(now)) {
+      reminderTime = reminderTime.add(const Duration(days: 1));
+    }
+    await AndroidAlarmManager.oneShotAt(
+      reminderTime,
+      _preBackupReminderAlarmId,
+      preBackupReminderAlarmCallback,
+      exact: true,
+      wakeup: true,
+      rescheduleOnReboot: true,
+    );
+  } catch (_) {
+    // This reminder is a convenience on top of the exact 10PM backup alarm
+    // and WorkManager fallback above - never let it block anything else.
+  }
+}
+
+/// Cancels the pre-backup reminder alarm - called when the owner turns the
+/// Settings toggle off. Safe to call even if nothing is currently scheduled.
+Future<void> cancelPreBackupReminderAlarm() async {
+  if (!Platform.isAndroid) return;
+  try {
+    await AndroidAlarmManager.initialize();
+    await AndroidAlarmManager.cancel(_preBackupReminderAlarmId);
+  } catch (_) {}
+}
+
+/// android_alarm_manager_plus entry point for [schedulePreBackupReminderAlarm]'s
+/// exact alarm - see [backupAlarmCallback] below for why this needs its own
+/// fresh isolate/re-initialize/@pragma boilerplate. Shows the reminder
+/// notification (BackupService.showPreBackupReminderIfNeeded - which itself
+/// no-ops if the setting is off or today's automatic backup already
+/// succeeded) and always re-arms tomorrow's firing before returning.
+@pragma('vm:entry-point')
+void preBackupReminderAlarmCallback() async {
+  try {
+    await AndroidAlarmManager.initialize();
+  } catch (_) {}
+  try {
+    await BackupService().showPreBackupReminderIfNeeded();
+  } catch (_) {}
+  try {
+    await schedulePreBackupReminderAlarm();
   } catch (_) {}
 }
 

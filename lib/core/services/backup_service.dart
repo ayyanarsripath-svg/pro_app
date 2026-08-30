@@ -705,7 +705,14 @@ class BackupService {
   /// Never returns null - every failure throws (a friendly message for a
   /// sign-in problem, the raw error otherwise) so the caller always knows
   /// exactly why "Backup Successful" was NOT shown (spec item 7).
-  Future<DriveBackupFileInfo> backupToGoogleDrive({bool allowInteractiveSignIn = true}) async {
+  Future<DriveBackupFileInfo> backupToGoogleDrive({
+    bool allowInteractiveSignIn = true,
+    // Bug fix (2026-08): true only when this call came from
+    // runDailyGoogleDriveBackupIfDue's own scheduled 10PM run - see
+    // SettingsRepository.driveAutoBackupCompletedDateKey's doc comment for
+    // why this must never be inferred from allowInteractiveSignIn alone.
+    bool isAutomaticRun = false,
+  }) async {
     if (!await _hasInternet()) {
       throw Exception('No internet connection right now.');
     }
@@ -767,7 +774,12 @@ class BackupService {
           size: fileSize,
         );
 
-        await _recordSuccessfulDriveBackup(info: info, checksum: hashes.sha256, now: now);
+        await _recordSuccessfulDriveBackup(
+          info: info,
+          checksum: hashes.sha256,
+          now: now,
+          isAutomaticRun: isAutomaticRun,
+        );
         await _applyRetentionPolicy(driveApi);
         return info;
       } finally {
@@ -787,6 +799,7 @@ class BackupService {
     required DriveBackupFileInfo info,
     required String checksum,
     required DateTime now,
+    bool isAutomaticRun = false,
   }) async {
     final db = await _dbHelper.database;
     await db.insert('backups', {
@@ -807,6 +820,14 @@ class BackupService {
 
     await _settings.set(SettingsRepository.lastDriveBackupAt, now.toIso8601String());
     await _settings.set(SettingsRepository.driveBackupCompletedDateKey, _dailyDateKey(now));
+    if (isAutomaticRun) {
+      // Bug fix (2026-08): only the scheduled automatic run may satisfy the
+      // automatic due-check - see runDailyGoogleDriveBackupIfDue and
+      // SettingsRepository.driveAutoBackupCompletedDateKey's doc comment. A
+      // manual "Backup to Drive" press must never mark the evening backup
+      // as "already done today".
+      await _settings.set(SettingsRepository.driveAutoBackupCompletedDateKey, _dailyDateKey(now));
+    }
     await _settings.set(SettingsRepository.driveBackupLastFileId, info.id);
     await _settings.set(SettingsRepository.driveBackupLastFileName, info.name);
     await _settings.set(SettingsRepository.driveBackupLastFileSize, info.size.toString());
@@ -1180,7 +1201,12 @@ class BackupService {
       final pending = (await _settings.get(SettingsRepository.driveBackupPending)) == 'true';
 
       if (!pending) {
-        final completedKey = await _settings.get(SettingsRepository.driveBackupCompletedDateKey);
+        // Bug fix (2026-08): gate on the AUTOMATIC-only completion key, not
+        // the shared driveBackupCompletedDateKey (which a manual "Backup to
+        // Drive" press also sets). Otherwise a shop owner who manually
+        // backs up earlier in the day would silently cause the 10PM
+        // automatic backup to skip, even though new data was added since.
+        final completedKey = await _settings.get(SettingsRepository.driveAutoBackupCompletedDateKey);
         if (completedKey == todayKey) return false; // already verified for today
       }
 
@@ -1199,7 +1225,7 @@ class BackupService {
         // show an account picker in, so it must only ever use a silent/
         // already-authorized connection, never try to pop UI. See
         // backupToGoogleDrive's doc comment.
-        await backupToGoogleDrive(allowInteractiveSignIn: false);
+        await backupToGoogleDrive(allowInteractiveSignIn: false, isAutomaticRun: true);
         await _clearPendingDriveBackup(showRecoveredNotification: pending);
         return true;
       } finally {
@@ -1305,6 +1331,7 @@ class BackupService {
   static bool _notificationsInitialized = false;
   static const _pendingBackupNotificationId = 2001;
   static const _backupRecoveredNotificationId = 2002;
+  static const _preBackupReminderNotificationId = 2003;
 
   Future<void> _ensureNotificationsInitialized() async {
     if (_notificationsInitialized) return;
@@ -1345,6 +1372,55 @@ class BackupService {
     } catch (_) {
       // A notification failing to show must never break the retry logic
       // itself - the Settings screen still shows the true pending state.
+    }
+  }
+
+  /// Shows the pre-backup reminder notification (see
+  /// background_tasks.dart's schedulePreBackupReminderAlarm, which calls
+  /// this a configurable number of minutes before the ~10PM automatic
+  /// backup). Added in response to "suppose automatic backup aagalana na
+  /// manual ah backup pannippan" (if the automatic one fails, let me back
+  /// up manually myself) - gives the shop owner a heads-up chance to open
+  /// Backup & Restore and tap "Backup to Drive" themselves before the
+  /// automatic attempt even runs.
+  ///
+  /// No-ops (shows nothing) if the Settings toggle is off, or if today's
+  /// automatic backup has already completed successfully
+  /// (SettingsRepository.driveAutoBackupCompletedDateKey already matches
+  /// today - see that key's doc comment) - there's nothing to remind about
+  /// once today is already safely backed up. Never throws - a reminder
+  /// failing to show must never affect anything else.
+  Future<void> showPreBackupReminderIfNeeded() async {
+    try {
+      final enabled = await _settings.get(SettingsRepository.preBackupReminderEnabled);
+      if (enabled != 'true') return;
+
+      final now = DateTime.now();
+      final todayKey = _dailyDateKey(now);
+      final completedKey = await _settings.get(SettingsRepository.driveAutoBackupCompletedDateKey);
+      if (completedKey == todayKey) return; // today's automatic backup already succeeded - nothing to warn about
+
+      await _ensureNotificationsInitialized();
+      const androidDetails = AndroidNotificationDetails(
+        'pre_backup_reminder',
+        'Backup Reminder',
+        channelDescription: "Reminds you to back up manually before tonight's automatic Google Drive backup",
+        importance: Importance.high,
+        priority: Priority.high,
+        playSound: true,
+        enableVibration: true,
+        category: AndroidNotificationCategory.reminder,
+        visibility: NotificationVisibility.public,
+      );
+      await _notifications.show(
+        _preBackupReminderNotificationId,
+        'Backup Reminder',
+        "Tonight's automatic Google Drive backup hasn't happened yet. "
+            'Open Backup & Restore and tap "Backup to Drive" now to be safe.',
+        const NotificationDetails(android: androidDetails),
+      );
+    } catch (_) {
+      // A reminder failing to show must never affect anything else.
     }
   }
 
