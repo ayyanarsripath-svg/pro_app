@@ -189,6 +189,13 @@ class PdfService {
   /// A shaded header strip above the body gives each section a crisp,
   /// form-like edge (still pure greyscale so it stays clean on a plain
   /// B/W printer) instead of the previous plain inline title line.
+  ///
+  /// NOTE (2026-08): a dark-header "emphasized" variant was tried here for
+  /// CUSTOMER & DEVICE DETAILS specifically, to print more distinctly than
+  /// the light grey300 fill - reverted per the shop owner's explicit
+  /// feedback ("munnadi eruntha design nalla erukku... ni eppo kudutha
+  /// design pudikkala" - the earlier design was good, didn't like the new
+  /// one). Every box uses the same plain grey300 header again.
   pw.Widget _box(String title, List<pw.Widget> children) {
     return pw.Container(
       width: double.infinity,
@@ -382,6 +389,7 @@ class PdfService {
     required double balanceAmount, String? faultBreakdown,
     double discountAmount = 0,
     bool paid = false,
+    String? offerText,
   }) {
     final box = pw.Container(
       width: 270,
@@ -395,6 +403,14 @@ class PdfService {
         children: [
           _amountLine('TOTAL AMOUNT', totalAmount), if (faultBreakdown != null) pw.Padding(padding: const pw.EdgeInsets.symmetric(vertical: 1), child: pw.Text(faultBreakdown, style: const pw.TextStyle(fontSize: 7.5, color: PdfColors.grey800), textAlign: pw.TextAlign.center)),
           _amountLine('- ADVANCE AMOUNT', advanceAmount),
+          // Offer (e.g. "Free Tempered Glass") - a plain text row, not a
+          // rupee amount, so it gets its own text/text line instead of
+          // _amountLine's label/currency layout. Only printed when the
+          // shop actually picked one; placed here (between Advance and
+          // Discount) rather than as a separate line above the box, per
+          // shop feedback wanting Total/Advance/Offer/Discount/Balance
+          // shown together as one neat, consistently-aligned block.
+          if ((offerText ?? '').trim().isNotEmpty) _amountTextLine('OFFER', offerText!),
           // Only printed when a bargain/write-off discount was actually
           // entered - a bill with no discount looks exactly as it did
           // before this line existed.
@@ -424,6 +440,28 @@ class PdfService {
                 style: pw.TextStyle(fontSize: emphasize ? 9 : 8, fontWeight: pw.FontWeight.bold)),
             pw.Text(formatCurrency(amount),
                 style: pw.TextStyle(fontSize: emphasize ? 11 : 9, fontWeight: pw.FontWeight.bold)),
+          ],
+        ),
+      );
+
+  /// Same label/value row layout as [_amountLine], but for a plain text
+  /// value (e.g. an offer name) instead of a rupee amount - printed in
+  /// plain black like every other row in the box (shop feedback: the old
+  /// standalone green "Offer: ..." line above the box looked out of place;
+  /// this keeps the whole amount summary one consistent black/bold style).
+  pw.Widget _amountTextLine(String label, String value) => pw.Padding(
+        padding: const pw.EdgeInsets.symmetric(vertical: 1),
+        child: pw.Row(
+          mainAxisAlignment: pw.MainAxisAlignment.spaceBetween,
+          children: [
+            pw.Text(label, style: pw.TextStyle(fontSize: 8, fontWeight: pw.FontWeight.bold)),
+            pw.Flexible(
+              child: pw.Text(
+                value,
+                textAlign: pw.TextAlign.right,
+                style: pw.TextStyle(fontSize: 8, fontWeight: pw.FontWeight.bold),
+              ),
+            ),
           ],
         ),
       );
@@ -659,17 +697,6 @@ class PdfService {
                     _warrantyRangeText(service.warrantyPeriod, warrantyStart),
               ),
           ]),
-          // Offers (spec item 4) - only printed when the shop actually
-          // picked one; kept to a single compact line (not its own boxed
-          // section) so adding offers never pushes the bill onto a 2nd page.
-          if ((service.offers ?? '').trim().isNotEmpty)
-            pw.Padding(
-              padding: const pw.EdgeInsets.only(top: 2, bottom: 1),
-              child: pw.Text(
-                'Offer: ${service.offers}',
-                style: pw.TextStyle(fontSize: 9, fontWeight: pw.FontWeight.bold, color: PdfColors.green900),
-              ),
-            ),
           pw.SizedBox(height: 3),
           // Parts/repair item names used to print here as their own boxed
           // section ("PARTS / REPAIR ITEMS ADDED"), but that pushed the bill
@@ -688,6 +715,13 @@ class PdfService {
             advanceAmount: service.paid,
             balanceAmount: _billTotal(service) - service.paid - service.discount, faultBreakdown: _faultBreakdownText(service.faultAmounts),
             discountAmount: service.discount,
+            // Offer (e.g. "Free Tempered Glass") moved INSIDE the amount
+            // box instead of its own separate green line above it (shop
+            // feedback: "offer free tempered glass green colorla erukku
+            // atha black ku change pannu" + wanted it laid out in the same
+            // neat Total/Advance/Offer/Discount/Balance order as the rest
+            // of the box) - printed in plain black like every other row.
+            offerText: service.offers,
             // "PAID" round-stamp deliberately removed from the Service Bill
             // per the shop owner's explicit request - the amount box itself
             // (Total - Advance = Balance) already shows the paid/balance
