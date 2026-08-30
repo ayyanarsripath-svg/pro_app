@@ -40,6 +40,10 @@ class _ServiceFormScreenState extends State<ServiceFormScreen> {
     final _discountCtrl = TextEditingController();
     final _warrantyPeriodCtrl = TextEditingController();
     final Map<String, TextEditingController> _faultAmountCtrls = {};
+    // Per-fault warranty period - one controller per selected complaint
+    // preset, shown once warranty is on AND 2+ faults are selected (spec:
+    // "each product ku warranty thani thaniya add panramathiri vendum").
+    final Map<String, TextEditingController> _warrantyPeriodCtrls = {};
 
     bool _charger = false, _cable = false, _sim = false, _memoryCard = false;
     bool _warranty = false;
@@ -58,6 +62,12 @@ class _ServiceFormScreenState extends State<ServiceFormScreen> {
     List<String> _damagePresets = [];
     final Set<String> _selectedDamages = {};
 
+    // "Offers" section (spec item 4): shop picks from a quick-pick list
+    // (e.g. "Free Tempered Glass") or adds its own, multi-select same as
+    // complaint/condition/damage presets above.
+    List<String> _offerPresets = [];
+    final Set<String> _selectedOffers = {};
+
     @override
     void initState() {
         super.initState();
@@ -68,12 +78,50 @@ class _ServiceFormScreenState extends State<ServiceFormScreen> {
         final presets = await _settingsRepo.getComplaintPresets();
         final conditions = await _settingsRepo.getConditionPresets();
         final damages = await _settingsRepo.getDamagePresets();
+        final offers = await _settingsRepo.getOfferPresets();
         if (mounted) {
             setState(() {
                 _presets = presets;
                 _conditionPresets = conditions;
                 _damagePresets = damages;
+                _offerPresets = offers;
             });
+        }
+    }
+
+    /// Toggles an Offer chip on/off - multi-select, since a job can carry
+    /// more than one offer at once (spec: "incase feature la vera ethana
+    /// offer pottalum athula la add panramathiri option set pannu").
+    void _toggleOffer(String preset) {
+        setState(() {
+            if (_selectedOffers.contains(preset)) {
+                _selectedOffers.remove(preset);
+            } else {
+                _selectedOffers.add(preset);
+            }
+        });
+    }
+
+    Future<void> _addCustomOffer() async {
+        final ctrl = TextEditingController();
+        final ok = await showDialog<bool>(
+            context: context,
+            builder: (context) => AlertDialog(
+                title: const Text('Add Offer'),
+                content: TextField(controller: ctrl, decoration: const InputDecoration(labelText: 'Offer text (e.g. Free Screen Guard)')),
+                actions: [
+                    TextButton(onPressed: () => Navigator.pop(context, false), child: const Text('Cancel')),
+                    ElevatedButton(onPressed: () => Navigator.pop(context, true), child: const Text('Add')),
+                    ],
+                ),
+            );
+        if (ok == true && ctrl.text.trim().isNotEmpty) {
+            final text = ctrl.text.trim();
+            if (!_offerPresets.contains(text)) {
+                setState(() => _offerPresets = [..._offerPresets, text]);
+                await _settingsRepo.saveOfferPresets(_offerPresets);
+            }
+            _toggleOffer(text);
         }
     }
 
@@ -212,9 +260,11 @@ class _ServiceFormScreenState extends State<ServiceFormScreen> {
             if (_selectedPresets.contains(preset)) {
                 _selectedPresets.remove(preset);
                 _faultAmountCtrls.remove(preset)?.dispose();
+                _warrantyPeriodCtrls.remove(preset)?.dispose();
             } else {
                 _selectedPresets.add(preset);
                 _faultAmountCtrls[preset] = TextEditingController();
+                _warrantyPeriodCtrls[preset] = TextEditingController();
             }
             _complaintCtrl.text = _selectedPresets.join(' + ');
             _recalcEstimatedFromFaults();
@@ -426,11 +476,53 @@ class _ServiceFormScreenState extends State<ServiceFormScreen> {
                                 value: _warranty,
                                 onChanged: (v) => setState(() => _warranty = v),
                                 ),
-                            if (_warranty)
+                            // 2+ faults selected: each one gets its OWN warranty
+                            // period field, since different faults genuinely
+                            // carry different warranty lengths (e.g. Battery 6
+                            // months, Screen 1 month) - printed separately on
+                            // the bill (spec item 6). Single fault (or free-typed
+                            // complaint) keeps the one shared field as before.
+                            if (_warranty && _selectedPresets.length >= 2) ...[
+                                const SizedBox(height: 4),
+                                const Text('Warranty period per fault', style: TextStyle(fontSize: 12, fontWeight: FontWeight.w600)),
+                                const SizedBox(height: 6),
+                                for (final preset in _selectedPresets)
+                                Padding(
+                                    padding: const EdgeInsets.only(bottom: 8),
+                                    child: TextFormField(
+                                        controller: _warrantyPeriodCtrls[preset],
+                                        decoration: InputDecoration(labelText: '$preset Warranty Period (e.g. 6 months)'),
+                                        ),
+                                    ),
+                                ] else if (_warranty)
                             TextFormField(
                                 controller: _warrantyPeriodCtrl,
                                 keyboardType: TextInputType.number,
                                 decoration: const InputDecoration(labelText: 'Warranty Period (in days)'),
+                                ),
+                            ]),
+                        // Offers (spec item 4): quick-pick + custom offers shown
+                        // on the printed bill (e.g. "Free Tempered Glass").
+                        // Multi-select, same chip pattern as Complaint/Condition -
+                        // any number can be picked, and PdfService keeps this to
+                        // one compact line so the bill still fits a single page.
+                        SectionCard(title: 'Offers', icon: Icons.local_offer_rounded, children: [
+                            Wrap(
+                                spacing: 6,
+                                runSpacing: 6,
+                                children: [
+                                    for (final preset in _offerPresets)
+                                    FilterChip(
+                                        label: Text(preset),
+                                        selected: _selectedOffers.contains(preset),
+                                        onSelected: (_) => _toggleOffer(preset),
+                                        ),
+                                    ActionChip(
+                                        avatar: const Icon(Icons.add, size: 16),
+                                        label: const Text('Add Offer'),
+                                        onPressed: _addCustomOffer,
+                                        ),
+                                    ],
                                 ),
                             ]),
                         SectionCard(title: 'Payment', icon: Icons.payments_rounded, children: [
@@ -503,6 +595,18 @@ class _ServiceFormScreenState extends State<ServiceFormScreen> {
             faultAmounts = parts.join('|');
         }
 
+        String? warrantyPeriods;
+        if (_warranty && _selectedPresets.length >= 2) {
+            final parts = <String>[];
+            for (final preset in _selectedPresets) {
+                final period = _warrantyPeriodCtrls[preset]?.text.trim() ?? '';
+                if (period.isNotEmpty) parts.add('$preset:$period');
+            }
+            if (parts.isNotEmpty) warrantyPeriods = parts.join('|');
+        }
+
+        final offers = _selectedOffers.isEmpty ? null : _selectedOffers.join(' + ');
+
         final service = await _serviceRepo.create(
             customerId: customer.id,
             mobileName: _mobileNameCtrl.text.trim(),
@@ -519,6 +623,8 @@ class _ServiceFormScreenState extends State<ServiceFormScreen> {
             technician: _technicianCtrl.text.trim(),
             warranty: _warranty,
             warrantyPeriod: _warrantyPeriodCtrl.text.trim(),
+            warrantyPeriods: warrantyPeriods,
+            offers: offers,
             estimatedAmount: double.tryParse(_estimatedCtrl.text.trim()) ?? 0,
             advance: double.tryParse(_advanceCtrl.text.trim()) ?? 0,
             discount: double.tryParse(_discountCtrl.text.trim()) ?? 0,

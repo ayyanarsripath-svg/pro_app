@@ -428,7 +428,12 @@ class PdfService {
         ),
       );
 
-  String? _faultBreakdownText(String? raw) { if (raw == null || raw.trim().isEmpty) return null; final parts = raw.split('|').where((p) => p.trim().isNotEmpty).toList(); if (parts.length < 2) return null; final pieces = <String>[]; for (final p in parts) { final idx = p.indexOf(':'); if (idx < 0) continue; final name = p.substring(0, idx).trim(); final amt = double.tryParse(p.substring(idx + 1).trim()) ?? 0; pieces.add('$name ${amt.toStringAsFixed(amt == amt.roundToDouble() ? 0 : 2)}'); } if (pieces.length < 2) return null; return pieces.join(' + '); } /// Turns a free-text warranty period like "1 month", "6 Months" or
+  // Per-fault amount breakdown shown under TOTAL AMOUNT on the bill, e.g.
+  // "(Battery ₹1,200) + (Screen ₹500)" - uses the same en_IN ₹ formatter
+  // as every other money figure on the bill (formatCurrency), each fault
+  // wrapped in parentheses per the shop owner's requested format, instead
+  // of a bare unlabelled number.
+  String? _faultBreakdownText(String? raw) { if (raw == null || raw.trim().isEmpty) return null; final parts = raw.split('|').where((p) => p.trim().isNotEmpty).toList(); if (parts.length < 2) return null; final pieces = <String>[]; for (final p in parts) { final idx = p.indexOf(':'); if (idx < 0) continue; final name = p.substring(0, idx).trim(); final amt = double.tryParse(p.substring(idx + 1).trim()) ?? 0; pieces.add('($name ${formatCurrency(amt)})'); } if (pieces.length < 2) return null; return pieces.join(' + '); } /// Turns a free-text warranty period like "1 month", "6 Months" or
   /// "30 days" into the actual covered date range, counted from
   /// [start] - e.g. "1 month" starting 01/01/2026 prints as
   /// "01/01/2026 to 31/01/2026" instead of the vague raw text, so there's
@@ -506,6 +511,30 @@ class PdfService {
       end = DateTime(start.year, start.month + n, start.day).subtract(const Duration(days: 1));
     }
     return '${formatDate(start)} to ${formatDate(end)}';
+  }
+
+  /// Per-fault warranty periods (spec item 6: "each product ku warranty
+  /// thani thaniya add panramathiri vendum ethu bil la print pannumpothu
+  /// kattanum") - parses the same "Name:value|Name:value" encoding as
+  /// [ServiceJob.faultAmounts]/[_faultBreakdownText] and turns each fault's
+  /// own period into its own resolved date range via [_warrantyRangeText],
+  /// e.g. "Battery: 01/01/2026 to 30/06/2026 | Screen: 01/01/2026 to
+  /// 31/01/2026" - kept to one joined line (not one line per fault) so a
+  /// job with several faults still fits the single-page bill.
+  String? _perFaultWarrantyText(String? raw, DateTime start) {
+    if (raw == null || raw.trim().isEmpty) return null;
+    final parts = raw.split('|').where((p) => p.trim().isNotEmpty).toList();
+    final pieces = <String>[];
+    for (final p in parts) {
+      final idx = p.indexOf(':');
+      if (idx < 0) continue;
+      final name = p.substring(0, idx).trim();
+      final period = p.substring(idx + 1).trim();
+      if (name.isEmpty || period.isEmpty) continue;
+      pieces.add('$name: ${_warrantyRangeText(period, start)}');
+    }
+    if (pieces.isEmpty) return null;
+    return pieces.join(' | ');
   }
 
   // -----------------------------------------------------------------
@@ -624,8 +653,23 @@ class PdfService {
             // 31/01/2026") needs more room than a half column gives.
             _kv('Warranty', service.warranty ? 'Yes' : 'No'),
             if (service.warranty)
-              _kv('Period', _warrantyRangeText(service.warrantyPeriod, warrantyStart)),
+              _kv(
+                'Period',
+                _perFaultWarrantyText(service.warrantyPeriods, warrantyStart) ??
+                    _warrantyRangeText(service.warrantyPeriod, warrantyStart),
+              ),
           ]),
+          // Offers (spec item 4) - only printed when the shop actually
+          // picked one; kept to a single compact line (not its own boxed
+          // section) so adding offers never pushes the bill onto a 2nd page.
+          if ((service.offers ?? '').trim().isNotEmpty)
+            pw.Padding(
+              padding: const pw.EdgeInsets.only(top: 2, bottom: 1),
+              child: pw.Text(
+                'Offer: ${service.offers}',
+                style: pw.TextStyle(fontSize: 9, fontWeight: pw.FontWeight.bold, color: PdfColors.green900),
+              ),
+            ),
           pw.SizedBox(height: 3),
           // Parts/repair item names used to print here as their own boxed
           // section ("PARTS / REPAIR ITEMS ADDED"), but that pushed the bill

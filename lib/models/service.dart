@@ -41,6 +41,15 @@ class ServiceJob {
   final double labourCost;
   final bool warranty;
   final String? warrantyPeriod;
+  // Per-fault warranty periods, e.g. "Battery:6 months|Screen:1 month" -
+  // same "Name:value" pipe encoding as [faultAmounts]. Set only when 2+
+  // faults are selected and warranty is on; falls back to the single
+  // [warrantyPeriod] everywhere else (one fault, or free-typed complaint).
+  final String? warrantyPeriods;
+  // Shop's selected offers for this job (e.g. "Free Tempered Glass"),
+  // "+"-joined the same way selected complaint presets are - printed on
+  // the bill when non-empty.
+  final String? offers;
   final double estimatedAmount;
   final double finalAmount;
   final double discount;
@@ -76,6 +85,8 @@ class ServiceJob {
     this.labourCost = 0,
     this.warranty = false,
     this.warrantyPeriod,
+    this.warrantyPeriods,
+    this.offers,
     this.estimatedAmount = 0,
     this.finalAmount = 0,
     this.discount = 0,
@@ -128,6 +139,8 @@ bool get isPaymentPending => displayBalance > 0;
         labourCost: (m['labour_cost'] as num?)?.toDouble() ?? 0,
         warranty: (m['warranty'] as int? ?? 0) == 1,
         warrantyPeriod: m['warranty_period'] as String?,
+        warrantyPeriods: m['warranty_periods'] as String?,
+        offers: m['offers'] as String?,
         estimatedAmount: (m['estimated_amount'] as num?)?.toDouble() ?? 0,
         finalAmount: (m['final_amount'] as num?)?.toDouble() ?? 0,
         discount: (m['discount'] as num?)?.toDouble() ?? 0,
@@ -164,6 +177,8 @@ bool get isPaymentPending => displayBalance > 0;
         'labour_cost': labourCost,
         'warranty': warranty ? 1 : 0,
         'warranty_period': warrantyPeriod,
+        'warranty_periods': warrantyPeriods,
+        'offers': offers,
         'estimated_amount': estimatedAmount,
         'final_amount': finalAmount,
         'discount': discount,

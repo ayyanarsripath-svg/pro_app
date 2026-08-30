@@ -46,6 +46,11 @@ Future<void> main() async {
   // or failing Drive attempt never delays the rest of app startup.
   scheduleDailyBackupAlarm();
   scheduleDailyGoogleDriveBackup();
+  // Pre-backup reminder (Settings -> Backup & Restore) - self-gates on the
+  // shop's own toggle (off by default), so safe to call unconditionally on
+  // every app open just like the two calls above. See
+  // background_tasks.dart's schedulePreBackupReminderAlarm doc comment.
+  schedulePreBackupReminderAlarm();
   BackupService().runDailyGoogleDriveBackupIfDue().then((_) async {
     try {
       if ((await BackupService().driveBackupStatus()).pending) {
