@@ -9,6 +9,12 @@
 /// [phone] is deliberately never included in anything sent outside the
 /// app (PDF, WhatsApp message) - it's for the shop's own in-app reference
 /// only (tap to call).
+///
+/// [received] only matters once [sent] is true: after an order is sent to
+/// the supplier, some parts arrive and some don't. Ticking an item as
+/// received hides it from the Daily Order screen (it's done); leaving it
+/// not-received keeps the row visible as an outstanding order line so the
+/// shop remembers to follow up.
 class DailyOrderItem {
   final String id;
   final String orderDate;
@@ -20,6 +26,7 @@ class DailyOrderItem {
   final bool sent;
   final DateTime? sentAt;
   final DateTime createdAt;
+  final bool received;
 
   DailyOrderItem({
     required this.id,
@@ -32,9 +39,10 @@ class DailyOrderItem {
     this.sent = false,
     this.sentAt,
     required this.createdAt,
+    this.received = false,
   });
 
-  DailyOrderItem copyWith({bool? sent, DateTime? sentAt}) => DailyOrderItem(
+  DailyOrderItem copyWith({bool? sent, DateTime? sentAt, bool? received}) => DailyOrderItem(
         id: id,
         orderDate: orderDate,
         sNo: sNo,
@@ -45,6 +53,7 @@ class DailyOrderItem {
         sent: sent ?? this.sent,
         sentAt: sentAt ?? this.sentAt,
         createdAt: createdAt,
+        received: received ?? this.received,
       );
 
   factory DailyOrderItem.fromMap(Map<String, dynamic> m) => DailyOrderItem(
@@ -58,6 +67,7 @@ class DailyOrderItem {
         sent: (m['sent'] as int) == 1,
         sentAt: m['sent_at'] != null ? DateTime.parse(m['sent_at'] as String) : null,
         createdAt: DateTime.parse(m['created_at'] as String),
+        received: ((m['received'] as int?) ?? 0) == 1,
       );
 
   Map<String, dynamic> toMap() => {
@@ -71,5 +81,6 @@ class DailyOrderItem {
         'sent': sent ? 1 : 0,
         'sent_at': sentAt?.toIso8601String(),
         'created_at': createdAt.toIso8601String(),
+        'received': received ? 1 : 0,
       };
 }

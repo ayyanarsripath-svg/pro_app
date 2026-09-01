@@ -80,6 +80,14 @@ class DailyOrderRepository {
     await batch.commit(noResult: true);
   }
 
+  /// Marks a single sent item as physically received at the shop. Once
+  /// received, DailyOrderScreen hides the row (it's done) instead of
+  /// deleting it, so the order history stays intact.
+  Future<void> markReceived(String id) async {
+    final db = await _dbHelper.database;
+    await db.update('daily_order_items', {'received': 1}, where: 'id = ?', whereArgs: [id]);
+  }
+
   /// Full history (sent and unsent), most recently noted date first - used
   /// by DailyOrderScreen's date-grouped list.
   Future<List<DailyOrderItem>> all() async {

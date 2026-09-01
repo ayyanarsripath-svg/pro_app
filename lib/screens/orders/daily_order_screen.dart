@@ -149,9 +149,14 @@ class _DailyOrderScreenState extends State<DailyOrderScreen> with WidgetsBinding
 
   List<DailyOrderItem> get _pending => _allItems.where((i) => !i.sent).toList();
 
+  /// Groups items by date for display. A sent item that has been ticked
+  /// Received is done - it's left out here entirely ("erase") rather than
+  /// deleted from the database, so order history stays intact while the
+  /// list the shop owner looks at only shows what's still outstanding.
   Map<String, List<DailyOrderItem>> get _groupedByDate {
     final map = <String, List<DailyOrderItem>>{};
     for (final item in _allItems) {
+      if (item.sent && item.received) continue;
       map.putIfAbsent(item.orderDate, () => []).add(item);
     }
     return map;
@@ -1107,8 +1112,40 @@ class _DailyOrderScreenState extends State<DailyOrderScreen> with WidgetsBinding
               icon: const Icon(Icons.delete_outline_rounded, size: 20, color: AppColors.danger),
               onPressed: () => _deleteItem(item),
             ),
+          // Sent items still need a receipt-status decision from the shop
+          // owner: some ordered parts arrive, some don't. Received hides
+          // the row (handled in _groupedByDate); Not Received is just an
+          // acknowledgement and deliberately leaves the row exactly as-is
+          // so the order keeps showing as outstanding.
+          if (item.sent && !item.received) ...[
+            IconButton(
+              icon: const Icon(Icons.check_circle_outline_rounded, size: 20, color: AppColors.success),
+              tooltip: 'Received',
+              onPressed: () => _markReceived(item),
+            ),
+            IconButton(
+              icon: const Icon(Icons.cancel_outlined, size: 20, color: AppColors.warning),
+              tooltip: 'Not Received',
+              onPressed: () => _markNotReceived(item),
+            ),
+          ],
         ],
       ),
+    );
+  }
+
+  Future<void> _markReceived(DailyOrderItem item) async {
+    await _repo.markReceived(item.id);
+    await _load();
+    if (!mounted) return;
+    ScaffoldMessenger.of(context).showSnackBar(
+      SnackBar(content: Text('${item.partName} marked received')),
+    );
+  }
+
+  void _markNotReceived(DailyOrderItem item) {
+    ScaffoldMessenger.of(context).showSnackBar(
+      SnackBar(content: Text('${item.partName} kept - not received yet')),
     );
   }
 }

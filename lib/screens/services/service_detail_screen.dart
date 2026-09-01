@@ -241,14 +241,17 @@ class _ServiceDetailScreenState extends State<ServiceDetailScreen> {
 
   Widget _quickActions(AuthService auth) {
     final actions = <_QuickAction>[
+      // Add Payment and Delivery used to be their own buttons here - both
+      // are now reached through Edit instead (spec: "add payment remove
+      // pannidu antha fuction na edit la add pannidu. delivery remove
+      // pannidu antha fuction ah edit la potru"), which now has optional
+      // "Add Payment" and "Delivery" sections - see _editService.
       _QuickAction('Edit', Icons.edit_rounded, _editService),
-      _QuickAction('Add Payment', Icons.payments_rounded, _addPayment),
       _QuickAction('Change Status', Icons.sync_alt_rounded, _changeStatus),
       _QuickAction('Print', Icons.print_rounded, _printBill),
       _QuickAction('Call', Icons.call_rounded, _callCustomer),
       _QuickAction('WhatsApp', Icons.chat_rounded, _sendWhatsApp),
       _QuickAction('SMS', Icons.sms_rounded, _sendSms),
-      _QuickAction('Delivery', Icons.local_shipping_rounded, _markDelivery),
       if (!_warrantyClaimed) _QuickAction('Warranty Claim', Icons.assignment_return_rounded, _fileWarrantyClaim),
       if (auth.canDelete) _QuickAction('Delete', Icons.delete_rounded, _deleteService),
     ];
@@ -366,6 +369,14 @@ class _ServiceDetailScreenState extends State<ServiceDetailScreen> {
   // Actions
   // -------------------------------------------------------------------
 
+  /// Edit Service - also does double duty as the old separate "Add
+  /// Payment" and "Delivery" actions (spec: "add payment remove pannidu
+  /// antha fuction na edit la add pannidu. delivery remove pannidu antha
+  /// fuction ah edit la potru"). Both are opt-in sections below the normal
+  /// fields, off by default, so a plain edit (e.g. just fixing the
+  /// technician name) never accidentally records a payment or re-sends the
+  /// "delivered" WhatsApp message - exactly the same two actions as
+  /// before, just reached from one button instead of three.
   Future<void> _editService() async {
     final s = _service!;
     final finalCtrl = TextEditingController(text: s.finalAmount.toStringAsFixed(0));
@@ -374,84 +385,211 @@ class _ServiceDetailScreenState extends State<ServiceDetailScreen> {
     final discountCtrl = TextEditingController(text: s.discount == 0 ? '' : s.discount.toStringAsFixed(0));
     final techCtrl = TextEditingController(text: s.technician ?? '');
 
+    // -- Add Payment (optional, folded in from the old _addPayment) --
+    final paymentAmountCtrl = TextEditingController();
+    String paymentMethod = 'Cash';
+
+    // -- Delivery (optional, folded in from the old _markDelivery) --
+    final balanceDue = s.displayBalance > 0 ? s.displayBalance : 0.0;
+    final deliveryPersonCtrl = TextEditingController(text: s.deliveryPerson ?? '');
+    bool markDelivered = false;
+    final deliveryAmountCtrl = TextEditingController(
+      text: balanceDue > 0 ? balanceDue.toStringAsFixed(balanceDue == balanceDue.roundToDouble() ? 0 : 2) : '',
+    );
+
     final ok = await showDialog<bool>(
       context: context,
-      builder: (context) => AlertDialog(
-        title: const Text('Edit Service'),
-        content: SingleChildScrollView(
-          child: Column(
-            mainAxisSize: MainAxisSize.min,
-            children: [
-              TextField(controller: techCtrl, decoration: const InputDecoration(labelText: 'Technician')),
-              const SizedBox(height: 10),
-              TextField(controller: finalCtrl, keyboardType: TextInputType.number, decoration: const InputDecoration(labelText: 'Final Amount (₹)')),
-              const SizedBox(height: 10),
-              TextField(controller: labourCtrl, keyboardType: TextInputType.number, decoration: const InputDecoration(labelText: 'Labour Cost (₹) - Admin only')),
-              const SizedBox(height: 10),
-              TextField(controller: expenseCtrl, keyboardType: TextInputType.number, decoration: const InputDecoration(labelText: 'Additional Expense (₹)')),
-              const SizedBox(height: 10),
-              // Bargain write-off: e.g. Final Amount 100, customer pays 90 -
-              // enter 10 here and the balance auto-settles to 0 instead of
-              // sitting as a pending due. Only printed on the bill when > 0.
-              TextField(
-                controller: discountCtrl,
-                keyboardType: TextInputType.number,
-                decoration: const InputDecoration(
-                  labelText: 'Discount (₹) - leave blank if none',
-                  helperText: 'Bargained-off amount. Balance = Final − Paid − Discount.',
-                  helperMaxLines: 2,
+      builder: (context) => StatefulBuilder(
+        builder: (context, setLocalState) => AlertDialog(
+          title: const Text('Edit Service'),
+          content: SingleChildScrollView(
+            child: Column(
+              mainAxisSize: MainAxisSize.min,
+              crossAxisAlignment: CrossAxisAlignment.start,
+              children: [
+                TextField(controller: techCtrl, decoration: const InputDecoration(labelText: 'Technician')),
+                const SizedBox(height: 10),
+                TextField(controller: finalCtrl, keyboardType: TextInputType.number, decoration: const InputDecoration(labelText: 'Final Amount (₹)')),
+                const SizedBox(height: 10),
+                TextField(controller: labourCtrl, keyboardType: TextInputType.number, decoration: const InputDecoration(labelText: 'Labour Cost (₹) - Admin only')),
+                const SizedBox(height: 10),
+                TextField(controller: expenseCtrl, keyboardType: TextInputType.number, decoration: const InputDecoration(labelText: 'Additional Expense (₹)')),
+                const SizedBox(height: 10),
+                // Bargain write-off: e.g. Final Amount 100, customer pays 90 -
+                // enter 10 here and the balance auto-settles to 0 instead of
+                // sitting as a pending due. Only printed on the bill when > 0.
+                TextField(
+                  controller: discountCtrl,
+                  keyboardType: TextInputType.number,
+                  decoration: const InputDecoration(
+                    labelText: 'Discount (₹) - leave blank if none',
+                    helperText: 'Bargained-off amount. Balance = Final − Paid − Discount.',
+                    helperMaxLines: 2,
+                  ),
                 ),
-              ),
-            ],
+                const Divider(height: 26),
+                const Text('Add Payment (optional)', style: TextStyle(fontWeight: FontWeight.w700, fontSize: 13)),
+                const SizedBox(height: 6),
+                Text(
+                  'Already paid: ${formatCurrency(s.paid)} • Balance due: ${formatCurrency(balanceDue)}',
+                  style: const TextStyle(fontSize: 12.5, fontWeight: FontWeight.w600),
+                ),
+                const SizedBox(height: 8),
+                TextField(controller: paymentAmountCtrl, keyboardType: TextInputType.number, decoration: const InputDecoration(labelText: 'Amount (₹)')),
+                const SizedBox(height: 8),
+                DropdownButtonFormField<String>(
+                  value: paymentMethod,
+                  items: ['Cash', 'UPI', 'Card', 'Bank Transfer'].map((m) => DropdownMenuItem(value: m, child: Text(m))).toList(),
+                  onChanged: (v) => setLocalState(() => paymentMethod = v ?? 'Cash'),
+                ),
+                const Divider(height: 26),
+                const Text('Delivery (optional)', style: TextStyle(fontWeight: FontWeight.w700, fontSize: 13)),
+                const SizedBox(height: 8),
+                TextField(controller: deliveryPersonCtrl, decoration: const InputDecoration(labelText: 'Delivery Person')),
+                const SizedBox(height: 4),
+                CheckboxListTile(
+                  contentPadding: EdgeInsets.zero,
+                  controlAffinity: ListTileControlAffinity.leading,
+                  value: markDelivered,
+                  onChanged: (v) => setLocalState(() => markDelivered = v ?? false),
+                  title: const Text('Mark as Delivered now'),
+                ),
+                if (markDelivered)
+                  TextField(
+                    controller: deliveryAmountCtrl,
+                    keyboardType: TextInputType.number,
+                    decoration: const InputDecoration(
+                      labelText: 'Amount Collected at Delivery (₹)',
+                      helperText: 'On top of the payment above and anything already paid. Leave 0 if nothing is being collected right now.',
+                      helperMaxLines: 3,
+                    ),
+                  ),
+              ],
+            ),
           ),
+          actions: [
+            TextButton(onPressed: () => Navigator.pop(context, false), child: const Text('Cancel')),
+            ElevatedButton(onPressed: () => Navigator.pop(context, true), child: const Text('Save')),
+          ],
         ),
-        actions: [
-          TextButton(onPressed: () => Navigator.pop(context, false), child: const Text('Cancel')),
-          ElevatedButton(onPressed: () => Navigator.pop(context, true), child: const Text('Save')),
-        ],
       ),
     );
 
-    if (ok == true) {
-      final updated = ServiceJob(
-        id: s.id,
-        billNo: s.billNo,
-        customerId: s.customerId,
-        mobileName: s.mobileName,
-        model: s.model,
-        imei: s.imei,
-        complaint: s.complaint,
-        faultAmounts: s.faultAmounts,
-        deviceCondition: s.deviceCondition,
-        existingDamage: s.existingDamage,
-        accCharger: s.accCharger,
-        accCable: s.accCable,
-        accSim: s.accSim,
-        accMemoryCard: s.accMemoryCard,
-        accOther: s.accOther,
-        technician: techCtrl.text.trim(),
-        status: s.status,
-        labourCost: double.tryParse(labourCtrl.text.trim()) ?? s.labourCost,
-        warranty: s.warranty,
-        warrantyPeriod: s.warrantyPeriod,
-        estimatedAmount: s.estimatedAmount,
-        finalAmount: double.tryParse(finalCtrl.text.trim()) ?? s.finalAmount,
-        discount: double.tryParse(discountCtrl.text.trim()) ?? 0,
-        advance: s.advance,
-        paid: s.paid,
-        balance: s.balance,
-        expectedDate: s.expectedDate,
-        actualDate: s.actualDate,
-        deliveryPerson: s.deliveryPerson,
-        deliveryStatus: s.deliveryStatus,
-        additionalExpense: double.tryParse(expenseCtrl.text.trim()) ?? s.additionalExpense,
-        active: s.active,
-        createdAt: s.createdAt,
-        updatedAt: DateTime.now(),
+    if (ok != true) return;
+
+    final newPaymentAmount = double.tryParse(paymentAmountCtrl.text.trim()) ?? 0;
+    final deliveryAmount = markDelivered ? (double.tryParse(deliveryAmountCtrl.text.trim()) ?? 0) : 0.0;
+
+    // Same overpay guard the old Delivery dialog had (spec: catches the
+    // "already paid, then entered again" mistake) - now covering whatever
+    // was entered in either optional section together.
+    final totalNewPayment = newPaymentAmount + deliveryAmount;
+    if (totalNewPayment > balanceDue + 0.5) {
+      final overBy = totalNewPayment - balanceDue;
+      if (!mounted) return;
+      final confirmOverpay = await showDialog<bool>(
+        context: context,
+        builder: (dialogContext) => AlertDialog(
+          title: const Text('More Than the Balance Due?'),
+          content: Text(
+            'Balance due is only ${formatCurrency(balanceDue)}, but ${formatCurrency(totalNewPayment)} was entered - '
+            '${formatCurrency(overBy)} more than what is actually pending.\n\n'
+            'Only continue if the customer is genuinely paying that much extra right now.',
+          ),
+          actions: [
+            TextButton(onPressed: () => Navigator.pop(dialogContext, false), child: const Text('Cancel')),
+            ElevatedButton(onPressed: () => Navigator.pop(dialogContext, true), child: const Text('Yes, Record It')),
+          ],
+        ),
       );
-      await _serviceRepo.update(updated);
-      _load();
+      if (confirmOverpay != true) return;
     }
+
+    final updated = ServiceJob(
+      id: s.id,
+      billNo: s.billNo,
+      customerId: s.customerId,
+      mobileName: s.mobileName,
+      model: s.model,
+      imei: s.imei,
+      complaint: s.complaint,
+      faultAmounts: s.faultAmounts,
+      deviceCondition: s.deviceCondition,
+      existingDamage: s.existingDamage,
+      accCharger: s.accCharger,
+      accCable: s.accCable,
+      accSim: s.accSim,
+      accMemoryCard: s.accMemoryCard,
+      accOther: s.accOther,
+      technician: techCtrl.text.trim(),
+      status: markDelivered ? ServiceStatus.delivered : s.status,
+      labourCost: double.tryParse(labourCtrl.text.trim()) ?? s.labourCost,
+      warranty: s.warranty,
+      warrantyPeriod: s.warrantyPeriod,
+      estimatedAmount: s.estimatedAmount,
+      finalAmount: double.tryParse(finalCtrl.text.trim()) ?? s.finalAmount,
+      discount: double.tryParse(discountCtrl.text.trim()) ?? 0,
+      advance: s.advance,
+      paid: s.paid,
+      balance: s.balance,
+      expectedDate: s.expectedDate,
+      actualDate: markDelivered ? DateTime.now() : s.actualDate,
+      deliveryPerson: deliveryPersonCtrl.text.trim().isEmpty ? s.deliveryPerson : deliveryPersonCtrl.text.trim(),
+      deliveryStatus: markDelivered ? 'Delivered' : s.deliveryStatus,
+      additionalExpense: double.tryParse(expenseCtrl.text.trim()) ?? s.additionalExpense,
+      active: s.active,
+      createdAt: s.createdAt,
+      updatedAt: DateTime.now(),
+    );
+    await _serviceRepo.update(updated);
+
+    if (newPaymentAmount > 0) {
+      await _serviceRepo.recordPayment(serviceId: widget.serviceId, amount: newPaymentAmount, paymentMethod: paymentMethod);
+    }
+
+    if (markDelivered) {
+      await _serviceRepo.changeStatus(widget.serviceId, ServiceStatus.delivered);
+      if (deliveryAmount > 0) {
+        await _serviceRepo.recordPayment(serviceId: widget.serviceId, amount: deliveryAmount, paymentMethod: 'Delivery Collection');
+      }
+
+      // Best-effort WhatsApp "delivered" notification - must never block
+      // saving if WhatsApp isn't available (same rule as before this fix).
+      var waSent = false;
+      if (_customer?.phone != null && _customer!.phone!.trim().isNotEmpty) {
+        try {
+          final freshTotal = s.billTotal;
+          final freshPaid = s.paid + newPaymentAmount + deliveryAmount;
+          final msg = await _waService.deliveryMessage(
+            customerName: _customer!.name,
+            billNo: s.billNo,
+            mobileName: s.mobileName,
+            totalAmount: freshTotal,
+            paidAmount: freshPaid,
+            complaint: s.complaint,
+            imei: s.imei,
+            technician: s.technician,
+            deliveryPerson: deliveryPersonCtrl.text.trim(),
+          );
+          waSent = await _waService.sendWhatsApp(phone: _customer!.phone!, message: msg);
+        } catch (_) {}
+      } else {
+        waSent = true;
+      }
+
+      if (mounted) {
+        ScaffoldMessenger.of(context).showSnackBar(SnackBar(
+          content: Text(waSent
+              ? 'Saved - marked as Delivered'
+              : 'Saved - marked as Delivered. WhatsApp could not be opened automatically, please message the customer manually.'),
+          duration: waSent ? const Duration(seconds: 4) : const Duration(seconds: 6),
+        ));
+      }
+    } else if (newPaymentAmount > 0 && mounted) {
+      ScaffoldMessenger.of(context).showSnackBar(const SnackBar(content: Text('Saved - payment recorded')));
+    }
+
+    _load();
   }
 
   /// Lets the shop add a NEW fault/complaint found after intake (e.g. the
@@ -631,54 +769,11 @@ class _ServiceDetailScreenState extends State<ServiceDetailScreen> {
     }
   }
 
-  Future<void> _addPayment() async {
-    final s = _service!;
-    final balanceDue = s.displayBalance > 0 ? s.displayBalance : 0.0;
-    final amountCtrl = TextEditingController();
-    String method = 'Cash';
-    final ok = await showDialog<bool>(
-      context: context,
-      builder: (context) => StatefulBuilder(
-        builder: (context, setLocalState) => AlertDialog(
-          title: const Text('Add Payment'),
-          content: Column(
-            mainAxisSize: MainAxisSize.min,
-            crossAxisAlignment: CrossAxisAlignment.start,
-            children: [
-              // Same "already paid / balance due" context as the Delivery
-              // dialog (see _markDelivery) - this is what makes it clear
-              // that an amount recorded here is a NEW payment on top of
-              // what's already paid, not a replacement of it.
-              Text(
-                'Already paid: ${formatCurrency(s.paid)} • Balance due: ${formatCurrency(balanceDue)}',
-                style: const TextStyle(fontSize: 12.5, fontWeight: FontWeight.w600),
-              ),
-              const SizedBox(height: 10),
-              TextField(controller: amountCtrl, keyboardType: TextInputType.number, decoration: const InputDecoration(labelText: 'Amount (₹)')),
-              const SizedBox(height: 10),
-              DropdownButtonFormField<String>(
-                value: method,
-                items: ['Cash', 'UPI', 'Card', 'Bank Transfer'].map((m) => DropdownMenuItem(value: m, child: Text(m))).toList(),
-                onChanged: (v) => setLocalState(() => method = v ?? 'Cash'),
-              ),
-            ],
-          ),
-          actions: [
-            TextButton(onPressed: () => Navigator.pop(context, false), child: const Text('Cancel')),
-            ElevatedButton(onPressed: () => Navigator.pop(context, true), child: const Text('Add')),
-          ],
-        ),
-      ),
-    );
-
-    if (ok == true) {
-      final amount = double.tryParse(amountCtrl.text.trim()) ?? 0;
-      if (amount > 0) {
-        await _serviceRepo.recordPayment(serviceId: widget.serviceId, amount: amount, paymentMethod: method);
-        _load();
-      }
-    }
-  }
+  // NOTE: the standalone "Add Payment" quick action used to live here as
+  // its own dialog (_addPayment). It's now folded into _editService's
+  // optional "Add Payment" section above (spec: "add payment remove
+  // pannidu antha fuction na edit la add pannidu") - removed rather than
+  // left as unused dead code.
 
   Future<void> _changeStatus() async {
     String status = _service!.status;
@@ -748,154 +843,11 @@ class _ServiceDetailScreenState extends State<ServiceDetailScreen> {
     }
   }
 
-  /// Delivery action: previously this dialog only captured the delivery
-  /// person's name (the amount had to be added separately via Add Payment,
-  /// which was easy to forget before handing the device back). Now it also
-  /// collects the final amount right here - filling it in and confirming
-  /// records the payment, marks the job Delivered in one step, and pushes a
-  /// WhatsApp "delivered" message to the customer.
-  Future<void> _markDelivery() async {
-    final s = _service!;
-    final personCtrl = TextEditingController(text: s.deliveryPerson ?? '');
-    // displayBalance already reflects every payment recorded so far
-    // (Advance, Add Payment, any earlier Delivery Collection) - it's what
-    // is ACTUALLY still owed right now, not just this dialog's own field.
-    final balanceDue = s.displayBalance > 0 ? s.displayBalance : 0.0;
-    final amountCtrl = TextEditingController(
-      text: balanceDue > 0 ? balanceDue.toStringAsFixed(balanceDue == balanceDue.roundToDouble() ? 0 : 2) : '',
-    );
-
-    final ok = await showDialog<bool>(
-      context: context,
-      builder: (context) => AlertDialog(
-        title: const Text('Delivery'),
-        content: Column(
-          mainAxisSize: MainAxisSize.min,
-          crossAxisAlignment: CrossAxisAlignment.start,
-          children: [
-            // Makes the current money state explicit before the shop types
-            // anything here - this is what was missing before, and why
-            // re-entering an amount already covered by Add Payment quietly
-            // overpaid the bill (showed as balance going negative /
-            // "extra"). Already paid comes from every payment recorded so
-            // far (Advance + any Add Payment entries); Balance due is what
-            // is genuinely still outstanding.
-            Text(
-              'Already paid: ${formatCurrency(s.paid)} • Balance due: ${formatCurrency(balanceDue)}',
-              style: const TextStyle(fontSize: 12.5, fontWeight: FontWeight.w600),
-            ),
-            const SizedBox(height: 10),
-            TextField(controller: personCtrl, decoration: const InputDecoration(labelText: 'Delivery Person')),
-            const SizedBox(height: 10),
-            TextField(
-              controller: amountCtrl,
-              keyboardType: TextInputType.number,
-              decoration: const InputDecoration(
-                labelText: 'Amount Collected Now (₹)',
-                helperText: 'Only what you are collecting AT this delivery. Leave as 0 if the balance was '
-                    'already fully paid earlier via Add Payment - this field always adds a NEW payment, '
-                    'on top of anything already paid.',
-                helperMaxLines: 4,
-              ),
-            ),
-          ],
-        ),
-        actions: [
-          TextButton(onPressed: () => Navigator.pop(context, false), child: const Text('Cancel')),
-          ElevatedButton(onPressed: () => Navigator.pop(context, true), child: const Text('OK - Mark Delivered')),
-        ],
-      ),
-    );
-    if (ok == true) {
-      final amountCollected = double.tryParse(amountCtrl.text.trim()) ?? 0;
-
-      // Catches exactly the "already paid via Add Payment, then also
-      // entered here" mistake before it silently overpays the bill - e.g.
-      // balance was already ₹0 (fully paid) but the field still had a
-      // suggested/typed amount left in it.
-      if (amountCollected > balanceDue + 0.5) {
-        final overBy = amountCollected - balanceDue;
-        if (!mounted) return;
-        final confirmOverpay = await showDialog<bool>(
-          context: context,
-          builder: (dialogContext) => AlertDialog(
-            title: const Text('More Than the Balance Due?'),
-            content: Text(
-              'Balance due is only ${formatCurrency(balanceDue)}, but ${formatCurrency(amountCollected)} was entered here - '
-              '${formatCurrency(overBy)} more than what is actually pending.\n\n'
-              'If this amount was already recorded earlier via Add Payment, tap Cancel and change this field to 0. '
-              'Only continue if the customer is genuinely paying ${formatCurrency(amountCollected)} extra right now.',
-            ),
-            actions: [
-              TextButton(onPressed: () => Navigator.pop(dialogContext, false), child: const Text('Cancel')),
-              ElevatedButton(onPressed: () => Navigator.pop(dialogContext, true), child: const Text('Yes, Record It')),
-            ],
-          ),
-        );
-        if (confirmOverpay != true) return;
-      }
-
-      final updated = ServiceJob(
-        id: s.id, billNo: s.billNo, customerId: s.customerId, mobileName: s.mobileName, model: s.model, imei: s.imei,
-        complaint: s.complaint, faultAmounts: s.faultAmounts, deviceCondition: s.deviceCondition, existingDamage: s.existingDamage,
-        accCharger: s.accCharger, accCable: s.accCable, accSim: s.accSim, accMemoryCard: s.accMemoryCard, accOther: s.accOther,
-        technician: s.technician, status: ServiceStatus.delivered, labourCost: s.labourCost, warranty: s.warranty,
-        warrantyPeriod: s.warrantyPeriod, estimatedAmount: s.estimatedAmount, finalAmount: s.finalAmount, advance: s.advance,
-        paid: s.paid, balance: s.balance, expectedDate: s.expectedDate, actualDate: DateTime.now(),
-        deliveryPerson: personCtrl.text.trim(), deliveryStatus: 'Delivered', additionalExpense: s.additionalExpense,
-        active: s.active, createdAt: s.createdAt, updatedAt: DateTime.now(),
-      );
-      // Update delivery details first (paid/balance untouched here), then
-      // record the collected amount as a real payment - so it shows in the
-      // Payments history too, not just as a raw number overwrite.
-      await _serviceRepo.update(updated);
-      if (amountCollected > 0) {
-        await _serviceRepo.recordPayment(serviceId: widget.serviceId, amount: amountCollected, paymentMethod: 'Delivery Collection');
-      }
-      await _serviceRepo.changeStatus(widget.serviceId, ServiceStatus.delivered);
-
-      // Best-effort WhatsApp "delivered" notification - must never block the
-      // delivery from being recorded if WhatsApp isn't available. PREVIOUSLY
-      // a failed send here was completely silent (bare catch, no feedback at
-      // all) - the "Marked as Delivered" snackbar below always looked the
-      // same whether the customer was actually notified or not. Now a
-      // failure is folded into that same snackbar instead of pretending
-      // everything went out.
-      var waSent = false;
-      if (_customer?.phone != null && _customer!.phone!.trim().isNotEmpty) {
-        try {
-          final freshTotal = s.billTotal;
-          final freshPaid = s.paid + amountCollected;
-          final msg = await _waService.deliveryMessage(
-            customerName: _customer!.name,
-            billNo: s.billNo,
-            mobileName: s.mobileName,
-            totalAmount: freshTotal,
-            paidAmount: freshPaid,
-            complaint: s.complaint,
-            imei: s.imei,
-            technician: s.technician,
-            deliveryPerson: personCtrl.text.trim(),
-          );
-          waSent = await _waService.sendWhatsApp(phone: _customer!.phone!, message: msg);
-        } catch (_) {}
-      } else {
-        // No phone saved at all - nothing to send, not a failure worth
-        // warning about (same as before this fix).
-        waSent = true;
-      }
-
-      if (mounted) {
-        ScaffoldMessenger.of(context).showSnackBar(SnackBar(
-          content: Text(waSent
-              ? 'Marked as Delivered'
-              : 'Marked as Delivered. WhatsApp could not be opened automatically - please message the customer manually.'),
-          duration: waSent ? const Duration(seconds: 4) : const Duration(seconds: 6),
-        ));
-      }
-      _load();
-    }
-  }
+  // NOTE: the standalone "Delivery" quick action used to live here as its
+  // own dialog (_markDelivery). It's now folded into _editService's
+  // optional "Delivery" section above (spec: "delivery remove pannidu
+  // antha fuction ah edit la potru") - removed rather than left as unused
+  // dead code.
 
   /// Shows an error in a dialog (not just a snackbar, which can clip a
   /// longer message) - the same pattern already used in BackupScreen, added
