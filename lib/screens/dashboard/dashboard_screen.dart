@@ -18,6 +18,7 @@ import '../../widgets/stat_card.dart';
 import '../../widgets/status_badge.dart';
 import '../../widgets/section_card.dart';
 import '../pnl/pnl_dashboard_screen.dart';
+import '../quick/quick_transaction_screen.dart';
 import '../services/service_list_screen.dart';
 
 class DashboardScreen extends StatefulWidget {
@@ -156,6 +157,46 @@ class _DashboardScreenState extends State<DashboardScreen> {
                   child: Text('Profit figures are hidden for your account. Ask Admin for access.',
                       style: TextStyle(color: AppColors.textSecondaryOf(context), fontSize: 11.5)),
                 ),
+              const SizedBox(height: 14),
+              // Quick Income & Expense Entry (spec: "PRO SERVICE – Quick
+              // Income & Expense Entry Feature") - fastest in-app path to
+              // log a stray income/expense without opening a full service
+              // bill or the Expenses screen. Refreshes the totals above the
+              // moment a save completes, same as every other "did this
+              // change the dashboard numbers?" flow on this screen.
+              Row(
+                children: [
+                  Expanded(
+                    child: OutlinedButton.icon(
+                      style: OutlinedButton.styleFrom(foregroundColor: AppColors.success),
+                      onPressed: () async {
+                        final saved = await Navigator.push<bool>(
+                          context,
+                          MaterialPageRoute(builder: (_) => const QuickTransactionScreen()),
+                        );
+                        if (saved == true) _refresh();
+                      },
+                      icon: const Icon(Icons.add_circle_outline_rounded),
+                      label: const Text('Quick Income'),
+                    ),
+                  ),
+                  const SizedBox(width: 10),
+                  Expanded(
+                    child: OutlinedButton.icon(
+                      style: OutlinedButton.styleFrom(foregroundColor: AppColors.danger),
+                      onPressed: () async {
+                        final saved = await Navigator.push<bool>(
+                          context,
+                          MaterialPageRoute(builder: (_) => const QuickTransactionScreen(startAsExpense: true)),
+                        );
+                        if (saved == true) _refresh();
+                      },
+                      icon: const Icon(Icons.remove_circle_outline_rounded),
+                      label: const Text('Quick Expense'),
+                    ),
+                  ),
+                ],
+              ),
               const SizedBox(height: 18),
               Row(
                 children: [
