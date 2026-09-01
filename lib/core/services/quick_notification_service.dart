@@ -37,6 +37,23 @@ const _nativeChannel = MethodChannel('pro_app/whatsapp_share');
 /// public` means the ➕/➖ buttons and today's totals show directly on the
 /// lock screen with no unlock needed first.
 ///
+/// ORDERING MATTERS here (2026-09 fix): the native service must be started
+/// BEFORE [AppNotifications.plugin.show] posts the real content, not after.
+/// The service's own onStartCommand has to call Android's startForeground()
+/// with SOME notification on this id the moment it starts - that call was
+/// happening AFTER .show() in an earlier version of this file, so its
+/// bare-bones placeholder (no ➕/➖ buttons, no tap action) silently
+/// clobbered the rich one .show() had just posted, leaving a notification
+/// that looked present but did nothing when tapped (spec: "touch panna
+/// entha responsesum varala ... thotta amount enter pannramathiri
+/// varamattangithu" - tapping it never opened the amount-entry screen).
+/// Starting the service first means its placeholder goes up first, and
+/// [AppNotifications.plugin.show]'s later call to the OS's regular
+/// notify()-with-same-id then simply overwrites that placeholder in place
+/// with the real title/body/actions - no second startForeground() call
+/// needed for that, updating an already-anchored notification's content is
+/// exactly what plain notify() is for.
+///
 /// Shown once on every app open and refreshed every time a Quick
 /// Income/Expense entry is saved (see QuickTransactionScreen) so the totals
 /// in its body stay live. Also re-posted on a periodic background timer via
@@ -71,6 +88,18 @@ class QuickNotificationService {
       }
 
       await AppNotifications.ensureInitialized();
+
+      // Lock-screen dismiss fix: anchors this notification id to a real
+      // foreground service so the OS won't let it be swiped away. MUST run
+      // BEFORE the plugin.show() call below - see the ORDERING MATTERS
+      // note on this class's doc comment for why the reverse order broke
+      // the ➕/➖ action buttons and tap-to-open entirely. Best-effort and
+      // Android-only - iOS has no such channel to reuse, and a failure
+      // here must never stop the notification's actual content (posted
+      // below) from showing.
+      try {
+        await _nativeChannel.invokeMethod('startQuickNotificationService');
+      } catch (_) {}
 
       var body = 'Tap Income or Expense to add an entry in one tap.';
       try {
@@ -115,18 +144,6 @@ class QuickNotificationService {
         const NotificationDetails(android: androidDetails),
         payload: payload,
       );
-
-      // Lock-screen dismiss fix: anchors this same notification id to a
-      // real foreground service so the OS won't let it be swiped away.
-      // Called AFTER the .show() above so the "quick_income_expense"
-      // channel is guaranteed to already exist by the time the native
-      // side touches it. Best-effort and Android-only - iOS has no such
-      // channel to reuse, and a failure here must never stop the
-      // notification's actual content (already shown above) from
-      // displaying.
-      try {
-        await _nativeChannel.invokeMethod('startQuickNotificationService');
-      } catch (_) {}
     } catch (_) {
       // A notification failing to show must never affect the rest of the app.
     }

@@ -701,19 +701,37 @@ class _ServiceFormScreenState extends State<ServiceFormScreen> {
         // apdiyea keep pannikka" - a shortcut so the shop doesn't have to
         // separately open Daily Orders afterwards and retype the same
         // device name/model there just to remember to order matching
-        // parts/accessories for it). Uses the exact same "Part/Accessory
-        // Name" field + quantity "1" default Quick Add Order already uses,
-        // so it shows up as an ordinary row the shop can edit/delete like
-        // any other Daily Order entry - not a separate, special kind of
-        // row. Skipped when neither Mobile Name nor Model was actually
-        // filled in (deviceLabel falls back to the literal 'Device' only
-        // in that case). Best-effort: a Daily Order write failing must
-        // never block the service job itself from being saved.
+        // parts/accessories for it). Uses the exact same quantity "1"
+        // default Quick Add Order already uses, so it shows up as an
+        // ordinary row the shop can edit/delete like any other Daily Order
+        // entry - not a separate, special kind of row.
+        //
+        // FIELD-MAPPING FIX (2026-09): this used to dump deviceLabel into
+        // partName (the "Part / Accessory" column) and leave typeModel
+        // blank - so a Daily Order row noted from a service job showed the
+        // device name where the actual part/accessory was supposed to be,
+        // and nothing at all in "Type / Model" (spec, with a screenshot of
+        // the printed order: "type and model ah mobile name and model name
+        // enter aaganum parts and accessories la fault la na enna mention
+        // panrano athu save aaganum" - Type/Model should hold the device
+        // name+model, Part/Accessory should hold whatever was entered as
+        // the fault/complaint). Now typeModel gets deviceLabel and
+        // partName gets the Fault/Complaint text instead, matching what
+        // Quick Add Order's own two fields mean. Falls back to deviceLabel
+        // for partName when the complaint was left blank, so the row is
+        // never saved with an empty Part/Accessory - a plain quantity-1 row
+        // whose only real detail is the device itself. Skipped entirely
+        // when neither Mobile Name nor Model was actually filled in
+        // (deviceLabel falls back to the literal 'Device' only in that
+        // case). Best-effort: a Daily Order write failing must never block
+        // the service job itself from being saved.
         if (service.deviceLabel != 'Device') {
             try {
+                final complaint = (service.complaint ?? '').trim();
                 await _dailyOrderRepo.create(
                     orderDate: isoDateFormat.format(DateTime.now()),
-                    partName: service.deviceLabel,
+                    typeModel: service.deviceLabel,
+                    partName: complaint.isEmpty ? service.deviceLabel : complaint,
                     quantity: '1',
                     );
                 // Keeps the Daily Orders home-screen widget in sync
