@@ -6,6 +6,9 @@ import '../../core/services/auth_service.dart';
 import '../../core/services/daily_order_auto_send_signal.dart';
 import '../../core/services/logo_service.dart';
 import '../../core/services/menu_order_service.dart';
+import '../../core/services/quick_action_signal.dart';
+import '../../core/services/quick_notification_service.dart';
+import '../quick/quick_transaction_screen.dart';
 import '../dashboard/dashboard_screen.dart';
 import '../customers/customer_list_screen.dart';
 import '../services/service_list_screen.dart';
@@ -54,23 +57,77 @@ class _AppShellState extends State<AppShell> {
   // rebuild.
   int _lastHandledAutoSendTick = 0;
 
+  // Same idea for QuickActionSignal (Quick Income/Expense notification
+  // taps) - see _onQuickActionSignal below.
+  int _lastHandledQuickActionTick = 0;
+
   @override
   void initState() {
     super.initState();
     DailyOrderAutoSendSignal.tick.addListener(_onAutoSendSignal);
+    QuickActionSignal.tick.addListener(_onQuickActionSignal);
     // Covers the cold-start case: the app process was fully dead and this
     // notification/alarm tap is what launched it, so the signal already
     // fired (see main.dart) BEFORE this widget (built only after the PIN
     // gate) even existed to add the listener above. Checking once, right
     // after the first frame, catches that already-fired signal instead of
     // silently landing on Dashboard.
-    WidgetsBinding.instance.addPostFrameCallback((_) => _onAutoSendSignal());
+    WidgetsBinding.instance.addPostFrameCallback((_) {
+      _onAutoSendSignal();
+      _onQuickActionSignal();
+    });
   }
 
   @override
   void dispose() {
     DailyOrderAutoSendSignal.tick.removeListener(_onAutoSendSignal);
+    QuickActionSignal.tick.removeListener(_onQuickActionSignal);
     super.dispose();
+  }
+
+  /// Reacts to a tap on the Quick Income/Expense persistent notification
+  /// (see QuickNotificationService/AppNotifications) - ➕ Income / ➖
+  /// Expense pushes QuickTransactionScreen straight away (same screen the
+  /// Dashboard's own Quick Income/Quick Expense buttons open), a plain
+  /// body or 📊 Dashboard tap just lands on the Dashboard tab, which is
+  /// already this shell's default. Runs after the PIN gate like every
+  /// other in-app navigation - a locked phone still shows the notification
+  /// itself (visibility: public) and its totals, but opening any of its
+  /// buttons goes through the app's normal unlock flow first, same as
+  /// every other notification here.
+  void _onQuickActionSignal() {
+    if (!mounted) return;
+    final tick = QuickActionSignal.tick.value;
+    if (tick == _lastHandledQuickActionTick) return;
+    _lastHandledQuickActionTick = tick;
+    final type = QuickActionSignal.lastType;
+    // Same "look up Dashboard's actual position, don't assume index 0"
+    // caution _onAutoSendSignal already takes for Daily Orders - the menu
+    // can be reordered/role-filtered (see _orderedDestinations), so
+    // Dashboard isn't guaranteed to still be at position 0.
+    final auth = context.read<AuthService>();
+    final menuOrder = context.read<MenuOrderService>();
+    final destinations = _orderedDestinations(menuOrder, auth);
+    final dashboardIndex = destinations.indexWhere((d) => d.id == 'dashboard');
+    if (dashboardIndex != -1) setState(() => _index = dashboardIndex);
+    if (type == QuickActionType.income || type == QuickActionType.expense) {
+      WidgetsBinding.instance.addPostFrameCallback((_) async {
+        if (!mounted) return;
+        final saved = await Navigator.push<bool>(
+          context,
+          MaterialPageRoute(builder: (_) => QuickTransactionScreen(startAsExpense: type == QuickActionType.expense)),
+        );
+        if (saved == true && mounted) {
+          setState(() => _dashboardKey = UniqueKey());
+        }
+        // Refresh the notification's own totals either way - even a
+        // cancelled entry screen is a harmless re-show with unchanged
+        // numbers, and this keeps the notification accurate the instant a
+        // save actually did happen without needing the Dashboard's own
+        // buttons to be the one that triggered it.
+        QuickNotificationService.show();
+      });
+    }
   }
 
   /// Jumps straight to the Daily Orders tab the moment the Daily Order

@@ -15,6 +15,7 @@ import 'package:http/http.dart' as http;
 import '../db/database_helper.dart';
 import '../repositories/settings_repository.dart';
 import '../utils/id_gen.dart';
+import 'app_notifications.dart';
 import 'device_id_service.dart';
 
 /// Manual local backup, and automatic + on-demand Google Drive backup (spec:
@@ -1304,7 +1305,7 @@ class BackupService {
       await _settings.set(SettingsRepository.driveBackupLastError, '');
       await _settings.set(SettingsRepository.driveBackupPendingSince, '');
       await _ensureNotificationsInitialized();
-      await _notifications.cancel(_pendingBackupNotificationId);
+      await AppNotifications.plugin.cancel(_pendingBackupNotificationId);
       if (showRecoveredNotification) {
         const androidDetails = AndroidNotificationDetails(
           'drive_backup_status',
@@ -1315,7 +1316,7 @@ class BackupService {
           playSound: true,
           enableVibration: true,
         );
-        await _notifications.show(
+        await AppNotifications.plugin.show(
           _backupRecoveredNotificationId,
           'Backup Completed',
           'Your data has been backed up to Google Drive successfully.',
@@ -1327,19 +1328,19 @@ class BackupService {
     }
   }
 
-  static final FlutterLocalNotificationsPlugin _notifications = FlutterLocalNotificationsPlugin();
-  static bool _notificationsInitialized = false;
   static const _pendingBackupNotificationId = 2001;
   static const _backupRecoveredNotificationId = 2002;
   static const _preBackupReminderNotificationId = 2003;
 
-  Future<void> _ensureNotificationsInitialized() async {
-    if (_notificationsInitialized) return;
-    const androidInit = AndroidInitializationSettings('@drawable/ic_notification');
-    const settings = InitializationSettings(android: androidInit);
-    await _notifications.initialize(settings);
-    _notificationsInitialized = true;
-  }
+  /// REFACTOR (shared-plugin risk fix): this used to own a completely
+  /// separate `FlutterLocalNotificationsPlugin()` instance and call its own
+  /// `.initialize()` here, with no response callback. See
+  /// AppNotifications' class doc comment for why that was a real risk to
+  /// every OTHER notification in this app (each independent `.initialize()`
+  /// call silently replaces whichever tap callback a previous one
+  /// registered, app-wide) - every notification now shares ONE plugin
+  /// instance/init call via AppNotifications, this method just delegates.
+  Future<void> _ensureNotificationsInitialized() => AppNotifications.ensureInitialized();
 
   /// Posts (or, on a later retry, silently updates in place - same
   /// notification id) a notification the shop owner cannot swipe away
@@ -1362,7 +1363,7 @@ class BackupService {
         playSound: false,
         enableVibration: false,
       );
-      await _notifications.show(
+      await AppNotifications.plugin.show(
         _pendingBackupNotificationId,
         'Backup Waiting for Internet',
         "Your latest data couldn't reach Google Drive yet ($reason). "
@@ -1412,7 +1413,7 @@ class BackupService {
         category: AndroidNotificationCategory.reminder,
         visibility: NotificationVisibility.public,
       );
-      await _notifications.show(
+      await AppNotifications.plugin.show(
         _preBackupReminderNotificationId,
         'Backup Reminder',
         "Tonight's automatic Google Drive backup hasn't happened yet. "

@@ -2,6 +2,7 @@ import 'package:flutter_local_notifications/flutter_local_notifications.dart';
 
 import '../repositories/daily_order_repository.dart';
 import '../repositories/settings_repository.dart';
+import 'app_notifications.dart';
 import 'daily_order_auto_send_signal.dart';
 
 /// Local (on-device, no server/API-key) reminder that nudges the shop
@@ -31,93 +32,24 @@ class OrderReminderService {
   final _settings = SettingsRepository();
   final _repo = DailyOrderRepository();
 
-  static final FlutterLocalNotificationsPlugin _plugin = FlutterLocalNotificationsPlugin();
-  static bool _pluginInitialized = false;
-
   /// Notification payload used to recognise "this tap was the Daily Order
-  /// reminder" - both the warm-app tap callback below and
-  /// [consumeColdStartLaunch] compare against this before firing the
-  /// auto-send signal, so an unrelated notification (if this app ever
-  /// adds one) could never accidentally trigger a WhatsApp send.
+  /// reminder" - AppNotifications' shared response callback compares
+  /// against this before firing the auto-send signal, so an unrelated
+  /// notification could never accidentally trigger a WhatsApp send.
   static const autoSendPayload = 'daily_order_auto_send';
 
-  // HOTFIX: this used to have no try/catch of its own at all, relying on
-  // every caller to wrap it - which was true right up until main.dart
-  // started calling this directly and unguarded on every app startup (to
-  // request the notification permission proactively - see main.dart's
-  // comment). If _plugin.initialize() or requestNotificationsPermission()
-  // ever threw on a particular device/Android version (a missing/renamed
-  // notification icon resource, a manifest merge quirk, anything), that
-  // exception propagated straight out of main() BEFORE runApp() was ever
-  // reached - Flutter never got the chance to mount a single widget, so the
-  // app opened to a permanently blank white screen with no error shown at
-  // all (spec: "app open panna thum kamikkama full white color la erukku").
-  // Wrapping the whole body here guarantees this can never happen again,
-  // regardless of which caller reaches it or whether that caller remembers
-  // to guard it too - reminder setup failing must never be able to stop the
-  // app from opening.
-  static Future<void> ensureInitialized() async {
-    if (_pluginInitialized) return;
-    try {
-      // A proper flat white-on-transparent icon (see build-apk.yml's "Add
-      // proper notification small-icon" step) - @mipmap/ic_launcher (the
-      // full-colour app icon) used to be passed here, which Android 5.0+
-      // collapses into a blank/unrecognisable white blob in the status bar
-      // since it only ever renders a notification icon's alpha channel.
-      const androidInit = AndroidInitializationSettings('@drawable/ic_notification');
-      const settings = InitializationSettings(android: androidInit);
-      await _plugin.initialize(
-        settings,
-        // Fires while the app process is alive (foreground OR backgrounded
-        // but not killed) - the cold-start case (process fully dead) is
-        // instead caught once at app boot via consumeColdStartLaunch()
-        // below, called from main.dart. Only reacts to taps on THIS
-        // reminder's own notification (payload check), so nothing else
-        // could ever accidentally trigger an auto WhatsApp-open.
-        onDidReceiveNotificationResponse: (response) {
-          if (response.payload == autoSendPayload) {
-            DailyOrderAutoSendSignal.fire();
-          }
-        },
-      );
-      // Android 13+ requires this one-time runtime "Allow notifications?"
-      // permission before ANY notification (including this reminder) can
-      // actually be shown - unlike the WorkManager background scheduling in
-      // background_tasks.dart, there's no silent alternative for
-      // notifications specifically. Shown once; the OS remembers the
-      // answer after that.
-      await _plugin
-          .resolvePlatformSpecificImplementation<AndroidFlutterLocalNotificationsPlugin>()
-          ?.requestNotificationsPermission();
-      _pluginInitialized = true;
-    } catch (_) {
-      // Never let reminder setup failing block app startup - see the
-      // HOTFIX note above. Leaves _pluginInitialized false so a later call
-      // (e.g. the next app open) gets to try again.
-    }
-  }
-
-  /// Call once from main(), right after [ensureInitialized], to catch the
-  /// case flutter_local_notifications' own tap callback CAN'T cover: the
-  /// app process was fully dead (not just backgrounded) and this exact tap
-  /// is what launched it fresh. In that situation Android just starts a
-  /// normal cold app launch via the notification's intent - there is no
-  /// live plugin instance yet for onDidReceiveNotificationResponse to fire
-  /// on - so this asks the plugin "were you launched by a notification
-  /// tap, and if so, which payload?" once boot has progressed far enough
-  /// for the plugin to answer, and fires the same auto-send signal if it
-  /// matches. Never throws - a failure here must never block app startup
-  /// (see HOTFIX note on ensureInitialized above).
-  static Future<void> consumeColdStartLaunch() async {
-    try {
-      final details = await _plugin.getNotificationAppLaunchDetails();
-      if (details?.didNotificationLaunchApp == true && details?.notificationResponse?.payload == autoSendPayload) {
-        DailyOrderAutoSendSignal.fire();
-      }
-    } catch (_) {
-      // See HOTFIX note on ensureInitialized - never block app startup.
-    }
-  }
+  /// Thin delegate to [AppNotifications.ensureInitialized] - kept as a
+  /// named entry point here since main.dart (and this class's own
+  /// [checkAndNotifyIfDue]) already call it by this name.
+  ///
+  /// REFACTOR (shared-plugin risk fix): this used to own a completely
+  /// separate `FlutterLocalNotificationsPlugin()` instance and its own
+  /// `.initialize()` call/callback, exactly like BackupService did - see
+  /// AppNotifications' class doc comment for the app-wide "last
+  /// .initialize() call silently wins" risk that created, and why every
+  /// notification in this app now shares ONE plugin instance and ONE
+  /// callback registered there instead.
+  static Future<void> ensureInitialized() => AppNotifications.ensureInitialized();
 
   /// Called both from the WorkManager background task (once daily, timed
   /// to the shop's chosen Daily Orders send time - see
@@ -194,7 +126,7 @@ class OrderReminderService {
         fullScreenIntent: true,
         visibility: NotificationVisibility.public,
       );
-      await _plugin.show(
+      await AppNotifications.plugin.show(
         1001,
         'Order Time!',
         "${pending.length} item(s) waiting - tap to auto-open Daily Orders ready to send to your supplier.",

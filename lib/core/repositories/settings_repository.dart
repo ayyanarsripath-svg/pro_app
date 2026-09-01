@@ -155,6 +155,15 @@ class SettingsRepository {
   // printer" API separate from its own system print dialog. See
   // ServiceFormScreen._printServiceBillDirect's doc comment.
 
+  // Quick Income & Expense persistent notification (spec: "PRO SERVICE -
+  // Quick Income & Expense Entry Feature") - on by default (unset/null and
+  // any value other than the literal string 'false' both mean "on") so a
+  // shop that never opens Settings still gets the always-available ➕
+  // Income / ➖ Expense notification out of the box; explicitly turning it
+  // off both clears the notification immediately and stops its periodic
+  // reboot-survival re-arm (see QuickNotificationService/background_tasks.dart).
+  static const quickNotificationEnabled = 'quick_notification_enabled';
+
   // NOTE: the Daily Orders home-screen widget's on/off toggle is
   // deliberately NOT a key in this table. Backups (see BackupService) work
   // by copying the whole SQLite database file, so anything stored here goes

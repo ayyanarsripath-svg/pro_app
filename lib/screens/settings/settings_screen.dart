@@ -11,8 +11,10 @@ import 'package:url_launcher/url_launcher.dart';
 import '../../core/repositories/settings_repository.dart';
 import '../../core/repositories/staff_repository.dart';
 import '../../core/services/auth_service.dart';
+import '../../core/services/background_tasks.dart';
 import '../../core/services/logo_service.dart';
 import '../../core/services/pdf_service.dart';
+import '../../core/services/quick_notification_service.dart';
 import '../../core/services/theme_service.dart';
 import '../../core/theme/app_theme.dart';
 import '../../widgets/section_card.dart';
@@ -57,6 +59,7 @@ class _SettingsScreenState extends State<SettingsScreen> {
   bool _loading = true;
   bool _testPrinting = false;
   String _whatsappSendApp = 'auto';
+  bool _quickNotificationEnabled = true;
 
   @override
   void initState() {
@@ -71,7 +74,26 @@ class _SettingsScreenState extends State<SettingsScreen> {
     _addressCtrl.text = all[SettingsRepository.shopAddress] ?? 'Mainroad, Ma.Kunnathur';
     _phoneCtrl.text = all[SettingsRepository.shopPhone] ?? '7806938306';
     _whatsappSendApp = await _settingsRepo.getWhatsAppSendApp();
+    // Unset/null defaults to ON (see SettingsRepository.quickNotificationEnabled).
+    _quickNotificationEnabled = all[SettingsRepository.quickNotificationEnabled] != 'false';
     setState(() => _loading = false);
+  }
+
+  /// Turning this on/off takes effect immediately - on: shows the
+  /// notification right away (with today's current totals) and re-arms its
+  /// reboot-survival timer; off: clears it and cancels that timer so it
+  /// doesn't silently reappear later. See QuickNotificationService/
+  /// background_tasks.dart's scheduleQuickNotificationRefresh.
+  Future<void> _saveQuickNotificationEnabled(bool value) async {
+    setState(() => _quickNotificationEnabled = value);
+    await _settingsRepo.set(SettingsRepository.quickNotificationEnabled, value.toString());
+    if (value) {
+      await QuickNotificationService.show();
+      await scheduleQuickNotificationRefresh();
+    } else {
+      await QuickNotificationService.cancel();
+      await cancelQuickNotificationRefresh();
+    }
   }
 
   Future<void> _saveWhatsAppSendApp(String value) async {
@@ -412,6 +434,20 @@ class _SettingsScreenState extends State<SettingsScreen> {
                 ? const SizedBox(width: 16, height: 16, child: CircularProgressIndicator(strokeWidth: 2, color: Colors.white))
                 : const Icon(Icons.print_rounded),
             label: const Text('Test Print'),
+          ),
+        ]),
+        SectionCard(title: 'Quick Income & Expense Notification', icon: Icons.notifications_active_rounded, children: [
+          SwitchListTile(
+            contentPadding: EdgeInsets.zero,
+            title: const Text('Show Persistent Notification'),
+            subtitle: Text(
+              _quickNotificationEnabled
+                  ? "Always shown, even on the lock screen, with today's running Income/Expense totals and ➕/➖ one-tap buttons."
+                  : 'Off - no Quick Income/Expense notification is shown.',
+            ),
+            secondary: const Icon(Icons.notifications_active_rounded, color: AppColors.primaryBlue),
+            value: _quickNotificationEnabled,
+            onChanged: _saveQuickNotificationEnabled,
           ),
         ]),
         SectionCard(title: 'Shop Details (shown on printed bills)', icon: Icons.storefront_rounded, children: [

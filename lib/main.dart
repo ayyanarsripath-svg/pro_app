@@ -2,6 +2,7 @@ import 'package:flutter/material.dart';
 import 'package:provider/provider.dart';
 
 import 'core/db/database_helper.dart';
+import 'core/services/app_notifications.dart';
 import 'core/services/auth_service.dart';
 import 'core/services/background_tasks.dart';
 import 'core/services/backup_service.dart';
@@ -9,6 +10,7 @@ import 'core/services/daily_order_widget_service.dart';
 import 'core/services/logo_service.dart';
 import 'core/services/menu_order_service.dart';
 import 'core/services/order_reminder_service.dart';
+import 'core/services/quick_notification_service.dart';
 import 'core/services/theme_service.dart';
 import 'core/repositories/settings_repository.dart';
 import 'core/theme/app_theme.dart';
@@ -99,24 +101,39 @@ Future<void> main() async {
   // thum kamikkama full white color la erukku"). Nothing to do with
   // reminders should ever be able to stop the app from opening.
   try {
-    await OrderReminderService.ensureInitialized();
+    // AppNotifications owns the ONE shared FlutterLocalNotificationsPlugin
+    // instance/init call every notification in this app now goes through
+    // (Daily Order reminder, backup status, and the Quick Income/Expense
+    // persistent notification below) - see its class doc comment for the
+    // "each service's own separate .initialize() call silently clobbers
+    // the last one's tap callback" risk this replaces.
+    await AppNotifications.ensureInitialized();
     // Catches the case where THIS app launch is happening because the shop
-    // owner tapped a Daily Order reminder while the app was fully closed
-    // (not just backgrounded) - two independent paths, since the exact
-    // alarm (background_tasks.dart's consumeDailyOrderAlarmLaunch) and the
-    // WorkManager-polled notification (OrderReminderService's
-    // consumeColdStartLaunch) are fired completely separately (native
-    // AlarmManager+Intent vs flutter_local_notifications). Both must run
-    // before AppShell/DailyOrderScreen ever build so neither one misses the
-    // signal (DailyOrderAutoSendSignal.tick is a counter precisely so a
-    // fire() here, before either widget exists yet, is still picked up
-    // once they mount).
-    await OrderReminderService.consumeColdStartLaunch();
+    // owner tapped a Daily Order reminder, or a Quick Income/Expense
+    // notification action, while the app was fully closed (not just
+    // backgrounded) - two further independent paths exist alongside this
+    // one, since the exact Daily Order alarm (background_tasks.dart's
+    // consumeDailyOrderAlarmLaunch) is fired completely separately (native
+    // AlarmManager+Intent vs flutter_local_notifications). All three must
+    // run before AppShell/DailyOrderScreen ever build so none of them
+    // misses its signal (DailyOrderAutoSendSignal.tick/QuickActionSignal.tick
+    // are counters precisely so a fire() here, before either widget exists
+    // yet, is still picked up once they mount).
+    await AppNotifications.consumeColdStartLaunch();
     await consumeDailyOrderAlarmLaunch();
     OrderReminderService().checkAndNotifyIfDue();
   } catch (_) {
     // See HOTFIX note above - reminder setup must never block app startup.
   }
+
+  // Quick Income & Expense persistent notification (spec: "PRO SERVICE -
+  // Quick Income & Expense Entry Feature") - shown (or refreshed with
+  // today's latest totals) on every app open, and re-armed to survive a
+  // device reboot on its own. Both self-gate on the Settings toggle inside
+  // QuickNotificationService/scheduleQuickNotificationRefresh, and never
+  // throw - see their own doc comments.
+  QuickNotificationService.show();
+  scheduleQuickNotificationRefresh();
 
   // Daily Orders home-screen widget (Phase 2) - refreshes on every app
   // startup so the widget reflects carry-forward changes even if the shop
