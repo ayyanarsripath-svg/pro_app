@@ -9,6 +9,7 @@ import '../repositories/settings_repository.dart';
 import 'backup_service.dart';
 import 'daily_order_auto_send_signal.dart';
 import 'order_reminder_service.dart';
+import 'quick_notification_service.dart';
 
 // Same native channel MainActivity.kt already exposes for WhatsApp direct
 // share and App Signing Info - reused here for the exact-alarm Daily Order
@@ -260,6 +261,75 @@ Future<void> cancelDailyBackupAlarm() async {
 /// Arbitrary but unique android_alarm_manager_plus alarm id for the
 /// pre-backup reminder below - only has to differ from [_dailyBackupAlarmId].
 const _preBackupReminderAlarmId = 930200;
+
+/// Arbitrary but unique android_alarm_manager_plus alarm id for the Quick
+/// Income/Expense persistent notification's periodic re-arm below - only
+/// has to differ from the other alarm ids on this page.
+const _quickNotificationAlarmId = 930300;
+
+/// Keeps the Quick Income/Expense persistent notification alive across
+/// device reboots (see QuickNotificationService's class doc comment for why
+/// a periodic re-arm, not a foreground service, is the deliberate choice
+/// here) - Android clears every notification, for every app, the moment the
+/// phone reboots, and there is no way for a plain (non-foreground-service)
+/// notification to survive that. `rescheduleOnReboot: true` below makes
+/// android_alarm_manager_plus's own bundled boot receiver silently
+/// re-register this same periodic alarm the moment the phone finishes
+/// booting - no manifest work needed here, the plugin already ships that
+/// receiver (see build-apk.yml's RECEIVE_BOOT_COMPLETED permission, already
+/// required for this app's other exact alarms). Safe to call on every app
+/// startup: [AndroidAlarmManager.periodic] with the same id simply leaves
+/// an already-registered periodic alarm alone if `startAt` isn't rewritten
+/// each time... in practice this just keeps re-arming the same cycle, which
+/// is harmless (it only ever calls [quickNotificationRefreshCallback],
+/// itself a no-op no matter how often it fires - see that callback's doc
+/// comment).
+Future<void> scheduleQuickNotificationRefresh() async {
+  if (!Platform.isAndroid) return;
+  try {
+    await AndroidAlarmManager.initialize();
+    await AndroidAlarmManager.periodic(
+      const Duration(minutes: 30),
+      _quickNotificationAlarmId,
+      quickNotificationRefreshCallback,
+      wakeup: true,
+      rescheduleOnReboot: true,
+    );
+  } catch (_) {
+    // The notification still shows on every app open (see main.dart) even
+    // if this periodic re-arm can't be scheduled on a particular device -
+    // this is purely the "survive a reboot without opening the app first"
+    // guarantee, never load-bearing for the feature to work at all.
+  }
+}
+
+/// Cancels the Quick Income/Expense periodic re-arm - called when the shop
+/// turns the notification off in Settings, so a stale timer doesn't keep
+/// silently re-showing a notification the owner just asked to turn off.
+Future<void> cancelQuickNotificationRefresh() async {
+  if (!Platform.isAndroid) return;
+  try {
+    await AndroidAlarmManager.initialize();
+    await AndroidAlarmManager.cancel(_quickNotificationAlarmId);
+  } catch (_) {}
+}
+
+/// android_alarm_manager_plus entry point for
+/// [scheduleQuickNotificationRefresh]'s periodic alarm - runs in its own
+/// fresh background isolate, same as [backupAlarmCallback] above, so it
+/// re-initializes AndroidAlarmManager itself before doing anything else.
+/// Just re-shows (or, if the shop has since turned the Settings toggle off,
+/// clears) the persistent notification with fresh totals -
+/// QuickNotificationService.show() already no-ops safely either way, so
+/// this callback never needs its own enabled/disabled branching. Must stay
+/// a top-level function annotated with @pragma('vm:entry-point') so the
+/// Android side can still find it after the app process is killed.
+@pragma('vm:entry-point')
+void quickNotificationRefreshCallback() async {
+  try {
+    await QuickNotificationService.show();
+  } catch (_) {}
+}
 
 /// Reminder alarm that fires a configurable number of minutes BEFORE the
 /// ~10 PM automatic Google Drive backup (see [scheduleDailyBackupAlarm] just

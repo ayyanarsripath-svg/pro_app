@@ -1,6 +1,7 @@
 import 'package:flutter/material.dart';
 
 import '../../core/repositories/quick_transaction_repository.dart';
+import '../../core/services/quick_notification_service.dart';
 import '../../core/theme/app_theme.dart';
 
 /// Fast Income/Expense entry (spec: "PRO SERVICE – Quick Income & Expense
@@ -64,6 +65,13 @@ class _QuickTransactionScreenState extends State<QuickTransactionScreen> {
       }
       if (!mounted) return;
       _savedCount++;
+      // Keeps the persistent notification's own "Today - Income: ...
+      // Expense: ..." body in sync the instant a save happens here too -
+      // not just when saved directly from the notification's own action
+      // buttons (see QuickNotificationService's "notification auto-update"
+      // doc comment). Fire-and-forget: never worth blocking this screen's
+      // own save flow on a notification refresh.
+      QuickNotificationService.show();
       if (addAnother) {
         _amountCtrl.clear();
         _noteCtrl.clear();
