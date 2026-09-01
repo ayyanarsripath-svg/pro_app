@@ -69,7 +69,7 @@ class _CustomerDetailScreenState extends State<CustomerDetailScreen> {
                   // here for history, but struck through so it's obvious at
                   // a glance that they're no longer live.
                   title: Text(
-                    '${s.billNo} - ${s.mobileName ?? ''} ${s.model ?? ''}',
+                    '${s.billNo} - ${s.deviceLabel}',
                     style: !s.active ? const TextStyle(decoration: TextDecoration.lineThrough) : null,
                   ),
                   subtitle: Text(

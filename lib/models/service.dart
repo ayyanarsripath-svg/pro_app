@@ -119,6 +119,26 @@ bool get isPaymentPending => displayBalance > 0;
   /// remaining 10 as a discount instead of leaving it as a pending due.
   double get displayBalance => billTotal - paid - discount;
 
+  /// Mobile Name + Model combined for display (e.g. "VIVO Y12") - shared by
+  /// every screen that lists jobs (Service Bill list, Customer history)
+  /// so they all show the full device identity, not just the brand.
+  ///
+  /// BUG FIX: ServiceListScreen used to show only [mobileName] next to the
+  /// bill number (e.g. "A009 - VIVO") with [model] (e.g. "Y12") entered on
+  /// intake nowhere in sight on that list - the shop couldn't tell which
+  /// exact model a bill was for without opening it (spec: "bill number
+  /// pakkathula vivo apdinu erukku ... edathula thoda model number mention
+  /// aaganum"). Falls back to whichever of the two is present if only one
+  /// was filled in, and to 'Device' if neither was.
+  String get deviceLabel {
+    final name = (mobileName ?? '').trim();
+    final m = (model ?? '').trim();
+    if (name.isEmpty && m.isEmpty) return 'Device';
+    if (name.isEmpty) return m;
+    if (m.isEmpty) return name;
+    return '$name $m';
+  }
+
   factory ServiceJob.fromMap(Map<String, dynamic> m) => ServiceJob(
         id: m['id'] as String,
         billNo: m['bill_no'] as String,

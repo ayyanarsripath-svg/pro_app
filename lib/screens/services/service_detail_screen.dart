@@ -191,6 +191,18 @@ class _ServiceDetailScreenState extends State<ServiceDetailScreen> {
               _row('Warranty', s.warranty ? 'Yes' : 'No'),
               if (s.warranty) _row('Period', s.warrantyPeriod),
             ]),
+            // Offers given on this job (e.g. "Free Tempered Glass") - was
+            // already saved on the job and printed on the bill (see
+            // PdfService), but never shown anywhere in the app itself, so
+            // there was no way to look back at which offer a bill carried
+            // without digging up the printed paper copy (spec: "offer la
+            // free tempered glass nu pottu erukku athu history la save
+            // pannika feature reference ku use aagum"). Only shown when an
+            // offer was actually picked, since most jobs carry none.
+            if ((s.offers ?? '').trim().isNotEmpty)
+              SectionCard(title: 'Offers', icon: Icons.local_offer_rounded, children: [
+                Text(s.offers!),
+              ]),
             SectionCard(
               title: 'Photos',
               icon: Icons.photo_camera_rounded,
