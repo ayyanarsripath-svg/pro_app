@@ -164,7 +164,7 @@ class _ServiceListScreenState extends State<ServiceListScreen> {
                   final customer = _customersById[s.customerId];
                   return Card(
                     child: ListTile(
-                      title: Text('${s.billNo} • ${s.mobileName ?? 'Device'}',
+                      title: Text('${s.billNo} • ${s.deviceLabel}',
                                   style: const TextStyle(fontWeight: FontWeight.w700)),
                       subtitle: Text(
                         '${customer?.name ?? '-'} • ${customer?.phone ?? '-'}\n${s.complaint ?? '-'}\n${formatCurrency(s.billTotal)} • Balance: ${formatCurrency(s.displayBalance)}'),

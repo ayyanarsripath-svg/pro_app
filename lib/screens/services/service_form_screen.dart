@@ -4,8 +4,10 @@ import 'package:pdf/pdf.dart';
 import 'package:printing/printing.dart';
 
 import '../../core/repositories/customer_repository.dart';
+import '../../core/repositories/daily_order_repository.dart';
 import '../../core/repositories/service_repository.dart';
 import '../../core/repositories/settings_repository.dart';
+import '../../core/services/daily_order_widget_service.dart';
 import '../../core/services/pdf_service.dart';
 import '../../core/services/whatsapp_sms_service.dart';
 import '../../core/utils/formatters.dart';
@@ -26,6 +28,8 @@ class _ServiceFormScreenState extends State<ServiceFormScreen> {
     final _formKey = GlobalKey<FormState>();
     final _customerRepo = CustomerRepository();
     final _serviceRepo = ServiceRepository();
+    final _dailyOrderRepo = DailyOrderRepository();
+    final _widgetService = DailyOrderWidgetService();
     final _settingsRepo = SettingsRepository();
     final _waService = WhatsAppSmsService();
     final _pdfService = PdfService();
@@ -689,6 +693,39 @@ class _ServiceFormScreenState extends State<ServiceFormScreen> {
             expectedDate: _expectedDate,
             faultAmounts: faultAmounts,
             );
+
+        // Auto-note this job's device into TODAY's Daily Order (spec:
+        // "service bill la new service job create pannumpothu device name
+        // and model la enna name kudukkureno athu enakku daily order la
+        // save aaganum ... earkanavy quantity 1 nu save panni erukkom atha
+        // apdiyea keep pannikka" - a shortcut so the shop doesn't have to
+        // separately open Daily Orders afterwards and retype the same
+        // device name/model there just to remember to order matching
+        // parts/accessories for it). Uses the exact same "Part/Accessory
+        // Name" field + quantity "1" default Quick Add Order already uses,
+        // so it shows up as an ordinary row the shop can edit/delete like
+        // any other Daily Order entry - not a separate, special kind of
+        // row. Skipped when neither Mobile Name nor Model was actually
+        // filled in (deviceLabel falls back to the literal 'Device' only
+        // in that case). Best-effort: a Daily Order write failing must
+        // never block the service job itself from being saved.
+        if (service.deviceLabel != 'Device') {
+            try {
+                await _dailyOrderRepo.create(
+                    orderDate: isoDateFormat.format(DateTime.now()),
+                    partName: service.deviceLabel,
+                    quantity: '1',
+                    );
+                // Keeps the Daily Orders home-screen widget in sync
+                // immediately, same as DailyOrderScreen/QuickAddOrderScreen's
+                // own refresh after adding an item - otherwise the widget
+                // would only pick this new row up the next time the app is
+                // reopened.
+                await _widgetService.refresh();
+            } catch (_) {
+                // Never let this shortcut's failure block job-card creation.
+            }
+        }
 
         // Print the bill IMMEDIATELY on "Create Service Job Card" - no app
         // preview screen, no confirmation dialog in between (spec: "create
