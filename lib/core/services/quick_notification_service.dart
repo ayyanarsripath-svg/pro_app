@@ -1,8 +1,17 @@
+import 'package:flutter/services.dart';
 import 'package:flutter_local_notifications/flutter_local_notifications.dart';
 
 import '../repositories/settings_repository.dart';
 import 'app_notifications.dart';
 import 'pnl_service.dart';
+
+// Same native channel MainActivity.kt already exposes for WhatsApp direct
+// share, App Signing Info and the Daily Order alarm - reused here to
+// start/stop QuickNotificationForegroundService.kt (see that file for why:
+// binding this notification's id to a real foreground service is what
+// actually stops the OS from letting it be swiped away, including from the
+// lock screen).
+const _nativeChannel = MethodChannel('pro_app/whatsapp_share');
 
 /// Persistent Quick Income/Expense notification (spec: "PRO SERVICE - Quick
 /// Income & Expense Entry Feature" - a persistent, always-available ➕
@@ -16,8 +25,15 @@ import 'pnl_service.dart';
 /// yet (it was paused mid-way over the shared-plugin-callback risk fixed in
 /// AppNotifications), so there was nothing TO show. It exists now.
 ///
-/// `ongoing: true` + `autoCancel: false` means the shop owner cannot swipe
-/// it away (only the Settings toggle below removes it); `visibility:
+/// `ongoing: true` + `autoCancel: false` alone turned out NOT to reliably
+/// stop the shop from swiping it away while the phone was locked, on some
+/// OEM lock-screen UIs (spec: "quick income and quick expenses notification
+/// lock screen la erukkumpothu thalli vitta poiduthu ... athu pogavey
+/// kudathu" - it must never go away). So `show()` below now also starts
+/// QuickNotificationForegroundService.kt via the native channel, which
+/// anchors this same notification id to a genuine Android foreground
+/// service - the one OS-guaranteed mechanism the platform itself won't let
+/// the user dismiss, on the lock screen or anywhere else. `visibility:
 /// public` means the ➕/➖ buttons and today's totals show directly on the
 /// lock screen with no unlock needed first.
 ///
@@ -26,15 +42,12 @@ import 'pnl_service.dart';
 /// in its body stay live. Also re-posted on a periodic background timer via
 /// android_alarm_manager_plus (see background_tasks.dart's
 /// scheduleQuickNotificationRefresh/quickNotificationRefreshCallback) -
-/// Android clears EVERY notification, for every app, on device reboot, and
-/// there is no way around that short of tying this to a running foreground
-/// service (deliberately avoided here - foreground services are exactly the
-/// kind of thing aggressive OEM battery managers kill, which would make
-/// this notification LESS reliable, not more). The periodic re-arm is the
-/// same trade-off this app's other exact alarms already make (see
-/// background_tasks.dart's daily backup alarm) - after a reboot, this
-/// notification reappears on its own within that timer's interval, without
-/// needing the app opened first.
+/// Android clears EVERY notification (and stops every foreground service),
+/// for every app, on device reboot, so the periodic re-arm is what brings
+/// both the notification AND its foreground-service anchor back after a
+/// reboot, without needing the app opened first - same trade-off this
+/// app's other exact alarms already make (see background_tasks.dart's
+/// daily backup alarm).
 class QuickNotificationService {
   QuickNotificationService._();
 
@@ -102,6 +115,18 @@ class QuickNotificationService {
         const NotificationDetails(android: androidDetails),
         payload: payload,
       );
+
+      // Lock-screen dismiss fix: anchors this same notification id to a
+      // real foreground service so the OS won't let it be swiped away.
+      // Called AFTER the .show() above so the "quick_income_expense"
+      // channel is guaranteed to already exist by the time the native
+      // side touches it. Best-effort and Android-only - iOS has no such
+      // channel to reuse, and a failure here must never stop the
+      // notification's actual content (already shown above) from
+      // displaying.
+      try {
+        await _nativeChannel.invokeMethod('startQuickNotificationService');
+      } catch (_) {}
     } catch (_) {
       // A notification failing to show must never affect the rest of the app.
     }
@@ -116,5 +141,13 @@ class QuickNotificationService {
     } catch (_) {
       // Never let clearing a notification throw into the caller.
     }
+    // Stops QuickNotificationForegroundService.kt too, which itself
+    // removes the notification id it anchored (see that file's
+    // onDestroy()) - otherwise the foreground service would keep the
+    // (now content-less) notification alive even after the cancel() call
+    // above.
+    try {
+      await _nativeChannel.invokeMethod('stopQuickNotificationService');
+    } catch (_) {}
   }
 }
