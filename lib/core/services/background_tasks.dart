@@ -267,12 +267,12 @@ const _preBackupReminderAlarmId = 930200;
 /// has to differ from the other alarm ids on this page.
 const _quickNotificationAlarmId = 930300;
 
-/// Keeps the Quick Income/Expense persistent notification alive across
-/// device reboots (see QuickNotificationService's class doc comment for why
-/// a periodic re-arm, not a foreground service, is the deliberate choice
-/// here) - Android clears every notification, for every app, the moment the
-/// phone reboots, and there is no way for a plain (non-foreground-service)
-/// notification to survive that. `rescheduleOnReboot: true` below makes
+/// Keeps the Quick Income/Expense persistent notification (and its
+/// foreground-service anchor - see QuickNotificationService's class doc
+/// comment) alive across device reboots - Android stops every foreground
+/// service and clears every notification, for every app, the moment the
+/// phone reboots, and there is no notification-only way to survive that.
+/// `rescheduleOnReboot: true` below makes
 /// android_alarm_manager_plus's own bundled boot receiver silently
 /// re-register this same periodic alarm the moment the phone finishes
 /// booting - no manifest work needed here, the plugin already ships that
@@ -324,6 +324,17 @@ Future<void> cancelQuickNotificationRefresh() async {
 /// this callback never needs its own enabled/disabled branching. Must stay
 /// a top-level function annotated with @pragma('vm:entry-point') so the
 /// Android side can still find it after the app process is killed.
+///
+/// NOTE: the foreground-service-start call inside QuickNotificationService
+/// .show() goes over a MethodChannel that only exists on a live
+/// MainActivity - this background isolate has none, so that specific call
+/// silently no-ops here (caught, like everywhere else this channel is
+/// called) while the notification content itself still posts fine (that
+/// part talks to Android directly via flutter_local_notifications, no
+/// MainActivity needed). In practice this only matters in the narrow
+/// window right after a reboot before the shop next opens the app - the
+/// very next app open re-attaches the foreground service normally (see
+/// main.dart calling QuickNotificationService.show() on startup).
 @pragma('vm:entry-point')
 void quickNotificationRefreshCallback() async {
   try {

@@ -139,6 +139,23 @@ jobs:
               # above already cover for the Daily Order alarm. Not a
               # runtime-prompted permission.
               '    <uses-permission android:name="android.permission.WAKE_LOCK"/>',
+              # Quick Income/Expense persistent notification - lock-screen
+              # dismiss fix (2026-09, spec: "quick income and quick
+              # expenses notification lock screen la erukkumpothu thalli
+              # vitta poiduthu ... athu pogavey kudathu" - the notification
+              # was getting swiped away while the phone was locked).
+              # `ongoing`/`autoCancel: false` alone turned out not to be
+              # enough on many OEM lock screens, so it's now anchored by a
+              # real foreground service (QuickNotificationForegroundService,
+              # see the step below) - FOREGROUND_SERVICE is required for
+              # any foreground service on Android 9+, and
+              # FOREGROUND_SERVICE_SPECIAL_USE is additionally required on
+              # Android 14+/API 34 because this service doesn't fit any of
+              # the platform's predefined foreground-service types (it's
+              # not media/location/camera/etc - it just keeps one
+              # notification alive). Neither prompts the user at runtime.
+              '    <uses-permission android:name="android.permission.FOREGROUND_SERVICE"/>',
+              '    <uses-permission android:name="android.permission.FOREGROUND_SERVICE_SPECIAL_USE"/>',
           ]
           to_add = [line for line in needed if line.split('"')[1] not in content]
 
@@ -865,6 +882,43 @@ jobs:
                           val flag = intent?.getBooleanExtra("open_daily_orders", false) ?: false
                           if (flag) intent?.removeExtra("open_daily_orders")
                           result.success(flag)
+                      } else if (call.method == "startQuickNotificationService") {
+                          // Lock-screen dismiss fix (spec: "quick income
+                          // and quick expenses notification lock screen la
+                          // erukkumpothu thalli vitta poiduthu ... athu
+                          // pogavey kudathu"). Called from
+                          // QuickNotificationService.show() right after
+                          // that same-id notification is (re)posted -
+                          // starting this foreground service anchors it so
+                          // the OS itself won't let it be swiped away, on
+                          // the lock screen or anywhere else. Safe to call
+                          // repeatedly (Android just keeps the already-
+                          // running service running).
+                          try {
+                              val serviceIntent = Intent(this, QuickNotificationForegroundService::class.java)
+                              if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.O) {
+                                  startForegroundService(serviceIntent)
+                              } else {
+                                  startService(serviceIntent)
+                              }
+                              result.success(true)
+                          } catch (e: Exception) {
+                              // Never let this block the notification's own
+                              // content from showing via the normal
+                              // (dismissible) path as a fallback.
+                              result.success(false)
+                          }
+                      } else if (call.method == "stopQuickNotificationService") {
+                          // Called from QuickNotificationService.cancel()
+                          // when the shop turns the Settings toggle off -
+                          // QuickNotificationForegroundService.onDestroy()
+                          // does the actual notification removal.
+                          try {
+                              stopService(Intent(this, QuickNotificationForegroundService::class.java))
+                              result.success(true)
+                          } catch (e: Exception) {
+                              result.success(false)
+                          }
                       } else {
                           result.notImplemented()
                       }
@@ -1005,6 +1059,105 @@ jobs:
           }
           '''
 
+          # Anchors the Quick Income/Expense notification (id 3001,
+          # channel "quick_income_expense" - same id/channel
+          # flutter_local_notifications already uses from
+          # QuickNotificationService.show()) as a genuine foreground-
+          # service notification, the only OS-guaranteed way to make a
+          # notification impossible to swipe away, including from the
+          # lock screen (spec: "quick income and quick expenses
+          # notification lock screen la erukkumpothu thalli vitta
+          # poiduthu ... athu pogavey kudathu" - it must never go away).
+          # `ongoing`/`autoCancel: false` alone (the earlier approach) is
+          # advisory only - many OEM lock-screen UIs and swipe gestures
+          # ignore it; binding the SAME notification id to a running
+          # foreground service is what the platform itself will not let
+          # the user dismiss.
+          #
+          # This service only ever posts a minimal placeholder
+          # notification on that id - QuickNotificationService.dart keeps
+          # calling NotificationManager.notify() with the real title/
+          # body/action-button content on the same id right after
+          # starting this service (see startQuickNotificationService
+          # above), which simply updates the already-anchored
+          # notification in place. So this service owns dismiss-proofing
+          # only; the Dart side still owns what the notification actually
+          # says.
+          quick_notification_foreground_service_kt = '''package com.example.pro_app
+
+          import android.app.NotificationChannel
+          import android.app.NotificationManager
+          import android.app.Service
+          import android.content.Context
+          import android.content.Intent
+          import android.content.pm.ServiceInfo
+          import android.os.Build
+          import android.os.IBinder
+          import androidx.core.app.NotificationCompat
+
+          class QuickNotificationForegroundService : Service() {
+
+              companion object {
+                  private const val CHANNEL_ID = "quick_income_expense"
+                  private const val NOTIFICATION_ID = 3001
+              }
+
+              override fun onCreate() {
+                  super.onCreate()
+                  // Idempotent - matches the channel flutter_local_notifications
+                  // itself creates on first QuickNotificationService.show(), so
+                  // it doesn't matter which of the two runs first.
+                  if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.O) {
+                      val manager = getSystemService(Context.NOTIFICATION_SERVICE) as NotificationManager
+                      val channel = NotificationChannel(
+                          CHANNEL_ID,
+                          "Quick Income & Expense",
+                          NotificationManager.IMPORTANCE_HIGH
+                      )
+                      channel.description = "Always-available Income/Expense entry, updated with today's running totals"
+                      manager.createNotificationChannel(channel)
+                  }
+              }
+
+              override fun onStartCommand(intent: Intent?, flags: Int, startId: Int): Int {
+                  val notification = NotificationCompat.Builder(this, CHANNEL_ID)
+                      .setContentTitle("Quick Income & Expense")
+                      .setContentText("Tap Income or Expense to add an entry in one tap.")
+                      .setSmallIcon(R.drawable.ic_notification)
+                      .setOngoing(true)
+                      .setOnlyAlertOnce(true)
+                      .build()
+
+                  // Raw 34 rather than Build.VERSION_CODES.UPSIDE_DOWN_CAKE -
+                  // this is compiled by CI against whatever compileSdk it
+                  // resolves, and the raw int avoids depending on that
+                  // constant being available.
+                  if (Build.VERSION.SDK_INT >= 34) {
+                      startForeground(NOTIFICATION_ID, notification, ServiceInfo.FOREGROUND_SERVICE_TYPE_SPECIAL_USE)
+                  } else {
+                      startForeground(NOTIFICATION_ID, notification)
+                  }
+                  // START_STICKY: if the OS kills this service under memory
+                  // pressure, it gets restarted (with a null intent) rather
+                  // than leaving the notification permanently un-anchored.
+                  return START_STICKY
+              }
+
+              override fun onDestroy() {
+                  // Explicit removal (not just stopForeground) so turning the
+                  // Settings toggle off actually clears the notification
+                  // instead of leaving a now-unanchored copy behind.
+                  @Suppress("DEPRECATION")
+                  stopForeground(true)
+                  val manager = getSystemService(Context.NOTIFICATION_SERVICE) as NotificationManager
+                  manager.cancel(NOTIFICATION_ID)
+                  super.onDestroy()
+              }
+
+              override fun onBind(intent: Intent?): IBinder? = null
+          }
+          '''
+
           file_paths_xml = '''<?xml version="1.0" encoding="utf-8"?>
           <paths xmlns:android="http://schemas.android.com/apk/res/android">
               <cache-path name="daily_order_pdfs" path="." />
@@ -1018,6 +1171,10 @@ jobs:
           with open(os.path.join(kotlin_dir, "DailyOrderAlarmReceiver.kt"), "w", encoding="utf-8") as f:
               f.write(daily_order_alarm_receiver_kt)
           print("Wrote DailyOrderAlarmReceiver.kt")
+
+          with open(os.path.join(kotlin_dir, "QuickNotificationForegroundService.kt"), "w", encoding="utf-8") as f:
+              f.write(quick_notification_foreground_service_kt)
+          print("Wrote QuickNotificationForegroundService.kt")
 
           with open(os.path.join(xml_dir, "file_paths.xml"), "w", encoding="utf-8") as f:
               f.write(file_paths_xml)
@@ -1097,6 +1254,37 @@ jobs:
               with open(manifest_path, "w", encoding="utf-8") as f:
                   f.write(manifest)
               print("Registered DailyOrderAlarmReceiver.")
+
+          # QuickNotificationForegroundService (see
+          # quick_notification_foreground_service_kt above) - anchors the
+          # Quick Income/Expense notification so it can't be swiped away,
+          # including from the lock screen. foregroundServiceType=
+          # "specialUse" + the PROPERTY_SPECIAL_USE_FGS_SUBTYPE below are
+          # both required on Android 14+/API 34 since this service isn't
+          # any of the platform's predefined foreground-service types
+          # (it's not media/location/camera playback etc - it just keeps
+          # one notification alive). exported=false since it's only ever
+          # started by this app's own MainActivity, never another app.
+          if "QuickNotificationForegroundService" in manifest:
+              print("Quick Notification foreground service already registered, nothing to do.")
+          else:
+              service_block = (
+                  '    <service\n'
+                  '        android:name=".QuickNotificationForegroundService"\n'
+                  '        android:exported="false"\n'
+                  '        android:foregroundServiceType="specialUse">\n'
+                  '        <property\n'
+                  '            android:name="android.app.PROPERTY_SPECIAL_USE_FGS_SUBTYPE"\n'
+                  '            android:value="Keeps the Quick Income/Expense entry notification always visible" />\n'
+                  '    </service>\n'
+              )
+              idx = manifest.rfind("</application>")
+              if idx == -1:
+                  raise SystemExit(f"Could not find </application> in {manifest_path} - aborting so this doesn't silently produce a broken manifest.")
+              manifest = manifest[:idx] + service_block + manifest[idx:]
+              with open(manifest_path, "w", encoding="utf-8") as f:
+                  f.write(manifest)
+              print("Registered QuickNotificationForegroundService.")
           PYEOF
 
       # Proper small notification icon (Task: "pro_app notification icon set
