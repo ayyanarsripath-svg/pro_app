@@ -47,6 +47,10 @@ class _QuickAddOrderScreenState extends State<QuickAddOrderScreen> {
   final _qtyCtrl = TextEditingController(text: '1');
   final _phoneCtrl = TextEditingController();
   final _qtyFocus = FocusNode();
+  // Save & Add Another should land the cursor straight back on Type/Model
+  // (the first field, top of the form) so the shop owner can keep typing
+  // the next item without tapping anything - see _save's addAnother branch.
+  final _typeFocus = FocusNode();
 
   bool _saving = false;
   int _addedCount = 0;
@@ -84,6 +88,7 @@ class _QuickAddOrderScreenState extends State<QuickAddOrderScreen> {
     _qtyCtrl.dispose();
     _phoneCtrl.dispose();
     _qtyFocus.dispose();
+    _typeFocus.dispose();
     super.dispose();
   }
 
@@ -138,6 +143,14 @@ class _QuickAddOrderScreenState extends State<QuickAddOrderScreen> {
         await _loadRecent();
         if (!mounted) return;
         setState(() => _saving = false);
+        // Cursor back to Type/Model so the next item can be typed straight
+        // away with no extra tap (spec: "save & add another button click
+        // panna ellam saved aagitu enaku curosr point type / model ku
+        // poganum"). requestFocus is queued for right after this frame so
+        // it wins over the field rebuild that setState above triggers.
+        WidgetsBinding.instance.addPostFrameCallback((_) {
+          if (mounted) _typeFocus.requestFocus();
+        });
         ScaffoldMessenger.of(context).showSnackBar(
           SnackBar(content: Text('Added "$part". Note the next item...')),
         );
@@ -213,6 +226,7 @@ class _QuickAddOrderScreenState extends State<QuickAddOrderScreen> {
                 // Add Item dialog.
                 TextField(
                   controller: _typeCtrl,
+                  focusNode: _typeFocus,
                   autofocus: true,
                   textCapitalization: TextCapitalization.sentences,
                   decoration: const InputDecoration(labelText: 'Type / Model', border: OutlineInputBorder()),

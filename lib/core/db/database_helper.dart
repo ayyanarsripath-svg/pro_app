@@ -13,7 +13,7 @@ class DatabaseHelper {
   static final DatabaseHelper instance = DatabaseHelper._internal();
 
   static Database? _db;
-  static const int dbVersion = 9;
+  static const int dbVersion = 10;
   static const String dbFileName = 'professional_mobiles.db';
 
   Future<Database> get database async {
@@ -124,6 +124,16 @@ class DatabaseHelper {
     if (oldVersion < 9) {
       await db.execute('ALTER TABLE services ADD COLUMN warranty_periods TEXT');
       await db.execute('ALTER TABLE services ADD COLUMN offers TEXT');
+    }
+    // Daily Order per-product receipt tracking - after an order is sent to
+    // the supplier, some parts may arrive and some may not. `received`
+    // marks a sent item as physically received at the shop; the Daily
+    // Order screen hides received items (they're done) while a
+    // not-received item is simply left as-is so it keeps showing as an
+    // outstanding order line. See DailyOrderItem.received /
+    // DailyOrderRepository.markReceived.
+    if (oldVersion < 10) {
+      await db.execute('ALTER TABLE daily_order_items ADD COLUMN received INTEGER NOT NULL DEFAULT 0');
     }
   }
 
@@ -607,7 +617,8 @@ class DatabaseHelper {
         phone TEXT,
         sent INTEGER NOT NULL DEFAULT 0,
         sent_at TEXT,
-        created_at TEXT NOT NULL
+        created_at TEXT NOT NULL,
+        received INTEGER NOT NULL DEFAULT 0
       )
     ''');
     batch.execute('CREATE INDEX idx_daily_order_items_date ON daily_order_items(order_date)');

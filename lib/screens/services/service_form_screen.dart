@@ -1,12 +1,16 @@
 import 'package:flutter/material.dart';
 import 'package:flutter_contacts/flutter_contacts.dart';
+import 'package:pdf/pdf.dart';
+import 'package:printing/printing.dart';
 
 import '../../core/repositories/customer_repository.dart';
 import '../../core/repositories/service_repository.dart';
 import '../../core/repositories/settings_repository.dart';
+import '../../core/services/pdf_service.dart';
 import '../../core/services/whatsapp_sms_service.dart';
 import '../../core/utils/formatters.dart';
 import '../../models/customer.dart';
+import '../../models/service.dart';
 import '../../widgets/section_card.dart';
 
 /// Intake screen for a new repair job - creates the customer (or reuses an
@@ -24,6 +28,7 @@ class _ServiceFormScreenState extends State<ServiceFormScreen> {
     final _serviceRepo = ServiceRepository();
     final _settingsRepo = SettingsRepository();
     final _waService = WhatsAppSmsService();
+    final _pdfService = PdfService();
 
     final _customerNameCtrl = TextEditingController();
     final _customerPhoneCtrl = TextEditingController();
@@ -576,6 +581,48 @@ class _ServiceFormScreenState extends State<ServiceFormScreen> {
             );
     }
 
+    /// Prints the just-created job's bill right away, with as few taps/
+    /// dialogs as this device allows, instead of the shop owner having to
+    /// open the new job in Service Detail and press Print separately
+    /// afterwards.
+    ///
+    /// If a Default Printer has been picked once in Settings -> Printing,
+    /// this sends straight to it via Printing.directPrintPdf - genuinely
+    /// zero dialogs, the bill just prints. Without one, Android/iOS's own
+    /// print framework always inserts its own system print screen the
+    /// first time any document is printed (Printing.layoutPdf) - that is a
+    /// platform-level screen this app cannot skip on its own, not an
+    /// app-level "preview"/"confirmation" step; setting a Default Printer
+    /// once is what removes it for good.
+    Future<void> _printServiceBillDirect({
+        required Customer customer,
+        required String billNo,
+        required ServiceJob service,
+        }) async {
+        try {
+            final bytes = await _pdfService.buildServiceBill(service: service, customer: customer);
+            final printerUrl = await _settingsRepo.get(SettingsRepository.defaultPrinterUrl);
+            if (printerUrl != null && printerUrl.trim().isNotEmpty) {
+                try {
+                    await Printing.directPrintPdf(
+                        printer: Printer(url: printerUrl),
+                        onLayout: (format) async => bytes,
+                        name: 'Service_$billNo',
+                        );
+                    return;
+                } catch (_) {
+                    // Saved printer might be off/out of range right now - fall
+                    // back below rather than losing the print entirely.
+                }
+            }
+            await Printing.layoutPdf(format: PdfPageFormat.a5, name: 'Service_$billNo', onLayout: (format) async => bytes);
+        } catch (_) {
+            // Never block job-card creation over a print failure - same
+            // "best effort" rule already applied to the WhatsApp/SMS
+            // intimation right below.
+        }
+    }
+
     Future<void> _submit() async {
         if (!_formKey.currentState!.validate()) return;
         setState(() => _saving = true);
@@ -626,11 +673,36 @@ class _ServiceFormScreenState extends State<ServiceFormScreen> {
             warrantyPeriods: warrantyPeriods,
             offers: offers,
             estimatedAmount: double.tryParse(_estimatedCtrl.text.trim()) ?? 0,
+            // BUG FIX (P&L tally): a new job used to be created with
+            // finalAmount left at 0 - only Edit's "Final Amount" field ever
+            // set it. The printed bill and every balance-due screen already
+            // fell back to showing estimatedAmount as the total whenever
+            // finalAmount was 0 (see ServiceJob.billTotal / PdfService.
+            // _billTotal), but the P&L ledger only ever records revenue
+            // from finalAmount itself (see ServiceRepository._syncCoreLedger)
+            // - so a freshly created job silently added ₹0 to Daily/Weekly/
+            // Monthly P&L even though its bill clearly showed an amount,
+            // until someone happened to open Edit later and fill in Final
+            // Amount. Defaulting Final Amount to the quoted Estimated
+            // Amount right at creation keeps the bill total and the P&L
+            // ledger in sync from day one; Edit can still correct it later
+            // if the actual price differs from the estimate (spec: "service
+            // bill create pannathukku aprom edit la profit and loss la
+            // proper ah tally aagala").
+            finalAmount: double.tryParse(_estimatedCtrl.text.trim()) ?? 0,
             advance: double.tryParse(_advanceCtrl.text.trim()) ?? 0,
             discount: double.tryParse(_discountCtrl.text.trim()) ?? 0,
             expectedDate: _expectedDate,
             faultAmounts: faultAmounts,
             );
+
+        // Print the bill IMMEDIATELY on "Create Service Job Card" - no app
+        // preview screen, no confirmation dialog in between (spec: "create
+        // service job card button press panna enakku direct ah bill print
+        // aaganum ... entha confirmation ellamal odaney bill print
+        // aaganum"). See _printServiceBillDirect's doc comment for exactly
+        // how "direct" this can actually be made.
+        await _printServiceBillDirect(customer: customer, billNo: service.billNo, service: service);
 
         // Auto-send the job-card intimation the moment the job is created, via
         // both WhatsApp (wa.me link) and SMS (sms: URI) - both just open the
