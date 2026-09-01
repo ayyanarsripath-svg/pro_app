@@ -264,6 +264,29 @@ class ServiceRepository {
     );
   }
 
+  /// BUG FIX (P&L daily/weekly/monthly tally): every direct-cost method
+  /// below used to ledger its cost on [date] - literally "today", whatever
+  /// day the technician happened to add the part/cost, days or weeks after
+  /// the job was actually created. Meanwhile the job's REVENUE is always
+  /// ledgered on the service's own createdAt (see _syncCoreLedger). A job
+  /// created Monday whose part gets added Thursday therefore split its
+  /// revenue and cost across two different ledger dates - Monday's P&L
+  /// looked artificially profitable (revenue, no matching cost yet) and
+  /// Thursday's looked artificially lossy (cost with no matching revenue),
+  /// even though the two fell in the same month and the MONTHLY total
+  /// still happened to add up. Daily and Weekly views had no such luck
+  /// (spec: "profit and loss dash board and monthly and weekly calculation
+  /// thappa kamikkuthu" - matches exactly this symptom). Every direct cost
+  /// tied to a service now ledgers on the SAME date as that service's
+  /// revenue, so a single bill's revenue and cost always land in the same
+  /// P&L day/week/month no matter which day the part was actually used.
+  /// [date] itself is untouched for inventory purposes (stock still
+  /// depletes on the real day the part was used, which is correct).
+  Future<DateTime> _ledgerDateForService(String serviceId, DateTime fallback) async {
+    final service = await byId(serviceId);
+    return service?.createdAt ?? fallback;
+  }
+
   /// Adds a spare part used in the repair: pulls stock (at current average
   /// cost) and links that exact cost to this service's internal costing.
   Future<void> addSparePartUsage({
@@ -292,7 +315,7 @@ class ServiceRepository {
       'total_cost': unitCost,
     });
     await _ledger.record(
-      txnDate: date,
+      txnDate: await _ledgerDateForService(serviceId, date),
       category: LedgerCategory.service,
       txnType: LedgerTxnType.directCost,
       referenceType: 'service_spare_part',
@@ -322,7 +345,7 @@ class ServiceRepository {
       'total_cost': amount,
     });
     await _ledger.record(
-      txnDate: date,
+      txnDate: await _ledgerDateForService(serviceId, date),
       category: LedgerCategory.service,
       txnType: LedgerTxnType.directCost,
       referenceType: 'service_spare_part',
@@ -347,7 +370,7 @@ class ServiceRepository {
       'amount': amount,
     });
     await _ledger.record(
-      txnDate: date,
+      txnDate: await _ledgerDateForService(serviceId, date),
       category: LedgerCategory.service,
       txnType: LedgerTxnType.directCost,
       referenceType: 'service_other_cost',

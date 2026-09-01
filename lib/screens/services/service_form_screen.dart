@@ -581,19 +581,27 @@ class _ServiceFormScreenState extends State<ServiceFormScreen> {
             );
     }
 
-    /// Prints the just-created job's bill right away, with as few taps/
-    /// dialogs as this device allows, instead of the shop owner having to
-    /// open the new job in Service Detail and press Print separately
-    /// afterwards.
+    /// Prints the just-created job's bill right away, instead of the shop
+    /// owner having to open the new job in Service Detail and press Print
+    /// separately afterwards - no app-level preview/confirmation screen of
+    /// our own in between.
     ///
-    /// If a Default Printer has been picked once in Settings -> Printing,
-    /// this sends straight to it via Printing.directPrintPdf - genuinely
-    /// zero dialogs, the bill just prints. Without one, Android/iOS's own
-    /// print framework always inserts its own system print screen the
-    /// first time any document is printed (Printing.layoutPdf) - that is a
-    /// platform-level screen this app cannot skip on its own, not an
-    /// app-level "preview"/"confirmation" step; setting a Default Printer
-    /// once is what removes it for good.
+    /// BUG FIX: this used to first try Printing.directPrintPdf against a
+    /// Settings -> Printing "Default Printer" (picked via Printing.
+    /// pickPrinter) for genuinely zero-dialog printing. On Android, this
+    /// `printing` package does not implement pickPrinter at all - calling
+    /// it always threw MissingPluginException("No implementation found for
+    /// method pickPrinter on channel net.nfet.printing"), a hard crash the
+    /// moment "Choose Default Printer" was tapped. That picker/direct-print
+    /// pairing turns out to be an iOS/macOS-only feature of this package,
+    /// not something Android exposes a "just pick a printer" API for at
+    /// all - Android's print framework only ever offers picking a printer
+    /// as PART OF its own system print dialog, which is exactly what
+    /// Printing.layoutPdf already opens below. So the Default Printer
+    /// feature and its Settings UI have been removed entirely (it could
+    /// never have worked on this Android-only app), and printing here goes
+    /// straight to the platform's normal print screen - already the most
+    /// "direct" print Android allows without our own screen in the way.
     Future<void> _printServiceBillDirect({
         required Customer customer,
         required String billNo,
@@ -601,20 +609,6 @@ class _ServiceFormScreenState extends State<ServiceFormScreen> {
         }) async {
         try {
             final bytes = await _pdfService.buildServiceBill(service: service, customer: customer);
-            final printerUrl = await _settingsRepo.get(SettingsRepository.defaultPrinterUrl);
-            if (printerUrl != null && printerUrl.trim().isNotEmpty) {
-                try {
-                    await Printing.directPrintPdf(
-                        printer: Printer(url: printerUrl),
-                        onLayout: (format) async => bytes,
-                        name: 'Service_$billNo',
-                        );
-                    return;
-                } catch (_) {
-                    // Saved printer might be off/out of range right now - fall
-                    // back below rather than losing the print entirely.
-                }
-            }
             await Printing.layoutPdf(format: PdfPageFormat.a5, name: 'Service_$billNo', onLayout: (format) async => bytes);
         } catch (_) {
             // Never block job-card creation over a print failure - same

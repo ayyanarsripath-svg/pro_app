@@ -56,10 +56,7 @@ class _SettingsScreenState extends State<SettingsScreen> {
   final _phoneCtrl = TextEditingController();
   bool _loading = true;
   bool _testPrinting = false;
-  bool _choosingPrinter = false;
   String _whatsappSendApp = 'auto';
-  String? _defaultPrinterName;
-  String? _defaultPrinterUrl;
 
   @override
   void initState() {
@@ -74,51 +71,7 @@ class _SettingsScreenState extends State<SettingsScreen> {
     _addressCtrl.text = all[SettingsRepository.shopAddress] ?? 'Mainroad, Ma.Kunnathur';
     _phoneCtrl.text = all[SettingsRepository.shopPhone] ?? '7806938306';
     _whatsappSendApp = await _settingsRepo.getWhatsAppSendApp();
-    _defaultPrinterName = all[SettingsRepository.defaultPrinterName];
-    _defaultPrinterUrl = all[SettingsRepository.defaultPrinterUrl];
     setState(() => _loading = false);
-  }
-
-  /// Lets the shop pick, once, exactly which printer Service Job Card
-  /// creation should print straight to with no dialog at all (spec: see
-  /// SettingsRepository.defaultPrinterUrl's doc comment). Printing.
-  /// pickPrinter shows the OS's own printer chooser ONE time here; the
-  /// picked printer's url is then reused silently by ServiceFormScreen._
-  /// submit via Printing.directPrintPdf every time afterwards.
-  Future<void> _chooseDefaultPrinter() async {
-    if (_choosingPrinter) return;
-    setState(() => _choosingPrinter = true);
-    try {
-      final printer = await Printing.pickPrinter(context: context);
-      if (printer == null) return;
-      await _settingsRepo.set(SettingsRepository.defaultPrinterUrl, printer.url);
-      await _settingsRepo.set(SettingsRepository.defaultPrinterName, printer.name);
-      if (!mounted) return;
-      setState(() {
-        _defaultPrinterUrl = printer.url;
-        _defaultPrinterName = printer.name;
-      });
-      ScaffoldMessenger.of(context).showSnackBar(
-        SnackBar(content: Text('Default printer set to ${printer.name} - new service bills will print instantly, no preview.')),
-      );
-    } catch (e) {
-      if (mounted) ScaffoldMessenger.of(context).showSnackBar(SnackBar(content: Text('Could not pick a printer: $e')));
-    } finally {
-      if (mounted) setState(() => _choosingPrinter = false);
-    }
-  }
-
-  Future<void> _clearDefaultPrinter() async {
-    await _settingsRepo.set(SettingsRepository.defaultPrinterUrl, '');
-    await _settingsRepo.set(SettingsRepository.defaultPrinterName, '');
-    if (!mounted) return;
-    setState(() {
-      _defaultPrinterUrl = null;
-      _defaultPrinterName = null;
-    });
-    ScaffoldMessenger.of(context).showSnackBar(
-      const SnackBar(content: Text('Default printer cleared - service bill printing will ask which printer again.')),
-    );
   }
 
   Future<void> _saveWhatsAppSendApp(String value) async {
@@ -459,46 +412,6 @@ class _SettingsScreenState extends State<SettingsScreen> {
                 ? const SizedBox(width: 16, height: 16, child: CircularProgressIndicator(strokeWidth: 2, color: Colors.white))
                 : const Icon(Icons.print_rounded),
             label: const Text('Test Print'),
-          ),
-          const Divider(height: 28),
-          Text(
-            'Default Printer - set this once so a new Service Job Card\'s bill prints '
-            'instantly the moment you press "Create Service Job Card", with no print '
-            'preview or picker in the way. Without a default printer set, that first '
-            'print still opens the phone\'s normal print screen.',
-            style: TextStyle(color: AppColors.textSecondaryOf(context), fontSize: 12.5),
-          ),
-          const SizedBox(height: 10),
-          if ((_defaultPrinterName ?? '').isNotEmpty)
-            Container(
-              padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 8),
-              decoration: BoxDecoration(
-                color: AppColors.success.withOpacity(0.12),
-                borderRadius: BorderRadius.circular(8),
-              ),
-              child: Row(
-                children: [
-                  const Icon(Icons.print_rounded, size: 16, color: AppColors.success),
-                  const SizedBox(width: 8),
-                  Expanded(child: Text(_defaultPrinterName!, style: const TextStyle(fontWeight: FontWeight.w700, fontSize: 12.5))),
-                ],
-              ),
-            ),
-          const SizedBox(height: 10),
-          Wrap(
-            spacing: 8,
-            runSpacing: 8,
-            children: [
-              ElevatedButton.icon(
-                onPressed: _choosingPrinter ? null : _chooseDefaultPrinter,
-                icon: _choosingPrinter
-                    ? const SizedBox(width: 16, height: 16, child: CircularProgressIndicator(strokeWidth: 2, color: Colors.white))
-                    : const Icon(Icons.print_rounded),
-                label: Text((_defaultPrinterName ?? '').isEmpty ? 'Choose Default Printer' : 'Change Default Printer'),
-              ),
-              if ((_defaultPrinterName ?? '').isNotEmpty)
-                OutlinedButton(onPressed: _clearDefaultPrinter, child: const Text('Clear')),
-            ],
           ),
         ]),
         SectionCard(title: 'Shop Details (shown on printed bills)', icon: Icons.storefront_rounded, children: [

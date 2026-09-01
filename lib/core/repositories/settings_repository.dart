@@ -146,20 +146,14 @@ class SettingsRepository {
   // action stays permanently available afterwards from Settings -> Printing.
   static const testPrintPromptShown = 'test_print_prompt_shown';
 
-  // Default Printer (spec: "create service job card button press panna
-  // enakku direct ah bill print aaganum ... entha confirmation ellamal
-  // odaney bill print aaganum") - true zero-tap printing needs a specific
-  // printer already picked ahead of time (printing package's
-  // Printing.directPrintPdf sends straight to one named printer with NO
-  // system print dialog at all, unlike Printing.layoutPdf which always
-  // shows Android's own print-preview/printer-picker). Picked once from
-  // Settings -> Printing ("Choose Default Printer") via
-  // Printing.pickPrinter, then reused silently on every new Service Job
-  // Card. defaultPrinterName is shown-only (so the shop can see which
-  // printer is set); defaultPrinterUrl is the actual identifier passed
-  // back into Printer(url: ...) for direct printing.
-  static const defaultPrinterUrl = 'default_printer_url';
-  static const defaultPrinterName = 'default_printer_name';
+  // REMOVED: a "Default Printer" setting (Printing.pickPrinter +
+  // Printing.directPrintPdf) used to live here, meant for genuinely
+  // zero-dialog service-bill printing. On Android, this `printing` package
+  // does not implement pickPrinter at all - tapping "Choose Default
+  // Printer" always threw MissingPluginException. That pairing turns out
+  // to be iOS/macOS-only in this package; Android has no "just pick a
+  // printer" API separate from its own system print dialog. See
+  // ServiceFormScreen._printServiceBillDirect's doc comment.
 
   // NOTE: the Daily Orders home-screen widget's on/off toggle is
   // deliberately NOT a key in this table. Backups (see BackupService) work
