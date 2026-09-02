@@ -1274,16 +1274,24 @@ jobs:
                   // declares launchMode="singleTask" with its own
                   // taskAffinity in the manifest, same as the Daily Orders
                   // widget's QuickAddActivity.
-                  val incomeIntent = Intent(this, QuickIncomeActivity::class.java).apply {
-                      flags = Intent.FLAG_ACTIVITY_NEW_TASK
-                  }
+                  //
+                  // NOT using `.apply { flags = ... }` here on purpose: this
+                  // method's own signature is
+                  // onStartCommand(intent, flags: Int, startId) - Kotlin
+                  // resolves an unqualified `flags = ...` assignment inside
+                  // the apply lambda to THAT outer val parameter instead of
+                  // the Intent receiver's own settable `flags` property
+                  // (same name, different thing), which fails to compile
+                  // ("'val' cannot be reassigned"). Setting it directly on
+                  // each val below sidesteps the name collision entirely.
+                  val incomeIntent = Intent(this, QuickIncomeActivity::class.java)
+                  incomeIntent.flags = Intent.FLAG_ACTIVITY_NEW_TASK
                   val incomePending = PendingIntent.getActivity(
                       this, 3101, incomeIntent,
                       PendingIntent.FLAG_UPDATE_CURRENT or PendingIntent.FLAG_IMMUTABLE
                   )
-                  val expenseIntent = Intent(this, QuickExpenseActivity::class.java).apply {
-                      flags = Intent.FLAG_ACTIVITY_NEW_TASK
-                  }
+                  val expenseIntent = Intent(this, QuickExpenseActivity::class.java)
+                  expenseIntent.flags = Intent.FLAG_ACTIVITY_NEW_TASK
                   val expensePending = PendingIntent.getActivity(
                       this, 3102, expenseIntent,
                       PendingIntent.FLAG_UPDATE_CURRENT or PendingIntent.FLAG_IMMUTABLE
@@ -1295,10 +1303,9 @@ jobs:
                   // DailyOrderAlarmReceiver already uses for
                   // "open_daily_orders", read back by
                   // consumeQuickDashboardLaunchFlag above.
-                  val dashboardIntent = Intent(this, MainActivity::class.java).apply {
-                      flags = Intent.FLAG_ACTIVITY_NEW_TASK or Intent.FLAG_ACTIVITY_CLEAR_TOP
-                      putExtra("open_dashboard", true)
-                  }
+                  val dashboardIntent = Intent(this, MainActivity::class.java)
+                  dashboardIntent.flags = Intent.FLAG_ACTIVITY_NEW_TASK or Intent.FLAG_ACTIVITY_CLEAR_TOP
+                  dashboardIntent.putExtra("open_dashboard", true)
                   val dashboardPending = PendingIntent.getActivity(
                       this, 3103, dashboardIntent,
                       PendingIntent.FLAG_UPDATE_CURRENT or PendingIntent.FLAG_IMMUTABLE
