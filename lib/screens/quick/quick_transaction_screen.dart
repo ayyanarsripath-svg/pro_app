@@ -1,5 +1,12 @@
 import 'package:flutter/material.dart';
 import 'package:speech_to_text/speech_to_text.dart' as stt;
+// BUILD FIX (2026-09): SpeechRecognitionResult (the type _onSpeechResult
+// takes) lives in this separate library, not re-exported by
+// speech_to_text.dart itself - importing only the main library left
+// `stt.SpeechRecognitionResult` unresolved and failed CI's release build
+// ("Error: Type 'stt.SpeechRecognitionResult' not found"). Same `stt`
+// prefix as above so both merge into one namespace.
+import 'package:speech_to_text/speech_recognition_result.dart' as stt;
 
 import '../../core/repositories/quick_transaction_repository.dart';
 import '../../core/services/quick_notification_service.dart';
