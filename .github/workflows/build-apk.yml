@@ -156,6 +156,10 @@ jobs:
               # notification alive). Neither prompts the user at runtime.
               '    <uses-permission android:name="android.permission.FOREGROUND_SERVICE"/>',
               '    <uses-permission android:name="android.permission.FOREGROUND_SERVICE_SPECIAL_USE"/>',
+              # Mic button on Quick Income/Quick Expense (speech_to_text) -
+              # runtime-prompted on first use, same as any other dangerous
+              # permission; the plugin itself asks for it via initialize().
+              '    <uses-permission android:name="android.permission.RECORD_AUDIO"/>',
           ]
           to_add = [line for line in needed if line.split('"')[1] not in content]
 
@@ -170,6 +174,36 @@ jobs:
               with open(path, "w", encoding="utf-8") as f:
                   f.write(content)
               print("Added:", to_add)
+
+          # speech_to_text (mic button on Quick Income/Quick Expense) needs
+          # a <queries> declaration so it can actually find the device's
+          # speech recognition service on Android 11+/API 30 - without this,
+          # the plugin's package-visibility view of the speech recognizer is
+          # blocked by default and SpeechToText().initialize() reports
+          # "not available" even though RECORD_AUDIO is granted and the
+          # device has a working recognizer. <queries> is a top-level child
+          # of <manifest>, a sibling of <application>, not a permission -
+          # re-read the file fresh here since `content` above may be stale
+          # after the permissions write.
+          with open(path, "r", encoding="utf-8") as f:
+              content = f.read()
+          if "android.speech.RecognitionService" in content:
+              print("Speech recognition <queries> already present, nothing to do.")
+          else:
+              queries_block = (
+                  '    <queries>\n'
+                  '        <intent>\n'
+                  '            <action android:name="android.speech.RecognitionService" />\n'
+                  '        </intent>\n'
+                  '    </queries>\n'
+              )
+              idx = content.find("<application")
+              if idx == -1:
+                  raise SystemExit(f"Could not find <application> in {path} - aborting so this doesn't silently produce a broken manifest.")
+              content = content[:idx] + queries_block + content[idx:]
+              with open(path, "w", encoding="utf-8") as f:
+                  f.write(content)
+              print("Added speech recognition <queries> block.")
           PYEOF
 
       # flutter_local_notifications (Daily Orders reminder - see

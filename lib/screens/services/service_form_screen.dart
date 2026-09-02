@@ -56,6 +56,19 @@ class _ServiceFormScreenState extends State<ServiceFormScreen> {
 
     bool _charger = false, _cable = false, _sim = false, _memoryCard = false;
     bool _warranty = false;
+    // Add-to-Daily-Order opt-in (spec fix, 2026-09): the auto-note-into-
+    // Daily-Order shortcut (see _submit's Daily Order block below) used to
+    // fire unconditionally for every job that had a Mobile Name/Model, so
+    // pure software jobs - "software", "unlock", "frp", "flash" etc, which
+    // need no physical part at all - were landing in Daily Order right
+    // alongside genuine "need to order a display/battery" rows (spec: "add
+    // panra compliant la podra software and unlock ethalam daily order la
+    // poittu save aaguthu ... ethu product ella ethu save aaga kudathu" -
+    // these aren't products, they shouldn't be saved there). Now it's an
+    // explicit opt-in the shop ticks only when this job genuinely needs a
+    // part/accessory ordered, defaulting OFF so a forgotten checkbox never
+    // spams Daily Order the way the old always-on version did.
+    bool _addToDailyOrder = false;
     // IMEI (mobile, numeric keypad) vs Serial No (laptop/other devices,
     // mixes letters e.g. "WES/1234" -> normal keyboard).
     bool _imeiIsSerial = false;
@@ -405,6 +418,25 @@ class _ServiceFormScreenState extends State<ServiceFormScreen> {
                                 ),
                             const SizedBox(height: 10),
                             TextFormField(controller: _complaintCtrl, maxLines: 2, decoration: const InputDecoration(labelText: 'Fault / Complaint')),
+                            const SizedBox(height: 4),
+                            // Opt-in Daily Order shortcut (spec fix: software-only
+                            // jobs like "unlock"/"frp" were auto-landing in Daily
+                            // Order, which is meant for parts/accessories to order
+                            // from a supplier, not every complaint type). Off by
+                            // default - only tick this when the job actually needs
+                            // a part ordered.
+                            CheckboxListTile(
+                                contentPadding: EdgeInsets.zero,
+                                controlAffinity: ListTileControlAffinity.leading,
+                                dense: true,
+                                value: _addToDailyOrder,
+                                onChanged: (v) => setState(() => _addToDailyOrder = v ?? false),
+                                title: const Text('Add to Daily Order', style: TextStyle(fontSize: 14)),
+                                subtitle: const Text(
+                                    'Only if this job needs a part/accessory ordered - not for software/unlock jobs',
+                                    style: TextStyle(fontSize: 11.5),
+                                    ),
+                                ),
                             if (_selectedPresets.length >= 2) ...[
                                 const SizedBox(height: 12),
                                 const Text('Amount per fault', style: TextStyle(fontSize: 12, fontWeight: FontWeight.w600)),
@@ -720,12 +752,20 @@ class _ServiceFormScreenState extends State<ServiceFormScreen> {
         // Quick Add Order's own two fields mean. Falls back to deviceLabel
         // for partName when the complaint was left blank, so the row is
         // never saved with an empty Part/Accessory - a plain quantity-1 row
-        // whose only real detail is the device itself. Skipped entirely
-        // when neither Mobile Name nor Model was actually filled in
-        // (deviceLabel falls back to the literal 'Device' only in that
-        // case). Best-effort: a Daily Order write failing must never block
-        // the service job itself from being saved.
-        if (service.deviceLabel != 'Device') {
+        // whose only real detail is the device itself.
+        //
+        // OPT-IN FIX (2026-09): this used to fire for every job that had a
+        // device name/model, so software-only jobs with no part to order at
+        // all ("software", "unlock", "frp"...) were landing in Daily Order
+        // too (spec: "add panra compliant la podra software and unlock
+        // ethalam daily order la poittu save aaguthu ... ethu product ella
+        // ethu save aaga kudathu" - these aren't products, they shouldn't be
+        // saved there). Now gated on the "Add to Daily Order" checkbox above
+        // (off by default) as well, so it only ever fires when the shop
+        // explicitly says this job needs a part ordered. Best-effort: a
+        // Daily Order write failing must never block the service job itself
+        // from being saved.
+        if (_addToDailyOrder && service.deviceLabel != 'Device') {
             try {
                 final complaint = (service.complaint ?? '').trim();
                 await _dailyOrderRepo.create(

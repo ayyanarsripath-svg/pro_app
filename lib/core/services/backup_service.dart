@@ -894,9 +894,26 @@ class BackupService {
   Future<List<DriveBackupFileInfo>> listGoogleDriveBackups({
     bool thisDeviceOnly = false,
     drive.DriveApi? driveApi,
+    // BUG FIX (2026-09): BackupScreen's own background refresh (see its
+    // _refreshDriveBackupCount) used to call this with the default (true)
+    // every single time the Backup & Restore screen opened - so whenever
+    // silent re-auth failed for any reason (a very common thing for
+    // google_sign_in's Credential Manager-backed silent auth to do after
+    // the app process was killed and restarted), that background refresh
+    // would itself pop the full "choose a Google account" sign-in picker,
+    // completely unprompted (spec: "na eppolam backup and restore settings
+    // la enter aagurano appolam enakku google drive sign in account pic
+    // panna solluthu ... once sign in pannitta adikkadi kekka kudathu" -
+    // once signed in, it shouldn't keep asking every time the screen is
+    // opened). BackupScreen now passes false here for that background
+    // refresh, so a failed silent re-auth just leaves the count blank
+    // instead of interrupting the shop with an account picker - only an
+    // explicit action (Connect/Change Google Account, Restore from Drive)
+    // still opens the picker when needed.
+    bool allowInteractiveSignIn = true,
   }) async {
     try {
-      final api = driveApi ?? await _authorizedDriveApi(allowInteractiveSignIn: true);
+      final api = driveApi ?? await _authorizedDriveApi(allowInteractiveSignIn: allowInteractiveSignIn);
       final folderId = await _findOrCreateBackupFolder(api);
 
       final infos = <DriveBackupFileInfo>[];

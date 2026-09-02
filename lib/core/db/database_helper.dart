@@ -13,7 +13,7 @@ class DatabaseHelper {
   static final DatabaseHelper instance = DatabaseHelper._internal();
 
   static Database? _db;
-  static const int dbVersion = 10;
+  static const int dbVersion = 11;
   static const String dbFileName = 'professional_mobiles.db';
 
   Future<Database> get database async {
@@ -134,6 +134,21 @@ class DatabaseHelper {
     // DailyOrderRepository.markReceived.
     if (oldVersion < 10) {
       await db.execute('ALTER TABLE daily_order_items ADD COLUMN received INTEGER NOT NULL DEFAULT 0');
+    }
+    // Dedicated Quick Income/Quick Expense history (spec: "quick expenses
+    // and quick income ku thaniya oru history create pannikkalam expenses
+    // menu la ella history create pannidalam" - Quick Expense entries were
+    // landing mixed into the general Expenses list with no way to tell
+    // them apart from a manually-added shop expense). `source = 'quick'`
+    // tags an expense as having come from the Quick Expense screen so
+    // QuickHistoryScreen can filter to just those - existing rows all get
+    // NULL, i.e. "not from Quick Expense", which is correct since Quick
+    // Expense never existed before this. Quick Income needs no equivalent
+    // column - it already writes to ledger_transactions with
+    // reference_type='quick_income' (see QuickTransactionRepository),
+    // which QuickHistoryScreen filters on directly.
+    if (oldVersion < 11) {
+      await db.execute('ALTER TABLE expenses ADD COLUMN source TEXT');
     }
   }
 
@@ -533,6 +548,7 @@ class DatabaseHelper {
         payment_method TEXT,
         description TEXT,
         allocation TEXT NOT NULL DEFAULT 'general', -- general | service | accessories | second_hand | other
+        source TEXT, -- null = added from the full Expenses screen; 'quick' = added from Quick Expense (see QuickHistoryScreen)
         created_at TEXT NOT NULL
       )
     ''');

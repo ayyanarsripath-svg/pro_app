@@ -18,6 +18,7 @@ import '../../widgets/stat_card.dart';
 import '../../widgets/status_badge.dart';
 import '../../widgets/section_card.dart';
 import '../pnl/pnl_dashboard_screen.dart';
+import '../quick/quick_history_screen.dart';
 import '../quick/quick_transaction_screen.dart';
 import '../services/service_list_screen.dart';
 
@@ -197,7 +198,23 @@ class _DashboardScreenState extends State<DashboardScreen> {
                   ),
                 ],
               ),
-              const SizedBox(height: 18),
+              // Dedicated Quick Income/Quick Expense history (spec: "quick
+              // expenses and quick income ku thaniya oru history create
+              // pannikkalam") - a small text link right under the two
+              // buttons above, since it's a secondary "look back at what I
+              // already entered" action, not a primary dashboard stat.
+              Align(
+                alignment: Alignment.centerRight,
+                child: TextButton.icon(
+                  onPressed: () => Navigator.push(
+                    context,
+                    MaterialPageRoute(builder: (_) => const QuickHistoryScreen()),
+                  ),
+                  icon: const Icon(Icons.history_rounded, size: 18),
+                  label: const Text('Quick History'),
+                ),
+              ),
+              const SizedBox(height: 4),
               Row(
                 children: [
                   Expanded(
