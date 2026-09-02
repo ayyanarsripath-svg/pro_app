@@ -2,16 +2,22 @@ import 'package:flutter/foundation.dart';
 
 enum QuickActionType { income, expense, dashboard }
 
-/// Tiny in-memory "someone tapped a Quick Income/Expense notification
-/// action" signal, shared between the notification callback (see
-/// AppNotifications) and AppShell, which reacts by pushing
-/// QuickTransactionScreen (or just landing on the Dashboard tab for a plain
-/// body/📊 tap) - same fire-once-picked-up-by-whoever's-listening pattern as
+/// Tiny in-memory "the 📊 Dashboard button (or a plain body tap) on the
+/// Quick Income/Expense notification was tapped" signal, fired from
+/// main.dart's consumeQuickDashboardLaunch() and picked up by AppShell,
+/// which reacts by landing on the Dashboard tab - same
+/// fire-once-picked-up-by-whoever's-listening pattern as
 /// DailyOrderAutoSendSignal (see its own doc comment for why a plain
 /// incrementing counter, not a one-shot bool, is what safely survives a
 /// cold app-start launched BY the notification tap itself: [fire] can
 /// happen before AppShell even exists yet, since it only mounts after the
 /// PIN gate is passed).
+///
+/// ➕ Income / ➖ Expense do NOT go through this signal - they launch their
+/// own standalone Activity/screen directly from the notification
+/// (QuickIncomeActivity/QuickExpenseActivity, see main.dart), skipping this
+/// app and its PIN gate entirely. See QuickNotificationService's class doc
+/// comment for the full picture.
 class QuickActionSignal {
   QuickActionSignal._();
 

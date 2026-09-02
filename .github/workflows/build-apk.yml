@@ -597,9 +597,41 @@ jobs:
           }
           '''
 
+          # Same "own Activity, own tiny Flutter engine, MainActivity never
+          # created" trick as QuickAddActivity above, now for the Quick
+          # Income/Expense notification's own ➕ Income / ➖ Expense buttons
+          # (spec: "income or expenses thouch panna app open aagakudathu ...
+          # quick expenses screen or quick income screen open aaganum athula
+          # direct ah na enter pannippan" - tapping either button must never
+          # open the app/PIN screen, it must land directly on the entry
+          # screen). Launched by PendingIntents built natively in
+          # QuickNotificationForegroundService.kt's onStartCommand (see that
+          # file below) - not via flutter_local_notifications, which has no
+          # public API to point a notification action at a specific
+          # Activity class other than the app's own launcher one.
+          quick_income_activity_kt = '''package com.example.pro_app
+
+          import io.flutter.embedding.android.FlutterActivity
+
+          class QuickIncomeActivity : FlutterActivity() {
+              override fun getDartEntrypointFunctionName(): String = "quickIncomeMain"
+          }
+          '''
+
+          quick_expense_activity_kt = '''package com.example.pro_app
+
+          import io.flutter.embedding.android.FlutterActivity
+
+          class QuickExpenseActivity : FlutterActivity() {
+              override fun getDartEntrypointFunctionName(): String = "quickExpenseMain"
+          }
+          '''
+
           files = {
               os.path.join(kotlin_dir, "DailyOrderWidgetProvider.kt"): provider_kt,
               os.path.join(kotlin_dir, "QuickAddActivity.kt"): quick_add_activity_kt,
+              os.path.join(kotlin_dir, "QuickIncomeActivity.kt"): quick_income_activity_kt,
+              os.path.join(kotlin_dir, "QuickExpenseActivity.kt"): quick_expense_activity_kt,
               os.path.join(xml_dir, "daily_order_widget_info.xml"): widget_info_xml,
               os.path.join(drawable_dir, "widget_background.xml"): widget_background_xml,
               os.path.join(drawable_dir, "widget_add_btn_bg.xml"): add_btn_bg_xml,
@@ -655,6 +687,47 @@ jobs:
                   '        android:windowSoftInputMode="adjustResize"\n'
                   '        android:launchMode="singleTask"\n'
                   '        android:taskAffinity="com.example.pro_app.quickadd"\n'
+                  '        android:excludeFromRecents="true" />\n'
+              )
+
+          # QuickIncomeActivity / QuickExpenseActivity (see
+          # quick_income_activity_kt/quick_expense_activity_kt above) - same
+          # reasoning/flags as QuickAddActivity just above: only ever
+          # launched via an explicit Intent from a PendingIntent this app
+          # itself built (QuickNotificationForegroundService.kt), never from
+          # the launcher, so no intent-filter/exported needed. Each gets its
+          # own distinct taskAffinity so Income and Expense (and
+          # QuickAddActivity) never share or collide over the same
+          # background task, and so repeated taps of the SAME button bring
+          # that one instance back to front (singleTask) instead of piling
+          # up new ones.
+          if "QuickIncomeActivity" in manifest:
+              print("QuickIncomeActivity already registered, nothing to do.")
+          else:
+              blocks_to_add.append(
+                  '    <activity\n'
+                  '        android:name=".QuickIncomeActivity"\n'
+                  '        android:theme="@android:style/Theme.Material.Light.NoActionBar"\n'
+                  '        android:configChanges="orientation|keyboardHidden|keyboard|screenSize|smallestScreenSize|locale|layoutDirection|fontScale|screenLayout|density|uiMode"\n'
+                  '        android:hardwareAccelerated="true"\n'
+                  '        android:windowSoftInputMode="adjustResize"\n'
+                  '        android:launchMode="singleTask"\n'
+                  '        android:taskAffinity="com.example.pro_app.quickincome"\n'
+                  '        android:excludeFromRecents="true" />\n'
+              )
+
+          if "QuickExpenseActivity" in manifest:
+              print("QuickExpenseActivity already registered, nothing to do.")
+          else:
+              blocks_to_add.append(
+                  '    <activity\n'
+                  '        android:name=".QuickExpenseActivity"\n'
+                  '        android:theme="@android:style/Theme.Material.Light.NoActionBar"\n'
+                  '        android:configChanges="orientation|keyboardHidden|keyboard|screenSize|smallestScreenSize|locale|layoutDirection|fontScale|screenLayout|density|uiMode"\n'
+                  '        android:hardwareAccelerated="true"\n'
+                  '        android:windowSoftInputMode="adjustResize"\n'
+                  '        android:launchMode="singleTask"\n'
+                  '        android:taskAffinity="com.example.pro_app.quickexpense"\n'
                   '        android:excludeFromRecents="true" />\n'
               )
 
@@ -921,15 +994,25 @@ jobs:
                           // and quick expenses notification lock screen la
                           // erukkumpothu thalli vitta poiduthu ... athu
                           // pogavey kudathu"). Called from
-                          // QuickNotificationService.show() right after
-                          // that same-id notification is (re)posted -
-                          // starting this foreground service anchors it so
-                          // the OS itself won't let it be swiped away, on
-                          // the lock screen or anywhere else. Safe to call
-                          // repeatedly (Android just keeps the already-
-                          // running service running).
+                          // QuickNotificationService.show() every time the
+                          // notification needs (re)posting - starting this
+                          // foreground service anchors it so the OS itself
+                          // won't let it be swiped away, on the lock screen
+                          // or anywhere else, AND (2026-09) is now also
+                          // what actually builds and posts the notification
+                          // itself, with its ➕/➖/📊 actions - see
+                          // QuickNotificationForegroundService.kt's
+                          // onStartCommand and QuickNotificationService's
+                          // class doc comment for why. title/body are the
+                          // live content (today's totals) computed on the
+                          // Dart side; onStartCommand falls back to sensible
+                          // defaults if either is missing. Safe to call
+                          // repeatedly (Android just re-delivers a fresh
+                          // onStartCommand to the already-running service).
                           try {
                               val serviceIntent = Intent(this, QuickNotificationForegroundService::class.java)
+                              serviceIntent.putExtra("title", call.argument<String>("title"))
+                              serviceIntent.putExtra("body", call.argument<String>("body"))
                               if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.O) {
                                   startForegroundService(serviceIntent)
                               } else {
@@ -937,9 +1020,9 @@ jobs:
                               }
                               result.success(true)
                           } catch (e: Exception) {
-                              // Never let this block the notification's own
-                              // content from showing via the normal
-                              // (dismissible) path as a fallback.
+                              // Never let this block the rest of the app -
+                              // the notification just won't show/update
+                              // this one time.
                               result.success(false)
                           }
                       } else if (call.method == "stopQuickNotificationService") {
@@ -953,6 +1036,25 @@ jobs:
                           } catch (e: Exception) {
                               result.success(false)
                           }
+                      } else if (call.method == "consumeQuickDashboardLaunchFlag") {
+                          // Read by background_tasks.dart's
+                          // consumeQuickDashboardLaunch(), called once from
+                          // main.dart at every app boot - true exactly once
+                          // per launch caused by tapping 📊 Dashboard (or
+                          // the notification body) on the Quick
+                          // Income/Expense notification (see
+                          // QuickNotificationForegroundService.kt's
+                          // onStartCommand, which is what puts this extra on
+                          // the launching Intent), then immediately cleared
+                          // from `intent` so re-checking later never
+                          // re-fires the same tab-jump. Exact same pattern
+                          // as consumeDailyOrderLaunchFlag above. ➕
+                          // Income/➖ Expense never set this extra - they
+                          // launch QuickIncomeActivity/QuickExpenseActivity
+                          // directly instead, never touching MainActivity.
+                          val flag = intent?.getBooleanExtra("open_dashboard", false) ?: false
+                          if (flag) intent?.removeExtra("open_dashboard")
+                          result.success(flag)
                       } else {
                           result.notImplemented()
                       }
@@ -1093,34 +1195,45 @@ jobs:
           }
           '''
 
-          # Anchors the Quick Income/Expense notification (id 3001,
-          # channel "quick_income_expense" - same id/channel
-          # flutter_local_notifications already uses from
-          # QuickNotificationService.show()) as a genuine foreground-
-          # service notification, the only OS-guaranteed way to make a
-          # notification impossible to swipe away, including from the
-          # lock screen (spec: "quick income and quick expenses
-          # notification lock screen la erukkumpothu thalli vitta
-          # poiduthu ... athu pogavey kudathu" - it must never go away).
-          # `ongoing`/`autoCancel: false` alone (the earlier approach) is
-          # advisory only - many OEM lock-screen UIs and swipe gestures
-          # ignore it; binding the SAME notification id to a running
-          # foreground service is what the platform itself will not let
-          # the user dismiss.
+          # Anchors the Quick Income/Expense notification (id 3001, channel
+          # "quick_income_expense") as a genuine foreground-service
+          # notification, the only OS-guaranteed way to make a notification
+          # impossible to swipe away, including from the lock screen (spec:
+          # "quick income and quick expenses notification lock screen la
+          # erukkumpothu thalli vitta poiduthu ... athu pogavey kudathu" -
+          # it must never go away). `ongoing`/`autoCancel: false` alone (the
+          # earlier approach) is advisory only - many OEM lock-screen UIs
+          # and swipe gestures ignore it; binding the SAME notification id
+          # to a running foreground service is what the platform itself
+          # will not let the user dismiss.
           #
-          # This service only ever posts a minimal placeholder
-          # notification on that id - QuickNotificationService.dart keeps
-          # calling NotificationManager.notify() with the real title/
-          # body/action-button content on the same id right after
-          # starting this service (see startQuickNotificationService
-          # above), which simply updates the already-anchored
-          # notification in place. So this service owns dismiss-proofing
-          # only; the Dart side still owns what the notification actually
-          # says.
+          # (2026-09) This service now builds and posts the ENTIRE real
+          # notification itself - title/body arrive as Intent extras from
+          # QuickNotificationService.show() (see startQuickNotificationService
+          # in MainActivity.kt above). It used to only post a bare
+          # placeholder here, with QuickNotificationService.dart
+          # (flutter_local_notifications) overwriting it with the real
+          # content/action buttons right after. That stopped being possible
+          # once ➕ Income/➖ Expense needed to open their OWN standalone
+          # Activity directly (see QuickIncomeActivity.kt/
+          # QuickExpenseActivity.kt) - flutter_local_notifications' action
+          # buttons can only run silently or relaunch this app's own
+          # MainActivity, there is no public API to point one at a
+          # different Activity class, which is exactly why tapping ➕/➖
+          # used to open the app and its PIN screen first no matter how the
+          # post-PIN navigation was tuned (spec: "income or expenses thouch
+          # panna app open aagakudathu ... athula direct ah na enter
+          # pannippan"). Building the whole notification natively, with
+          # three independent PendingIntents, is what finally lets ➕/➖
+          # skip MainActivity entirely while 📊 Dashboard (real profit/
+          # income/expense figures, not a one-field entry) still goes
+          # through it and the shop's PIN, same protection as every other
+          # screen in the app.
           quick_notification_foreground_service_kt = '''package com.example.pro_app
 
           import android.app.NotificationChannel
           import android.app.NotificationManager
+          import android.app.PendingIntent
           import android.app.Service
           import android.content.Context
           import android.content.Intent
@@ -1138,9 +1251,6 @@ jobs:
 
               override fun onCreate() {
                   super.onCreate()
-                  // Idempotent - matches the channel flutter_local_notifications
-                  // itself creates on first QuickNotificationService.show(), so
-                  // it doesn't matter which of the two runs first.
                   if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.O) {
                       val manager = getSystemService(Context.NOTIFICATION_SERVICE) as NotificationManager
                       val channel = NotificationChannel(
@@ -1154,12 +1264,82 @@ jobs:
               }
 
               override fun onStartCommand(intent: Intent?, flags: Int, startId: Int): Int {
+                  val title = intent?.getStringExtra("title") ?: "Quick Income & Expense"
+                  val body = intent?.getStringExtra("body") ?: "Tap Income or Expense to add an entry in one tap."
+
+                  // ➕ Income / ➖ Expense: each launches its OWN standalone
+                  // Activity/Flutter engine directly - never MainActivity,
+                  // never this app's PIN screen. FLAG_ACTIVITY_NEW_TASK is
+                  // enough (not CLEAR_TOP) since each Activity already
+                  // declares launchMode="singleTask" with its own
+                  // taskAffinity in the manifest, same as the Daily Orders
+                  // widget's QuickAddActivity.
+                  val incomeIntent = Intent(this, QuickIncomeActivity::class.java).apply {
+                      flags = Intent.FLAG_ACTIVITY_NEW_TASK
+                  }
+                  val incomePending = PendingIntent.getActivity(
+                      this, 3101, incomeIntent,
+                      PendingIntent.FLAG_UPDATE_CURRENT or PendingIntent.FLAG_IMMUTABLE
+                  )
+                  val expenseIntent = Intent(this, QuickExpenseActivity::class.java).apply {
+                      flags = Intent.FLAG_ACTIVITY_NEW_TASK
+                  }
+                  val expensePending = PendingIntent.getActivity(
+                      this, 3102, expenseIntent,
+                      PendingIntent.FLAG_UPDATE_CURRENT or PendingIntent.FLAG_IMMUTABLE
+                  )
+
+                  // 📊 Dashboard, and a plain tap on the notification body,
+                  // both still go through MainActivity (and the shop's own
+                  // PIN) - same "open_dashboard" extra pattern
+                  // DailyOrderAlarmReceiver already uses for
+                  // "open_daily_orders", read back by
+                  // consumeQuickDashboardLaunchFlag above.
+                  val dashboardIntent = Intent(this, MainActivity::class.java).apply {
+                      flags = Intent.FLAG_ACTIVITY_NEW_TASK or Intent.FLAG_ACTIVITY_CLEAR_TOP
+                      putExtra("open_dashboard", true)
+                  }
+                  val dashboardPending = PendingIntent.getActivity(
+                      this, 3103, dashboardIntent,
+                      PendingIntent.FLAG_UPDATE_CURRENT or PendingIntent.FLAG_IMMUTABLE
+                  )
+
                   val notification = NotificationCompat.Builder(this, CHANNEL_ID)
-                      .setContentTitle("Quick Income & Expense")
-                      .setContentText("Tap Income or Expense to add an entry in one tap.")
+                      .setContentTitle(title)
+                      .setContentText(body)
+                      // BigTextStyle (spec: "quick income and quick
+                      // expenses notification screen la or lock la
+                      // kamikkuthu athula right side oru drop down arrow
+                      // kattuthu ... enakku antha dropdown arrow no need
+                      // stright ah income expenses and dash board
+                      // kamikkanum" - the ➕/➖/📊 buttons are hidden behind
+                      // a collapsed/expand-arrow card on the lock screen).
+                      // Giving the system a "big" content style is what
+                      // usually makes it draw the FULL card (title, body
+                      // and every action button) straight away instead of
+                      // collapsing to one line, on both the notification
+                      // shade and the lock screen - a plain
+                      // setContentText-only notification is what most
+                      // often gets collapsed like that. Best-effort, same
+                      // as `visibility: public` below: whether a lock
+                      // screen still shows its OWN "swipe/expand to see
+                      // actions" card on top of this is each phone's own
+                      // OEM lock-screen skin (e.g. some Samsung/Xiaomi
+                      // builds), which no app-level API can override.
+                      .setStyle(NotificationCompat.BigTextStyle().bigText(body))
                       .setSmallIcon(R.drawable.ic_notification)
                       .setOngoing(true)
                       .setOnlyAlertOnce(true)
+                      .setPriority(NotificationCompat.PRIORITY_HIGH)
+                      // Shows the ➕/➖/📊 buttons and the totals in `body`
+                      // directly on the lock screen with no unlock needed
+                      // just to see them (was `visibility: public` on the
+                      // old AndroidNotificationDetails).
+                      .setVisibility(NotificationCompat.VISIBILITY_PUBLIC)
+                      .setContentIntent(dashboardPending)
+                      .addAction(R.drawable.ic_notification, "➕ Income", incomePending)
+                      .addAction(R.drawable.ic_notification, "➖ Expense", expensePending)
+                      .addAction(R.drawable.ic_notification, "📊 Dashboard", dashboardPending)
                       .build()
 
                   // Raw 34 rather than Build.VERSION_CODES.UPSIDE_DOWN_CAKE -
@@ -1172,8 +1352,10 @@ jobs:
                       startForeground(NOTIFICATION_ID, notification)
                   }
                   // START_STICKY: if the OS kills this service under memory
-                  // pressure, it gets restarted (with a null intent) rather
-                  // than leaving the notification permanently un-anchored.
+                  // pressure, it gets restarted (with a null intent, so
+                  // title/body fall back to the defaults above until the
+                  // next real refresh) rather than leaving the notification
+                  // permanently un-anchored.
                   return START_STICKY
               }
 

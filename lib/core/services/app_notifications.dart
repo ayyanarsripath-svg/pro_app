@@ -2,8 +2,6 @@ import 'package:flutter_local_notifications/flutter_local_notifications.dart';
 
 import 'daily_order_auto_send_signal.dart';
 import 'order_reminder_service.dart';
-import 'quick_action_signal.dart';
-import 'quick_notification_service.dart';
 
 /// Single, app-wide [FlutterLocalNotificationsPlugin] instance with exactly
 /// ONE `initialize()` call and ONE `onDidReceiveNotificationResponse`
@@ -70,40 +68,31 @@ class AppNotifications {
 
   /// Fires while the app process is alive (foreground OR backgrounded but
   /// not killed) - reacts to a tap on ANY notification this app shows,
-  /// routed here by [payload]/[actionId] to whichever feature owns it. The
+  /// routed here by [payload] to whichever feature owns it. The
   /// fully-dead-process cold-start case is handled separately by
   /// [consumeColdStartLaunch] below.
+  ///
+  /// NOTE: the Quick Income/Expense notification (QuickNotificationService)
+  /// used to route its ➕/➖/📊 button taps through here too. It no longer
+  /// does - that notification and all three of its actions are now built
+  /// and launched entirely natively (QuickNotificationForegroundService.kt),
+  /// specifically so ➕ Income/➖ Expense can open their own standalone
+  /// Activity/screen without ever going through this app's MainActivity or
+  /// PIN gate at all. See QuickNotificationService's class doc comment.
   static void _onResponse(NotificationResponse response) {
     if (response.payload == OrderReminderService.autoSendPayload) {
       DailyOrderAutoSendSignal.fire();
       return;
     }
-    if (response.payload == QuickNotificationService.payload) {
-      _fireQuickAction(response.actionId);
-    }
     // Backup notifications (BackupService, ids 2001-2003) are purely
     // informational today - nothing to route on tap.
   }
 
-  static void _fireQuickAction(String? actionId) {
-    if (actionId == QuickNotificationService.incomeActionId) {
-      QuickActionSignal.fire(QuickActionType.income);
-    } else if (actionId == QuickNotificationService.expenseActionId) {
-      QuickActionSignal.fire(QuickActionType.expense);
-    } else {
-      QuickActionSignal.fire(QuickActionType.dashboard);
-    }
-  }
-
   /// Call once from main(), right after [ensureInitialized], to catch the
   /// case flutter_local_notifications' own tap callback CAN'T cover: the
-  /// app process was fully dead (not just backgrounded) and this exact tap
-  /// - the Daily Order reminder OR a Quick Income/Expense notification
-  /// button - is what launched it fresh. Replaces both
-  /// OrderReminderService's and (a new) QuickNotificationService's own
-  /// separate cold-start checks, now that both notifications share this one
-  /// plugin instance. Never throws - a failure here must never block app
-  /// startup.
+  /// app process was fully dead (not just backgrounded) and the Daily
+  /// Order reminder notification is what launched it fresh. Never throws -
+  /// a failure here must never block app startup.
   static Future<void> consumeColdStartLaunch() async {
     try {
       final details = await plugin.getNotificationAppLaunchDetails();
@@ -112,10 +101,6 @@ class AppNotifications {
       if (response == null) return;
       if (response.payload == OrderReminderService.autoSendPayload) {
         DailyOrderAutoSendSignal.fire();
-        return;
-      }
-      if (response.payload == QuickNotificationService.payload) {
-        _fireQuickAction(response.actionId);
       }
     } catch (_) {
       // See ensureInitialized's note - never block app startup.
