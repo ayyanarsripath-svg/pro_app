@@ -60,4 +60,23 @@ class LedgerRepository {
     final rows = await db.query('ledger_transactions', where: where.toString(), whereArgs: args);
     return rows.map(LedgerTransaction.fromMap).toList();
   }
+
+  /// Every ledger row tagged with a given [referenceType] - feeds
+  /// QuickHistoryScreen's Income side (referenceType 'quick_income', see
+  /// QuickTransactionRepository.recordIncome), newest first.
+  Future<List<LedgerTransaction>> byReferenceType(String referenceType) async {
+    final db = await _dbHelper.database;
+    final rows = await db.query('ledger_transactions',
+        where: 'reference_type = ?', whereArgs: [referenceType], orderBy: 'created_at DESC');
+    return rows.map(LedgerTransaction.fromMap).toList();
+  }
+
+  /// Removes a single ledger row by id - used by QuickHistoryScreen to
+  /// delete a Quick Income entry (which, unlike a service/sale/expense,
+  /// has no other repository row to clean up alongside it; the ledger row
+  /// IS the record of that income).
+  Future<void> delete(String id) async {
+    final db = await _dbHelper.database;
+    await db.delete('ledger_transactions', where: 'id = ?', whereArgs: [id]);
+  }
 }

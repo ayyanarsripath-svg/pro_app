@@ -405,9 +405,19 @@ class _ServiceDetailScreenState extends State<ServiceDetailScreen> {
     final balanceDue = s.displayBalance > 0 ? s.displayBalance : 0.0;
     final deliveryPersonCtrl = TextEditingController(text: s.deliveryPerson ?? '');
     bool markDelivered = false;
-    final deliveryAmountCtrl = TextEditingController(
-      text: balanceDue > 0 ? balanceDue.toStringAsFixed(balanceDue == balanceDue.roundToDouble() ? 0 : 2) : '',
-    );
+    // BUG FIX (2026-09): this used to pre-fill with the FULL balance due
+    // (e.g. ₹1,500), so a shop that typed ₹1,500 into "Add Payment" above
+    // AND ticked "Mark as Delivered now" - the natural way to record "the
+    // full balance was just paid at delivery" - ended up submitting ₹1,500
+    // (Add Payment) + ₹1,500 (this field, still holding its untouched
+    // prefill) = ₹3,000, tripping the "more than balance due" guard with a
+    // confusing "₹3,000 was entered" message for a payment that was really
+    // only ever ₹1,500 (spec: "add payment la 1500 add panna total amount
+    // ah vida extra 1500 amount add aagi 3000 kamikkuthu"). Starting this
+    // field blank - same as "Add Payment"'s Amount field just above it -
+    // means the two fields never silently double-count the same real
+    // payment; the shop only ever gets charged what they actually typed.
+    final deliveryAmountCtrl = TextEditingController();
 
     final ok = await showDialog<bool>(
       context: context,
@@ -472,8 +482,8 @@ class _ServiceDetailScreenState extends State<ServiceDetailScreen> {
                     keyboardType: TextInputType.number,
                     decoration: const InputDecoration(
                       labelText: 'Amount Collected at Delivery (₹)',
-                      helperText: 'On top of the payment above and anything already paid. Leave 0 if nothing is being collected right now.',
-                      helperMaxLines: 3,
+                      helperText: "If the customer is paying now, enter it in ONE place only - either here OR in Add Payment above, not both. Leave blank if you already entered it above, or if nothing is being collected right now.",
+                      helperMaxLines: 4,
                     ),
                   ),
               ],

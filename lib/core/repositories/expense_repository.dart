@@ -34,6 +34,7 @@ class ExpenseRepository {
     String? paymentMethod,
     String? description,
     String allocation = ExpenseAllocation.general,
+    String? source,
   }) async {
     final db = await _dbHelper.database;
     final expense = Expense(
@@ -44,6 +45,7 @@ class ExpenseRepository {
       paymentMethod: paymentMethod,
       description: description,
       allocation: allocation,
+      source: source,
       createdAt: DateTime.now(),
     );
     await db.insert('expenses', expense.toMap());
@@ -94,6 +96,16 @@ class ExpenseRepository {
       return rows.map(Expense.fromMap).toList();
     }
     final rows = await db.query('expenses', orderBy: 'expense_date DESC');
+    return rows.map(Expense.fromMap).toList();
+  }
+
+  /// Just the expenses added from Quick Expense (source = 'quick') - feeds
+  /// QuickHistoryScreen, kept separate from [all] (the general Expenses
+  /// screen still shows everything, quick or not, since it's all real
+  /// money either way).
+  Future<List<Expense>> quickOnly() async {
+    final db = await _dbHelper.database;
+    final rows = await db.query('expenses', where: "source = 'quick'", orderBy: 'created_at DESC');
     return rows.map(Expense.fromMap).toList();
   }
 }

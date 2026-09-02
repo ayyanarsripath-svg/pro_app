@@ -119,7 +119,17 @@ class _BackupScreenState extends State<BackupScreen> with WidgetsBindingObserver
   /// blank rather than showing an error over the whole screen.
   Future<void> _refreshDriveBackupCount() async {
     try {
-      final list = await _backupService.listGoogleDriveBackups();
+      // allowInteractiveSignIn: false - BUG FIX (2026-09): this background
+      // refresh used to open the full Google account picker on its own
+      // whenever silent re-auth failed, so the shop got asked to sign in
+      // again just from opening this screen, sometimes every single time
+      // (spec: "na eppolam backup and restore settings la enter aagurano
+      // appolam enakku google drive sign in account pic panna solluthu ...
+      // once sign in pannitta adikkadi kekka kudathu"). A failed silent
+      // check now just leaves the count blank - "Connect Google Drive" /
+      // "Change Google Account" below still open the picker when the shop
+      // actually wants to (re)link an account.
+      final list = await _backupService.listGoogleDriveBackups(allowInteractiveSignIn: false);
       if (mounted) setState(() => _driveBackupCount = list.length);
     } catch (_) {
       // Leave it blank - Backup History still shows everything it already

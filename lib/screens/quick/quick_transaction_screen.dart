@@ -1,4 +1,5 @@
 import 'package:flutter/material.dart';
+import 'package:speech_to_text/speech_to_text.dart' as stt;
 
 import '../../core/repositories/quick_transaction_repository.dart';
 import '../../core/services/quick_notification_service.dart';
@@ -31,6 +32,16 @@ class _QuickTransactionScreenState extends State<QuickTransactionScreen> {
   bool _saving = false;
   int _savedCount = 0;
 
+  // Mic entry (spec: "adikkadi type panni text enter panna mudiyathu so
+  // mic touch panni petrol 50 rupees nu sonna enakku expenses la petrol
+  // add pannittu 50 ah amount la add pannanum" - speaking an entry instead
+  // of typing the amount and a note every single time). _speech is
+  // created fresh per screen (not a shared singleton) since this is the
+  // only screen that uses it - no need for app-wide plumbing.
+  final _speech = stt.SpeechToText();
+  bool _speechAvailable = false;
+  bool _listening = false;
+
   @override
   void initState() {
     super.initState();
@@ -46,7 +57,76 @@ class _QuickTransactionScreenState extends State<QuickTransactionScreen> {
     _amountCtrl.dispose();
     _noteCtrl.dispose();
     _amountFocus.dispose();
+    _speech.stop();
     super.dispose();
+  }
+
+  /// Starts (or, if already listening, stops) voice entry. Lazily
+  /// initializes speech_to_text on first tap rather than in initState, so
+  /// opening this screen never itself triggers the RECORD_AUDIO permission
+  /// prompt - only actually tapping the mic does, same as every other
+  /// permission in this app being asked for only when the shop uses the
+  /// feature that needs it.
+  Future<void> _toggleListening() async {
+    if (_listening) {
+      await _speech.stop();
+      if (mounted) setState(() => _listening = false);
+      return;
+    }
+
+    if (!_speechAvailable) {
+      final ok = await _speech.initialize(
+        onError: (_) {
+          if (mounted) setState(() => _listening = false);
+        },
+        onStatus: (status) {
+          // Covers the recognizer stopping itself after a pause in speech
+          // (the normal end of a successful entry), not just an explicit
+          // stop tap - otherwise the mic icon would stay stuck in its
+          // "listening" state after the shop finished speaking.
+          if (status == 'done' || status == 'notListening') {
+            if (mounted) setState(() => _listening = false);
+          }
+        },
+      );
+      if (!mounted) return;
+      setState(() => _speechAvailable = ok);
+      if (!ok) {
+        ScaffoldMessenger.of(context).showSnackBar(const SnackBar(
+          content: Text('Mic not available - check microphone permission in phone Settings'),
+        ));
+        return;
+      }
+    }
+
+    setState(() => _listening = true);
+    await _speech.listen(onResult: _onSpeechResult);
+  }
+
+  /// Fills Amount + Note from what was heard. Only the AMOUNT is parsed out
+  /// with any confidence (the first plain number in the phrase, e.g. "50"
+  /// in "petrol 50 rupees") - matching text against this app's fixed
+  /// Category list by voice would be guesswork risking the wrong category
+  /// getting silently picked, so the full heard phrase (with that number
+  /// and a trailing "rupees"/"rs" removed) goes into Note instead, e.g.
+  /// "petrol" - visible and editable, and the shop still picks the right
+  /// Category with one tap same as always.
+  void _onSpeechResult(stt.SpeechRecognitionResult result) {
+    final heard = result.recognizedWords.trim();
+    if (heard.isEmpty) return;
+
+    final numberMatch = RegExp(r'\d+(\.\d+)?').firstMatch(heard);
+    var description = heard;
+    if (numberMatch != null) {
+      _amountCtrl.text = numberMatch.group(0)!;
+      description = (heard.substring(0, numberMatch.start) + heard.substring(numberMatch.end)).trim();
+    }
+    // Strip a trailing/leading currency word left over once the number
+    // itself is removed (e.g. "petrol  rupees" -> "petrol").
+    description = description.replaceAll(RegExp(r'\b(rupees?|rs\.?)\b', caseSensitive: false), '').trim();
+    if (description.isNotEmpty) _noteCtrl.text = description;
+
+    if (result.finalResult && mounted) setState(() {});
   }
 
   Future<void> _save({bool addAnother = false}) async {
@@ -121,6 +201,23 @@ class _QuickTransactionScreenState extends State<QuickTransactionScreen> {
                   _isExpense = s.first;
                   _category = _categories.first;
                 }),
+              ),
+              const SizedBox(height: 14),
+              // Voice entry (spec: speak instead of typing - "petrol 50
+              // rupees" fills Amount with 50 and Note with "petrol" below).
+              // Centered and full-width so it reads as an alternative way
+              // to fill the form below, not a minor extra button.
+              SizedBox(
+                width: double.infinity,
+                child: OutlinedButton.icon(
+                  onPressed: _toggleListening,
+                  style: OutlinedButton.styleFrom(
+                    foregroundColor: _listening ? color : null,
+                    side: _listening ? BorderSide(color: color, width: 2) : null,
+                  ),
+                  icon: Icon(_listening ? Icons.mic_rounded : Icons.mic_none_rounded),
+                  label: Text(_listening ? 'Listening... (tap to stop)' : 'Speak an entry (e.g. "petrol 50 rupees")'),
+                ),
               ),
               const SizedBox(height: 18),
               TextField(

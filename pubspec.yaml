@@ -130,6 +130,13 @@ dependencies:
   # file's doc comments for how the two avoid creating duplicate backups.
   android_alarm_manager_plus: ^4.0.4
 
+  # Mic button on Quick Income/Quick Expense (spec: "adikkadi type panni
+  # text enter panna mudiyathu so mic touch panni petrol 50 rupees nu
+  # sonna enakku expenses la petrol add pannittu 50 ah amount la add
+  # pannanum" - speak an entry instead of typing it every time). Handles
+  # requesting the RECORD_AUDIO runtime permission itself via initialize().
+  speech_to_text: ^7.0.0
+
 dev_dependencies:
   flutter_test:
     sdk: flutter

@@ -34,6 +34,11 @@ class Expense {
   final String? paymentMethod;
   final String? description;
   final String allocation;
+  // Tags an expense added from the Quick Expense screen as 'quick', so
+  // QuickHistoryScreen can show just those, separate from the general
+  // Expenses list (see DatabaseHelper's oldVersion < 11 migration). Null
+  // for every expense added the normal way, via Settings -> Expenses.
+  final String? source;
   final DateTime createdAt;
 
   Expense({
@@ -44,6 +49,7 @@ class Expense {
     this.paymentMethod,
     this.description,
     this.allocation = ExpenseAllocation.general,
+    this.source,
     required this.createdAt,
   });
 
@@ -55,6 +61,7 @@ class Expense {
         paymentMethod: m['payment_method'] as String?,
         description: m['description'] as String?,
         allocation: m['allocation'] as String? ?? ExpenseAllocation.general,
+        source: m['source'] as String?,
         createdAt: DateTime.parse(m['created_at'] as String),
       );
 
@@ -66,6 +73,7 @@ class Expense {
         'payment_method': paymentMethod,
         'description': description,
         'allocation': allocation,
+        'source': source,
         'created_at': createdAt.toIso8601String(),
       };
 }

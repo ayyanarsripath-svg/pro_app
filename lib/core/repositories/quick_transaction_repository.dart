@@ -88,6 +88,11 @@ class QuickTransactionRepository {
       category: category,
       amount: amount,
       description: (trimmedNote == null || trimmedNote.isEmpty) ? null : trimmedNote,
+      // Tags this row so QuickHistoryScreen can show it separately from
+      // the general Expenses list (spec: "quick expenses and quick income
+      // ku thaniya oru history create pannikkalam" - it was landing mixed
+      // into Expenses with no way to tell it apart).
+      source: 'quick',
     );
   }
 }
