@@ -306,6 +306,34 @@ class _ServiceFormScreenState extends State<ServiceFormScreen> {
         _estimatedCtrl.text = sum == sum.roundToDouble() ? sum.toStringAsFixed(0) : sum.toStringAsFixed(2);
     }
 
+    /// Non-physical service actions that never get ordered from a supplier,
+    /// so they should never become a Daily Order row on their own (spec:
+    /// "software remove pannanum" - drop these out, don't save them as if
+    /// they were a part).
+    static const _nonPhysicalFaultWords = {
+        'software', 'unlock', 'frp', 'flash', 'flashing', 'format', 'pattern', 'password', 'reset', 'update',
+    };
+
+    /// Splits the Fault/Complaint text into the individual parts/accessories
+    /// that actually need ordering (spec: "display + battery + button +
+    /// software apdinu ellam onna potruvan ... enakku thani thaniya daily
+    /// order entry ah venum ... software remove pannanum" - a combined
+    /// complaint like "Display + Battery + Button + Software" was landing
+    /// in Daily Order as ONE row with the whole joined string as the
+    /// Part/Accessory, instead of Display/Battery/Button each getting their
+    /// own row and Software being dropped since it isn't a part at all).
+    /// Splits on "+" - the same delimiter _togglePreset already joins
+    /// selected complaint chips with - and drops any part whose text
+    /// contains a non-physical word (see [_nonPhysicalFaultWords]).
+    List<String> _dailyOrderPartsFrom(String complaint) {
+        return complaint
+            .split('+')
+            .map((p) => p.trim())
+            .where((p) => p.isNotEmpty)
+            .where((p) => !p.toLowerCase().split(RegExp(r'\s+')).any(_nonPhysicalFaultWords.contains))
+            .toList();
+    }
+
     /// Lets the shop add their own complaint preset to the quick-pick list -
     /// saved to settings so it's available on every future job card, not
     /// just this one.
@@ -765,21 +793,38 @@ class _ServiceFormScreenState extends State<ServiceFormScreen> {
         // explicitly says this job needs a part ordered. Best-effort: a
         // Daily Order write failing must never block the service job itself
         // from being saved.
+        //
+        // SPLIT-PER-PART FIX (2026-09): a combined complaint like "Display +
+        // Battery + Button + Software" used to save as ONE Daily Order row
+        // with that entire string dumped into Part/Accessory (spec: "display
+        // battery button software apdinu ellam onna potruvan ethu ... daily
+        // order la ... parts accessories la ... ellam vanthudum so enakku
+        // thani thaniya daily order entry ah venum at tha same time software
+        // remove pannanum" - each fault needs its OWN row, and non-physical
+        // faults like "software" shouldn't be saved as a part at all). Now
+        // splits on "+" (see _dailyOrderPartsFrom) into one row per real
+        // part, dropping software-type words entirely; a blank complaint
+        // still falls back to a single deviceLabel-only row as before.
         if (_addToDailyOrder && service.deviceLabel != 'Device') {
             try {
                 final complaint = (service.complaint ?? '').trim();
-                await _dailyOrderRepo.create(
-                    orderDate: isoDateFormat.format(DateTime.now()),
-                    typeModel: service.deviceLabel,
-                    partName: complaint.isEmpty ? service.deviceLabel : complaint,
-                    quantity: '1',
-                    );
+                final parts = complaint.isEmpty ? [service.deviceLabel] : _dailyOrderPartsFrom(complaint);
+                for (final part in parts) {
+                    await _dailyOrderRepo.create(
+                        orderDate: isoDateFormat.format(DateTime.now()),
+                        typeModel: service.deviceLabel,
+                        partName: part,
+                        quantity: '1',
+                        );
+                }
                 // Keeps the Daily Orders home-screen widget in sync
                 // immediately, same as DailyOrderScreen/QuickAddOrderScreen's
                 // own refresh after adding an item - otherwise the widget
                 // would only pick this new row up the next time the app is
-                // reopened.
-                await _widgetService.refresh();
+                // reopened. Skipped when every part was filtered out (e.g. a
+                // complaint that was ONLY "Software") since nothing was
+                // actually added.
+                if (parts.isNotEmpty) await _widgetService.refresh();
             } catch (_) {
                 // Never let this shortcut's failure block job-card creation.
             }
