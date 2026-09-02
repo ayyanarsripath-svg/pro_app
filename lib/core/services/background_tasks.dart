@@ -9,6 +9,7 @@ import '../repositories/settings_repository.dart';
 import 'backup_service.dart';
 import 'daily_order_auto_send_signal.dart';
 import 'order_reminder_service.dart';
+import 'quick_action_signal.dart';
 import 'quick_notification_service.dart';
 
 // Same native channel MainActivity.kt already exposes for WhatsApp direct
@@ -663,6 +664,33 @@ Future<bool> consumeDailyOrderAlarmLaunch() async {
     final launched = await _nativeChannel.invokeMethod('consumeDailyOrderLaunchFlag');
     if (launched == true) {
       DailyOrderAutoSendSignal.fire();
+      return true;
+    }
+  } catch (_) {}
+  return false;
+}
+
+/// Call once from main(), right alongside [consumeDailyOrderAlarmLaunch],
+/// to catch the case where THIS launch is happening because the shop owner
+/// tapped the 📊 Dashboard button (or a plain body tap) on the Quick
+/// Income/Expense persistent notification. That notification is built and
+/// posted entirely natively now (QuickNotificationForegroundService.kt -
+/// see QuickNotificationService's class doc comment for why), and its
+/// Dashboard/content PendingIntent launches MainActivity with an
+/// "open_dashboard" extra, the exact same "read a boolean extra straight
+/// off the launching Intent" pattern [consumeDailyOrderAlarmLaunch] above
+/// already uses for the exact-alarm reminder. Fires QuickActionSignal so
+/// AppShell (once it mounts, past the PIN gate) lands on the Dashboard tab.
+/// Never throws - a platform-channel hiccup here must never block app
+/// startup. NOTE: ➕ Income / ➖ Expense never reach this - they launch
+/// their own standalone Activity directly from the notification, skipping
+/// MainActivity (and this whole cold-start check) entirely.
+Future<bool> consumeQuickDashboardLaunch() async {
+  if (!Platform.isAndroid) return false;
+  try {
+    final launched = await _nativeChannel.invokeMethod('consumeQuickDashboardLaunchFlag');
+    if (launched == true) {
+      QuickActionSignal.fire(QuickActionType.dashboard);
       return true;
     }
   } catch (_) {}

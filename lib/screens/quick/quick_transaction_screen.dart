@@ -23,7 +23,20 @@ import '../../core/theme/app_theme.dart';
 /// change when those arrive, only how this screen gets reached.
 class QuickTransactionScreen extends StatefulWidget {
   final bool startAsExpense;
-  const QuickTransactionScreen({super.key, this.startAsExpense = false});
+
+  /// Set only when this screen is the ROOT of its own standalone
+  /// Activity/engine - the Quick Income/Expense notification's ➕ Income /
+  /// ➖ Expense buttons (see QuickIncomeActivity/QuickExpenseActivity and
+  /// quickIncomeMain/quickExpenseMain in main.dart). There is no previous
+  /// route to pop back to in that case - Navigator.pop() on the app's only
+  /// route is a silent no-op - so this closes the whole standalone task
+  /// instead (same "finish back to the home screen" behaviour as the Daily
+  /// Orders widget's QuickAddOrderScreen). Left null for the normal in-app
+  /// path (Dashboard's own Quick Income/Quick Expense buttons), which keeps
+  /// popping back to Dashboard exactly as before.
+  final VoidCallback? onClose;
+
+  const QuickTransactionScreen({super.key, this.startAsExpense = false, this.onClose});
 
   @override
   State<QuickTransactionScreen> createState() => _QuickTransactionScreenState();
@@ -169,6 +182,9 @@ class _QuickTransactionScreenState extends State<QuickTransactionScreen> {
         ScaffoldMessenger.of(context).showSnackBar(
           SnackBar(content: Text('${_isExpense ? 'Expense' : 'Income'} of ₹${amount.toStringAsFixed(0)} saved')),
         );
+      } else if (widget.onClose != null) {
+        // Standalone (notification) entry point - see [QuickTransactionScreen.onClose].
+        widget.onClose!();
       } else {
         Navigator.pop(context, true);
       }
@@ -182,11 +198,17 @@ class _QuickTransactionScreenState extends State<QuickTransactionScreen> {
   @override
   Widget build(BuildContext context) {
     final color = _isExpense ? AppColors.danger : AppColors.success;
-    return Scaffold(
+    final standalone = widget.onClose != null;
+    final scaffold = Scaffold(
       appBar: AppBar(
         title: Text(_savedCount == 0
             ? (_isExpense ? 'Quick Expense' : 'Quick Income')
             : '${_isExpense ? 'Quick Expense' : 'Quick Income'} ($_savedCount saved)'),
+        // Standalone (notification) launch is this Navigator's only/root
+        // route, so Flutter never draws its own automatic back arrow here -
+        // this is the only way to close it without saving anything, same
+        // as QuickAddOrderScreen's own close icon.
+        leading: standalone ? IconButton(icon: const Icon(Icons.close_rounded), onPressed: widget.onClose) : null,
       ),
       body: SafeArea(
         child: SingleChildScrollView(
@@ -273,6 +295,20 @@ class _QuickTransactionScreenState extends State<QuickTransactionScreen> {
           ),
         ),
       ),
+    );
+
+    if (!standalone) return scaffold;
+
+    // Standalone (notification) launch has no previous route for the
+    // device back button/gesture to reveal either - without this, it would
+    // be silently swallowed (a no-op) the same way Navigator.pop() is in
+    // _save() above. Same PopScope pattern as QuickAddOrderScreen.
+    return PopScope(
+      canPop: false,
+      onPopInvokedWithResult: (didPop, _) {
+        if (!didPop) widget.onClose!();
+      },
+      child: scaffold,
     );
   }
 }

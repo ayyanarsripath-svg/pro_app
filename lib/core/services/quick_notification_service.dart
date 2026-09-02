@@ -1,8 +1,6 @@
 import 'package:flutter/services.dart';
-import 'package:flutter_local_notifications/flutter_local_notifications.dart';
 
 import '../repositories/settings_repository.dart';
-import 'app_notifications.dart';
 import 'pnl_service.dart';
 
 // Same native channel MainActivity.kt already exposes for WhatsApp direct
@@ -29,30 +27,48 @@ const _nativeChannel = MethodChannel('pro_app/whatsapp_share');
 /// stop the shop from swiping it away while the phone was locked, on some
 /// OEM lock-screen UIs (spec: "quick income and quick expenses notification
 /// lock screen la erukkumpothu thalli vitta poiduthu ... athu pogavey
-/// kudathu" - it must never go away). So `show()` below now also starts
+/// kudathu" - it must never go away). So `show()` below starts
 /// QuickNotificationForegroundService.kt via the native channel, which
 /// anchors this same notification id to a genuine Android foreground
 /// service - the one OS-guaranteed mechanism the platform itself won't let
-/// the user dismiss, on the lock screen or anywhere else. `visibility:
-/// public` means the ➕/➖ buttons and today's totals show directly on the
-/// lock screen with no unlock needed first.
+/// the user dismiss, on the lock screen or anywhere else.
 ///
-/// ORDERING MATTERS here (2026-09 fix): the native service must be started
-/// BEFORE [AppNotifications.plugin.show] posts the real content, not after.
-/// The service's own onStartCommand has to call Android's startForeground()
-/// with SOME notification on this id the moment it starts - that call was
-/// happening AFTER .show() in an earlier version of this file, so its
-/// bare-bones placeholder (no ➕/➖ buttons, no tap action) silently
-/// clobbered the rich one .show() had just posted, leaving a notification
-/// that looked present but did nothing when tapped (spec: "touch panna
-/// entha responsesum varala ... thotta amount enter pannramathiri
-/// varamattangithu" - tapping it never opened the amount-entry screen).
-/// Starting the service first means its placeholder goes up first, and
-/// [AppNotifications.plugin.show]'s later call to the OS's regular
-/// notify()-with-same-id then simply overwrites that placeholder in place
-/// with the real title/body/actions - no second startForeground() call
-/// needed for that, updating an already-anchored notification's content is
-/// exactly what plain notify() is for.
+/// BUILT ENTIRELY NATIVELY (2026-09 fix - "athula income or expenses thouch
+/// panna app open aagakudathu ... athukku bathil enakku quick expenses
+/// screen or quick income screen open aaganum athula direct ah na enter
+/// pannippan": tapping ➕ Income / ➖ Expense must never open the app/PIN
+/// screen at all, it must land directly on the entry screen). This used to
+/// call [AppNotifications.plugin.show] (flutter_local_notifications) for
+/// the actual title/body/action-button content, with the foreground service
+/// above only posting a throwaway placeholder first so the OS wouldn't let
+/// the notification be swiped away. That worked for keeping the
+/// notification pinned, but flutter_local_notifications' action buttons can
+/// only ever do one of two things when tapped: run silently in the
+/// background, or relaunch this app's own MainActivity (there is no public
+/// API to point a specific action at some other Activity) - so ➕/➖ could
+/// never skip MainActivity's PIN gate that way, no matter how the
+/// post-PIN navigation inside AppShell was tuned (see git history for that
+/// earlier attempt). QuickNotificationForegroundService.kt's onStartCommand
+/// now builds the ONE real notification itself (title/body passed down as
+/// Intent extras from [show] below), with three independent PendingIntents:
+/// ➕ Income and ➖ Expense each launch their own tiny standalone
+/// Activity/Flutter-engine (QuickIncomeActivity/QuickExpenseActivity, see
+/// lib/main.dart's quickIncomeMain/quickExpenseMain) that shows nothing but
+/// QuickTransactionScreen - same "never touches MainActivity" trick already
+/// proven by the Daily Orders home-screen widget's QuickAddActivity, so
+/// typing an entry no longer goes through this app's PIN at all (the
+/// phone's own lock screen, if the shop has one set, is still what has to
+/// be unlocked to act on any notification button in the first place - this
+/// only removes the second, redundant PIN prompt on top of that). 📊
+/// Dashboard and a plain tap on the notification body still launch
+/// MainActivity as before (see the `open_dashboard` extra/
+/// consumeQuickDashboardLaunchFlag in main.dart) - that one shows real
+/// profit/income/expense figures, not a single field to fill in, so it
+/// keeps the same PIN protection every other screen in the app has.
+/// `setVisibility(PUBLIC)` is set directly on the native builder now (was
+/// `NotificationVisibility.public` on the old AndroidNotificationDetails)
+/// so the buttons and today's totals still show directly on the lock
+/// screen with no unlock needed just to see them.
 ///
 /// Shown once on every app open and refreshed every time a Quick
 /// Income/Expense entry is saved (see QuickTransactionScreen) so the totals
@@ -69,10 +85,6 @@ class QuickNotificationService {
   QuickNotificationService._();
 
   static const _id = 3001;
-  static const payload = 'quick_actions_notification';
-  static const incomeActionId = 'quick_income';
-  static const expenseActionId = 'quick_expense';
-  static const dashboardActionId = 'quick_dashboard';
 
   /// Shows (or, called again later, silently updates in place - same
   /// notification id) the persistent notification with today's running
@@ -86,20 +98,6 @@ class QuickNotificationService {
         await cancel();
         return;
       }
-
-      await AppNotifications.ensureInitialized();
-
-      // Lock-screen dismiss fix: anchors this notification id to a real
-      // foreground service so the OS won't let it be swiped away. MUST run
-      // BEFORE the plugin.show() call below - see the ORDERING MATTERS
-      // note on this class's doc comment for why the reverse order broke
-      // the ➕/➖ action buttons and tap-to-open entirely. Best-effort and
-      // Android-only - iOS has no such channel to reuse, and a failure
-      // here must never stop the notification's actual content (posted
-      // below) from showing.
-      try {
-        await _nativeChannel.invokeMethod('startQuickNotificationService');
-      } catch (_) {}
 
       var body = 'Tap Income or Expense to add an entry in one tap.';
       try {
@@ -120,51 +118,34 @@ class QuickNotificationService {
         // from showing at all.
       }
 
-      const androidDetails = AndroidNotificationDetails(
-        'quick_income_expense',
-        'Quick Income & Expense',
-        channelDescription: "Always-available Income/Expense entry, updated with today's running totals",
-        importance: Importance.high,
-        priority: Priority.high,
-        ongoing: true,
-        autoCancel: false,
-        playSound: false,
-        enableVibration: false,
-        visibility: NotificationVisibility.public,
-        actions: [
-          AndroidNotificationAction(incomeActionId, '➕ Income', showsUserInterface: true),
-          AndroidNotificationAction(expenseActionId, '➖ Expense', showsUserInterface: true),
-          AndroidNotificationAction(dashboardActionId, '📊 Dashboard', showsUserInterface: true),
-        ],
-      );
-      await AppNotifications.plugin.show(
-        _id,
-        'Quick Income & Expense',
-        body,
-        const NotificationDetails(android: androidDetails),
-        payload: payload,
-      );
+      // Starts (or, called again, simply re-triggers onStartCommand on) the
+      // already-running foreground service, which builds and posts the
+      // ENTIRE real notification itself - title/body passed down as Intent
+      // extras. See this class's doc comment for why the ➕/➖/📊 buttons
+      // are no longer built via AndroidNotificationDetails/
+      // AppNotifications.plugin.show at all. Best-effort and Android-only -
+      // iOS has no such channel to reuse, and a failure here must never
+      // throw into the rest of the app.
+      try {
+        await _nativeChannel.invokeMethod('startQuickNotificationService', {
+          'title': 'Quick Income & Expense',
+          'body': body,
+        });
+      } catch (_) {}
     } catch (_) {
       // A notification failing to show must never affect the rest of the app.
     }
   }
 
   /// Removes the persistent notification - called when the shop turns the
-  /// Settings toggle off.
+  /// Settings toggle off. Stops QuickNotificationForegroundService.kt,
+  /// which itself removes the notification id it anchored (see that file's
+  /// onDestroy()).
   static Future<void> cancel() async {
     try {
-      await AppNotifications.ensureInitialized();
-      await AppNotifications.plugin.cancel(_id);
+      await _nativeChannel.invokeMethod('stopQuickNotificationService');
     } catch (_) {
       // Never let clearing a notification throw into the caller.
     }
-    // Stops QuickNotificationForegroundService.kt too, which itself
-    // removes the notification id it anchored (see that file's
-    // onDestroy()) - otherwise the foreground service would keep the
-    // (now content-less) notification alive even after the cancel() call
-    // above.
-    try {
-      await _nativeChannel.invokeMethod('stopQuickNotificationService');
-    } catch (_) {}
   }
 }

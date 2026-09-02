@@ -1,4 +1,5 @@
 import 'package:flutter/material.dart';
+import 'package:flutter/services.dart';
 import 'package:provider/provider.dart';
 
 import 'core/db/database_helper.dart';
@@ -15,6 +16,7 @@ import 'core/services/theme_service.dart';
 import 'core/repositories/settings_repository.dart';
 import 'core/theme/app_theme.dart';
 import 'screens/orders/quick_add_order_screen.dart';
+import 'screens/quick/quick_transaction_screen.dart';
 import 'app.dart';
 
 Future<void> main() async {
@@ -121,6 +123,13 @@ Future<void> main() async {
     // yet, is still picked up once they mount).
     await AppNotifications.consumeColdStartLaunch();
     await consumeDailyOrderAlarmLaunch();
+    // Catches a cold launch from the Quick Income/Expense notification's 📊
+    // Dashboard button (or a plain body tap) - see
+    // consumeQuickDashboardLaunch's own doc comment. ➕ Income/➖ Expense
+    // never reach here at all; they open their own standalone screen
+    // directly (see quickIncomeMain/quickExpenseMain below), never
+    // launching MainActivity/this main() in the first place.
+    await consumeQuickDashboardLaunch();
     OrderReminderService().checkAndNotifyIfDue();
   } catch (_) {
     // See HOTFIX note above - reminder setup must never block app startup.
@@ -200,6 +209,58 @@ class _QuickAddApp extends StatelessWidget {
         brightness: Brightness.light,
       ),
       home: const QuickAddOrderScreen(),
+    );
+  }
+}
+
+/// Third and fourth, equally minimal Flutter entry points - used ONLY by
+/// the Quick Income/Expense persistent notification's ➕ Income / ➖
+/// Expense buttons (spec: "income or expenses thouch panna app open
+/// aagakudathu ... athukku bathil enakku quick expenses screen or quick
+/// income screen open aaganum athula direct ah na enter pannippan" -
+/// tapping either button must never open the app/PIN screen, it must land
+/// directly on the entry screen). Exactly the same "separate Activity,
+/// separate tiny Flutter engine, MainActivity never created" trick as
+/// [quickAddMain] above for the Daily Orders widget - see
+/// QuickIncomeActivity.kt/QuickExpenseActivity.kt and
+/// QuickNotificationForegroundService.kt's onStartCommand, which is what
+/// actually launches these. Closing this screen (the ✕, the Save & Close
+/// button, or the device back gesture) finishes this entire separate task
+/// straight back to the home screen, same as quickAddMain's screen (see
+/// QuickTransactionScreen's `onClose` param).
+@pragma('vm:entry-point')
+Future<void> quickIncomeMain() async {
+  WidgetsFlutterBinding.ensureInitialized();
+  runApp(const _QuickTransactionStandaloneApp(startAsExpense: false));
+}
+
+@pragma('vm:entry-point')
+Future<void> quickExpenseMain() async {
+  WidgetsFlutterBinding.ensureInitialized();
+  runApp(const _QuickTransactionStandaloneApp(startAsExpense: true));
+}
+
+class _QuickTransactionStandaloneApp extends StatelessWidget {
+  final bool startAsExpense;
+  const _QuickTransactionStandaloneApp({required this.startAsExpense});
+
+  @override
+  Widget build(BuildContext context) {
+    return MaterialApp(
+      debugShowCheckedModeBanner: false,
+      theme: ThemeData(
+        useMaterial3: true,
+        colorSchemeSeed: AppColors.primaryBlue,
+        brightness: Brightness.light,
+      ),
+      home: QuickTransactionScreen(
+        startAsExpense: startAsExpense,
+        // This screen is the ROOT (and only) route of its own standalone
+        // task here - there's nothing behind it to pop back to, so closing
+        // it means finishing the whole task, exactly like
+        // QuickAddOrderScreen's _closeToHomeScreen.
+        onClose: () => SystemNavigator.pop(),
+      ),
     );
   }
 }
