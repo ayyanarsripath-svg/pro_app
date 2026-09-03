@@ -6,6 +6,7 @@ import 'package:path/path.dart' as p;
 import 'package:share_plus/share_plus.dart';
 
 import '../../core/repositories/settings_repository.dart';
+import '../../core/services/app_restart_service.dart';
 import '../../core/services/backup_service.dart';
 import '../../core/services/background_tasks.dart';
 import '../../core/theme/app_theme.dart';
@@ -542,7 +543,7 @@ class _BackupScreenState extends State<BackupScreen> with WidgetsBindingObserver
       builder: (context) => AlertDialog(
         title: const Text('Restore Backup?'),
         content: Text(
-          'This will replace your current data with "${p.basename(file.path)}". Make sure this file is a genuine Professional Mobiles backup - restoring the wrong file can leave the app unable to open. The app must be restarted after restoring.',
+          'This will replace your current data with "${p.basename(file.path)}". Make sure this file is a genuine Professional Mobiles backup - restoring the wrong file can leave the app unable to open. The app will restart automatically after restoring.',
         ),
         actions: [
           TextButton(onPressed: () => Navigator.pop(context, false), child: const Text('Cancel')),
@@ -556,8 +557,13 @@ class _BackupScreenState extends State<BackupScreen> with WidgetsBindingObserver
     try {
       await _backupService.restoreFrom(file);
       if (mounted) {
-        ScaffoldMessenger.of(context).showSnackBar(const SnackBar(content: Text('Restored. Please close and reopen the app.')));
+        ScaffoldMessenger.of(context).showSnackBar(const SnackBar(content: Text('Restored. Restarting the app...')));
       }
+      // Auto-restart (spec item 5 - "app automatically restart aaganum"),
+      // replacing the old "please close and reopen the app" manual step.
+      // See AppRestartService's doc comment for why this has to be a real
+      // process relaunch rather than an in-app rebuild.
+      await AppRestartService.restart();
     } catch (e) {
       _showError('Restore failed', e);
     } finally {
@@ -704,7 +710,7 @@ class _BackupScreenState extends State<BackupScreen> with WidgetsBindingObserver
       context: context,
       builder: (context) => AlertDialog(
         title: const Text('Restore Backup?'),
-        content: Text('This will replace your current data with the backup from ${formatDateTime(file.statSync().modified)}. The app must be restarted after restoring.'),
+        content: Text('This will replace your current data with the backup from ${formatDateTime(file.statSync().modified)}. The app will restart automatically after restoring.'),
         actions: [
           TextButton(onPressed: () => Navigator.pop(context, false), child: const Text('Cancel')),
           ElevatedButton(onPressed: () => Navigator.pop(context, true), child: const Text('Restore')),
@@ -716,8 +722,9 @@ class _BackupScreenState extends State<BackupScreen> with WidgetsBindingObserver
       try {
         await _backupService.restoreFrom(file);
         if (mounted) {
-          ScaffoldMessenger.of(context).showSnackBar(const SnackBar(content: Text('Restored. Please close and reopen the app.')));
+          ScaffoldMessenger.of(context).showSnackBar(const SnackBar(content: Text('Restored. Restarting the app...')));
         }
+        await AppRestartService.restart();
       } catch (e) {
         _showError('Restore failed', e);
       } finally {

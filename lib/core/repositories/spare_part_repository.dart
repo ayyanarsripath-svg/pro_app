@@ -4,6 +4,7 @@ import '../db/database_helper.dart';
 import '../utils/id_gen.dart';
 import '../../models/spare_part.dart';
 import '../../models/return_record.dart';
+import '../../models/spare_part_usage.dart';
 import 'return_repository.dart';
 
 class SparePartRepository {
@@ -164,6 +165,38 @@ class SparePartRepository {
     if (txn != null) return run(txn);
     final db = await _dbHelper.database;
     return db.transaction(run);
+  }
+
+  /// Full audit trail of every spare part used on a Service Bill (spec item
+  /// 2's "Spare Parts list") - every row [useForService] has ever written
+  /// for `reference_type = 'service'`, joined with the part's own name and
+  /// that bill's number/mobile name/model, newest first. Read-only: this is
+  /// purely a report over data every "Add Part" already recorded, not a new
+  /// place to enter anything.
+  Future<List<SparePartUsage>> serviceUsageLog({DateTime? from, DateTime? to}) async {
+    final db = await _dbHelper.database;
+    // s.active = 1 excludes a soft-deleted Service Bill's usage rows - a
+    // delete already clears that bill's own P&L ledger entries (see
+    // ServiceRepository.delete), so leaving this report showing cost for a
+    // deleted bill would contradict the "this is exactly what's counted in
+    // P&L" promise this screen makes.
+    final where = StringBuffer("t.txn_type = 'service_usage' AND t.reference_type = 'service' AND s.active = 1");
+    final args = <Object?>[];
+    if (from != null && to != null) {
+      where.write(' AND t.txn_date >= ? AND t.txn_date <= ?');
+      args.addAll([from.toIso8601String(), to.toIso8601String()]);
+    }
+    final rows = await db.rawQuery('''
+      SELECT t.id, t.quantity, t.unit_cost, t.txn_date,
+             p.name AS part_name, p.category AS part_category,
+             s.bill_no, s.mobile_name, s.model
+      FROM spare_part_transactions t
+      JOIN spare_parts p ON p.id = t.spare_part_id
+      JOIN services s ON s.id = t.reference_id
+      WHERE $where
+      ORDER BY t.txn_date DESC
+    ''', args);
+    return rows.map(SparePartUsage.fromMap).toList();
   }
 
   Future<void> adjustStock({

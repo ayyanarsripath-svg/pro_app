@@ -47,30 +47,37 @@ class _PurchaseListScreenState extends State<PurchaseListScreen> {
     return Scaffold(
       body: _loading
           ? const Center(child: CircularProgressIndicator())
-          : _purchases.isEmpty
-              ? const EmptyState(icon: Icons.shopping_cart_rounded, message: 'No purchases yet')
-              : ListView.builder(
-                  padding: const EdgeInsets.all(14),
-                  itemCount: _purchases.length,
-                  itemBuilder: (context, i) {
-                    final purchase = _purchases[i];
-                    return Card(
-                      child: ListTile(
-                        title: Text('${purchase.category.toUpperCase()}  •  ${formatCurrency(purchase.totalAmount)}'),
-                        subtitle: Text(
-                            '${_supplierNames[purchase.supplierId] ?? 'No supplier'}\n${formatDate(purchase.purchaseDate)}  •  Balance: ${formatCurrency(purchase.balance)}'),
-                        isThreeLine: true,
-                        trailing: auth.canDelete
-                            ? IconButton(
-                                icon: const Icon(Icons.delete_rounded, color: AppColors.danger),
-                                tooltip: 'Delete purchase',
-                                onPressed: () => _delete(purchase),
-                              )
-                            : null,
-                      ),
-                    );
-                  },
+          : Column(
+              children: [
+                _purchasesExplainerBanner(),
+                Expanded(
+                  child: _purchases.isEmpty
+                      ? const EmptyState(icon: Icons.shopping_cart_rounded, message: 'No purchases yet')
+                      : ListView.builder(
+                          padding: const EdgeInsets.fromLTRB(14, 0, 14, 14),
+                          itemCount: _purchases.length,
+                          itemBuilder: (context, i) {
+                            final purchase = _purchases[i];
+                            return Card(
+                              child: ListTile(
+                                title: Text('${purchase.category.toUpperCase()}  •  ${formatCurrency(purchase.totalAmount)}'),
+                                subtitle: Text(
+                                    '${_supplierNames[purchase.supplierId] ?? 'No supplier'}\n${formatDate(purchase.purchaseDate)}  •  Balance: ${formatCurrency(purchase.balance)}'),
+                                isThreeLine: true,
+                                trailing: auth.canDelete
+                                    ? IconButton(
+                                        icon: const Icon(Icons.delete_rounded, color: AppColors.danger),
+                                        tooltip: 'Delete purchase',
+                                        onPressed: () => _delete(purchase),
+                                      )
+                                    : null,
+                              ),
+                            );
+                          },
+                        ),
                 ),
+              ],
+            ),
       floatingActionButton: FloatingActionButton.extended(
         onPressed: () async {
           final created = await Navigator.push<bool>(context, MaterialPageRoute(builder: (_) => const PurchaseFormScreen()));
@@ -78,6 +85,39 @@ class _PurchaseListScreenState extends State<PurchaseListScreen> {
         },
         icon: const Icon(Icons.add_rounded),
         label: const Text('New Purchase'),
+      ),
+    );
+  }
+
+  /// Explains what this screen is for (spec: "main menu la purchase nu onnu
+  /// erukku athu ethukku nu therila explain pannu" - the shop owner didn't
+  /// know what Purchases was for and asked me to either explain it or, if
+  /// unused, remove it. It turned out to be a real, working feature - a log
+  /// of what was bought FROM suppliers (spare parts, accessories, stock)
+  /// and how much of each purchase is still owed, with Delete reversing the
+  /// stock/cost impact of every line item - so it's kept, with this
+  /// permanent banner in place of removing it).
+  Widget _purchasesExplainerBanner() {
+    return Container(
+      margin: const EdgeInsets.fromLTRB(14, 14, 14, 4),
+      padding: const EdgeInsets.all(12),
+      decoration: BoxDecoration(
+        color: AppColors.primaryBlue.withOpacity(0.08),
+        borderRadius: BorderRadius.circular(12),
+        border: Border.all(color: AppColors.primaryBlue.withOpacity(0.2)),
+      ),
+      child: Row(
+        crossAxisAlignment: CrossAxisAlignment.start,
+        children: [
+          const Icon(Icons.info_outline_rounded, size: 20, color: AppColors.primaryBlue),
+          const SizedBox(width: 10),
+          Expanded(
+            child: Text(
+              'What is this? A record of what you buy FROM your suppliers - spare parts, accessories, stock - and how much you still owe them (Balance). This is separate from the parts a customer is charged for on a Service Bill. Deleting a purchase reverses the stock it added.',
+              style: TextStyle(fontSize: 12, color: AppColors.textSecondaryOf(context), height: 1.35),
+            ),
+          ),
+        ],
       ),
     );
   }

@@ -88,6 +88,37 @@ class DailyOrderRepository {
     await db.update('daily_order_items', {'received': 1}, where: 'id = ?', whereArgs: [id]);
   }
 
+  /// Sends a sent-but-not-yet-received item back to the order note (spec:
+  /// "yellow x round touch panna thirumba order note ku antha particular
+  /// order poganum" - tapping the yellow Not Received icon must actually
+  /// move that item back to the order note, not just show an
+  /// acknowledgement toast). Clears [sent]/[sentAt]/[received] so the item
+  /// flows straight back into [unsentItems] and gets included in whatever
+  /// batch is sent next.
+  ///
+  /// Recomputes s_no the exact same way [create] does - one more than
+  /// however many OTHER items are currently unsent for this item's own
+  /// order_date - so it slots in after whatever's already waiting on that
+  /// date instead of keeping a stale s_no left over from its old (now-sent)
+  /// batch, which could otherwise collide with an s_no already in use.
+  Future<void> resetToPending(String id) async {
+    final db = await _dbHelper.database;
+    final rows = await db.query('daily_order_items', where: 'id = ?', whereArgs: [id]);
+    if (rows.isEmpty) return;
+    final orderDate = rows.first['order_date'] as String;
+    final existing = await db.query(
+      'daily_order_items',
+      where: 'order_date = ? AND sent = 0 AND id != ?',
+      whereArgs: [orderDate, id],
+    );
+    await db.update(
+      'daily_order_items',
+      {'sent': 0, 'sent_at': null, 'received': 0, 's_no': existing.length + 1},
+      where: 'id = ?',
+      whereArgs: [id],
+    );
+  }
+
   /// Full history (sent and unsent), most recently noted date first - used
   /// by DailyOrderScreen's date-grouped list.
   Future<List<DailyOrderItem>> all() async {

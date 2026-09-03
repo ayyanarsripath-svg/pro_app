@@ -20,6 +20,7 @@ import '../../widgets/section_card.dart';
 import '../pnl/pnl_dashboard_screen.dart';
 import '../quick/quick_history_screen.dart';
 import '../quick/quick_transaction_screen.dart';
+import '../services/service_detail_screen.dart';
 import '../services/service_list_screen.dart';
 
 class DashboardScreen extends StatefulWidget {
@@ -146,10 +147,44 @@ class _DashboardScreenState extends State<DashboardScreen> {
                 crossAxisSpacing: 10,
                 childAspectRatio: 1.5,
                 children: [
-                  StatCard(label: "Today's Revenue", value: data.totals.totalRevenue, icon: Icons.trending_up_rounded, color: AppColors.success),
-                  StatCard(label: "Today's Cost", value: data.totals.totalDirectCost, icon: Icons.inventory_2_rounded, color: AppColors.warning),
-                  StatCard(label: "Gross Profit", value: data.totals.grossProfit, icon: Icons.savings_rounded, color: AppColors.info),
-                  StatCard(label: "Net Profit", value: data.totals.netProfit, icon: Icons.account_balance_wallet_rounded, color: AppColors.accentPurple),
+                  StatCard(
+                    label: "Today's Revenue",
+                    value: data.totals.totalRevenue,
+                    icon: Icons.trending_up_rounded,
+                    color: AppColors.success,
+                    infoText: 'Total money coming in today from Service Bills, Accessories, Mobile/Laptop Sales and Other Sales - before subtracting anything.',
+                  ),
+                  StatCard(
+                    label: "Today's Cost",
+                    value: data.totals.totalDirectCost,
+                    icon: Icons.inventory_2_rounded,
+                    color: AppColors.warning,
+                    infoText: 'What those sales themselves directly cost you today - spare parts used, accessory cost price, the phone\'s own purchase cost for a sale, etc. Does NOT include shop expenses like rent or salary.',
+                  ),
+                  // Gross vs Net Profit (spec item 4: "dash board la gross
+                  // profit and net profit enakku konjam confusion ah
+                  // erukku"). Tap the (i) on either card for the plain-
+                  // language version below.
+                  StatCard(
+                    label: 'Gross Profit',
+                    value: data.totals.grossProfit,
+                    icon: Icons.savings_rounded,
+                    color: AppColors.info,
+                    infoText: 'Gross Profit = Revenue − Cost.\n\n'
+                        "Today's Revenue (₹${data.totals.totalRevenue.toStringAsFixed(0)}) minus Today's Cost "
+                        '(₹${data.totals.totalDirectCost.toStringAsFixed(0)}) = ₹${data.totals.grossProfit.toStringAsFixed(0)}.\n\n'
+                        'This is what you made on the sales themselves, BEFORE counting shop running expenses (rent, salary, electricity, Quick Expense entries, etc.).',
+                  ),
+                  StatCard(
+                    label: 'Net Profit',
+                    value: data.totals.netProfit,
+                    icon: Icons.account_balance_wallet_rounded,
+                    color: AppColors.accentPurple,
+                    infoText: 'Net Profit = Gross Profit − Shop Expenses.\n\n'
+                        'Gross Profit (₹${data.totals.grossProfit.toStringAsFixed(0)}) minus today\'s shop running expenses '
+                        '(₹${data.totals.operatingExpenses.toStringAsFixed(0)} - Expenses screen entries + Quick Expense entries) = ₹${data.totals.netProfit.toStringAsFixed(0)}.\n\n'
+                        'This is what you actually kept today, after everything - the real bottom line.',
+                  ),
                 ],
               ),
               if (!auth.canSeeProfit)
@@ -285,6 +320,15 @@ class _DashboardScreenState extends State<DashboardScreen> {
                       title: Text('${s.billNo} - ${s.mobileName ?? ''}'),
                       subtitle: Text(s.complaint ?? '-', maxLines: 1, overflow: TextOverflow.ellipsis),
                       trailing: StatusBadge(s.status, fontSize: 10),
+                      // Fix: "dash board la recent bill number kattuthu atha
+                      // thotta athukulla pogamattangithu" - tapping a Recent
+                      // Services row used to do nothing at all. Opens that
+                      // exact bill's Service Detail screen, same as tapping
+                      // a row on the full Service List screen does.
+                      onTap: () => Navigator.push(
+                        context,
+                        MaterialPageRoute(builder: (_) => ServiceDetailScreen(serviceId: s.id)),
+                      ),
                     ),
                   )),
               if (data.recentServices.isEmpty) const EmptyState(icon: Icons.build_rounded, message: 'No services yet'),

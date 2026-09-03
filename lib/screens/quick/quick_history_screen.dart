@@ -30,14 +30,36 @@ class _QuickEntry {
 /// tables the rest of the app already reads for Dashboard/P&L (see
 /// QuickTransactionRepository's class doc comment) - this screen is purely
 /// an additional, filtered view onto that same data, not a separate ledger.
-class QuickHistoryScreen extends StatefulWidget {
+///
+/// Body/Scaffold split (2026-09, spec item 3 - "expenses la mention
+/// aaguratha thaniya mention pannu quick income and quick expenses
+/// thaniyavum spare parts list thaniyavum mention pannu"): [QuickHistoryBody]
+/// holds all the actual list/loading logic with no AppBar of its own, so
+/// ExpenseScreen can embed the exact same widget as one of its three tabs
+/// instead of duplicating this logic or having to push a whole separate
+/// screen just to see it. [QuickHistoryScreen] (still used from the
+/// Dashboard's "View History" link) is now just a thin Scaffold+AppBar
+/// wrapper around it.
+class QuickHistoryScreen extends StatelessWidget {
   const QuickHistoryScreen({super.key});
 
   @override
-  State<QuickHistoryScreen> createState() => _QuickHistoryScreenState();
+  Widget build(BuildContext context) {
+    return Scaffold(
+      appBar: AppBar(title: const Text('Quick Income & Expense History')),
+      body: const QuickHistoryBody(),
+    );
+  }
 }
 
-class _QuickHistoryScreenState extends State<QuickHistoryScreen> {
+class QuickHistoryBody extends StatefulWidget {
+  const QuickHistoryBody({super.key});
+
+  @override
+  State<QuickHistoryBody> createState() => _QuickHistoryBodyState();
+}
+
+class _QuickHistoryBodyState extends State<QuickHistoryBody> {
   final _expenseRepo = ExpenseRepository();
   final _ledgerRepo = LedgerRepository();
   List<_QuickEntry> _entries = [];
@@ -112,80 +134,76 @@ class _QuickHistoryScreenState extends State<QuickHistoryScreen> {
     final auth = context.watch<AuthService>();
     final totalIncome = _entries.where((e) => !e.isExpense).fold<double>(0, (s, e) => s + e.amount);
     final totalExpense = _entries.where((e) => e.isExpense).fold<double>(0, (s, e) => s + e.amount);
-    return Scaffold(
-      appBar: AppBar(title: const Text('Quick Income & Expense History')),
-      body: _loading
-          ? const Center(child: CircularProgressIndicator())
-          : RefreshIndicator(
-              onRefresh: _load,
-              child: ListView(
-                padding: const EdgeInsets.all(14),
-                children: [
-                  Row(
+    if (_loading) return const Center(child: CircularProgressIndicator());
+    return RefreshIndicator(
+      onRefresh: _load,
+      child: ListView(
+        padding: const EdgeInsets.all(14),
+        children: [
+          Row(
+            children: [
+              Expanded(
+                child: Container(
+                  padding: const EdgeInsets.all(14),
+                  decoration: BoxDecoration(color: AppColors.success.withOpacity(0.08), borderRadius: BorderRadius.circular(14)),
+                  child: Column(
+                    crossAxisAlignment: CrossAxisAlignment.start,
                     children: [
-                      Expanded(
-                        child: Container(
-                          padding: const EdgeInsets.all(14),
-                          decoration: BoxDecoration(color: AppColors.success.withOpacity(0.08), borderRadius: BorderRadius.circular(14)),
-                          child: Column(
-                            crossAxisAlignment: CrossAxisAlignment.start,
-                            children: [
-                              const Text('Quick Income', style: TextStyle(fontWeight: FontWeight.w700, fontSize: 12)),
-                              const SizedBox(height: 4),
-                              Text(formatCurrency(totalIncome),
-                                  style: const TextStyle(fontWeight: FontWeight.w800, color: AppColors.success, fontSize: 17)),
-                            ],
-                          ),
-                        ),
-                      ),
-                      const SizedBox(width: 10),
-                      Expanded(
-                        child: Container(
-                          padding: const EdgeInsets.all(14),
-                          decoration: BoxDecoration(color: AppColors.danger.withOpacity(0.08), borderRadius: BorderRadius.circular(14)),
-                          child: Column(
-                            crossAxisAlignment: CrossAxisAlignment.start,
-                            children: [
-                              const Text('Quick Expense', style: TextStyle(fontWeight: FontWeight.w700, fontSize: 12)),
-                              const SizedBox(height: 4),
-                              Text(formatCurrency(totalExpense),
-                                  style: const TextStyle(fontWeight: FontWeight.w800, color: AppColors.danger, fontSize: 17)),
-                            ],
-                          ),
-                        ),
-                      ),
+                      const Text('Quick Income', style: TextStyle(fontWeight: FontWeight.w700, fontSize: 12)),
+                      const SizedBox(height: 4),
+                      Text(formatCurrency(totalIncome),
+                          style: const TextStyle(fontWeight: FontWeight.w800, color: AppColors.success, fontSize: 17)),
                     ],
                   ),
-                  const SizedBox(height: 12),
-                  if (_entries.isEmpty) const EmptyState(icon: Icons.bolt_rounded, message: 'No Quick Income/Expense entries yet'),
-                  ..._entries.map((e) => Card(
-                        child: ListTile(
-                          leading: Icon(
-                            e.isExpense ? Icons.remove_circle_outline_rounded : Icons.add_circle_outline_rounded,
-                            color: e.isExpense ? AppColors.danger : AppColors.success,
-                          ),
-                          title: Text(e.label),
-                          subtitle: Text(formatDateTime(e.date)),
-                          trailing: Row(
-                            mainAxisSize: MainAxisSize.min,
-                            children: [
-                              Text(
-                                '${e.isExpense ? '-' : '+'} ${formatCurrency(e.amount)}',
-                                style: TextStyle(fontWeight: FontWeight.w800, color: e.isExpense ? AppColors.danger : AppColors.success),
-                              ),
-                              if (auth.canDelete)
-                                IconButton(
-                                  icon: const Icon(Icons.delete_rounded, color: AppColors.danger, size: 20),
-                                  tooltip: 'Delete entry',
-                                  onPressed: () => _delete(e),
-                                ),
-                            ],
-                          ),
-                        ),
-                      )),
-                ],
+                ),
               ),
-            ),
+              const SizedBox(width: 10),
+              Expanded(
+                child: Container(
+                  padding: const EdgeInsets.all(14),
+                  decoration: BoxDecoration(color: AppColors.danger.withOpacity(0.08), borderRadius: BorderRadius.circular(14)),
+                  child: Column(
+                    crossAxisAlignment: CrossAxisAlignment.start,
+                    children: [
+                      const Text('Quick Expense', style: TextStyle(fontWeight: FontWeight.w700, fontSize: 12)),
+                      const SizedBox(height: 4),
+                      Text(formatCurrency(totalExpense),
+                          style: const TextStyle(fontWeight: FontWeight.w800, color: AppColors.danger, fontSize: 17)),
+                    ],
+                  ),
+                ),
+              ),
+            ],
+          ),
+          const SizedBox(height: 12),
+          if (_entries.isEmpty) const EmptyState(icon: Icons.bolt_rounded, message: 'No Quick Income/Expense entries yet'),
+          ..._entries.map((e) => Card(
+                child: ListTile(
+                  leading: Icon(
+                    e.isExpense ? Icons.remove_circle_outline_rounded : Icons.add_circle_outline_rounded,
+                    color: e.isExpense ? AppColors.danger : AppColors.success,
+                  ),
+                  title: Text(e.label),
+                  subtitle: Text(formatDateTime(e.date)),
+                  trailing: Row(
+                    mainAxisSize: MainAxisSize.min,
+                    children: [
+                      Text(
+                        '${e.isExpense ? '-' : '+'} ${formatCurrency(e.amount)}',
+                        style: TextStyle(fontWeight: FontWeight.w800, color: e.isExpense ? AppColors.danger : AppColors.success),
+                      ),
+                      if (auth.canDelete)
+                        IconButton(
+                          icon: const Icon(Icons.delete_rounded, color: AppColors.danger, size: 20),
+                          tooltip: 'Delete entry',
+                          onPressed: () => _delete(e),
+                        ),
+                    ],
+                  ),
+                ),
+              )),
+        ],
+      ),
     );
   }
 }

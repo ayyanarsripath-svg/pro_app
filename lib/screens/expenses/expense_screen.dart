@@ -7,7 +7,27 @@ import '../../core/theme/app_theme.dart';
 import '../../core/utils/formatters.dart';
 import '../../models/expense.dart';
 import '../../widgets/section_card.dart';
+import '../quick/quick_history_screen.dart';
+import 'spare_parts_usage_screen.dart';
 
+/// Expenses menu (spec items 2 & 3). Used to show ONLY manually-added
+/// expenses, but Quick Expense entries (Dashboard -> Quick Expense) are
+/// actually saved into this very same `expenses` table (source = 'quick',
+/// see ExpenseRepository/QuickTransactionRepository) so they were already
+/// silently mixing in here too, with nothing to tell them apart from a
+/// shop expense typed in by hand - which is exactly what made "evlo
+/// expenses" hard to reconcile against Profit & Loss (spec: "profit and
+/// loss and expenses la calculation la konjam theliva eru").
+///
+/// Now three clearly separate tabs instead of one mixed list:
+///  1. Expenses - only entries added HERE, the normal way (source is null).
+///  2. Quick Income & Expense - the Dashboard's fast-entry feature's own
+///     history, embedded directly (see QuickHistoryBody).
+///  3. Spare Parts - every part used on a Service Bill and what it cost
+///     (spec item 2's new "Spare Parts list" - see SparePartsUsageBody).
+/// Nothing about how any of the three are actually saved or counted into
+/// Profit & Loss changes here - this is purely about seeing them separately
+/// instead of guessing which total belongs to what.
 class ExpenseScreen extends StatefulWidget {
   const ExpenseScreen({super.key});
 
@@ -15,15 +35,29 @@ class ExpenseScreen extends StatefulWidget {
   State<ExpenseScreen> createState() => _ExpenseScreenState();
 }
 
-class _ExpenseScreenState extends State<ExpenseScreen> {
+class _ExpenseScreenState extends State<ExpenseScreen> with SingleTickerProviderStateMixin {
   final _repo = ExpenseRepository();
   List<Expense> _expenses = [];
   bool _loading = true;
+  late final TabController _tabController;
 
   @override
   void initState() {
     super.initState();
+    _tabController = TabController(length: 3, vsync: this);
+    // The Add Expense FAB only makes sense on the Expenses tab - hide it
+    // on Quick Income/Expense and Spare Parts (both are read-only reports
+    // here; entries there are added from their own proper screens).
+    _tabController.addListener(() {
+      if (!_tabController.indexIsChanging) setState(() {});
+    });
     _load();
+  }
+
+  @override
+  void dispose() {
+    _tabController.dispose();
+    super.dispose();
   }
 
   Future<void> _load() async {
@@ -38,47 +72,82 @@ class _ExpenseScreenState extends State<ExpenseScreen> {
   @override
   Widget build(BuildContext context) {
     final auth = context.watch<AuthService>();
-    final total = _expenses.fold<double>(0, (s, e) => s + e.amount);
+    // Manual-only for this tab's own total/list - source == 'quick' rows
+    // now live exclusively under the Quick Income & Expense tab (spec item
+    // 3), so the same rupee never shows twice with no explanation.
+    final manualExpenses = _expenses.where((e) => e.source != 'quick').toList();
+    final total = manualExpenses.fold<double>(0, (s, e) => s + e.amount);
     return Scaffold(
-      body: _loading
-          ? const Center(child: CircularProgressIndicator())
-          : ListView(
-              padding: const EdgeInsets.all(14),
-              children: [
-                Container(
-                  padding: const EdgeInsets.all(14),
-                  decoration: BoxDecoration(color: Colors.red.withOpacity(0.06), borderRadius: BorderRadius.circular(14)),
-                  child: Row(
-                    mainAxisAlignment: MainAxisAlignment.spaceBetween,
-                    children: [
-                      const Text('Total Expenses (All Time)', style: TextStyle(fontWeight: FontWeight.w700)),
-                      Text(formatCurrency(total), style: const TextStyle(fontWeight: FontWeight.w800, color: Colors.red)),
-                    ],
-                  ),
-                ),
-                const SizedBox(height: 10),
-                if (_expenses.isEmpty) const EmptyState(icon: Icons.money_off_rounded, message: 'No expenses recorded'),
-                ..._expenses.map((e) => Card(
-                      child: ListTile(
-                        title: Text('${e.category}  •  ${formatCurrency(e.amount)}'),
-                        subtitle: Text('${e.description ?? ''}\n${formatDate(e.expenseDate)}  •  ${e.paymentMethod ?? '-'}  •  ${_allocationLabel(e.allocation)}'),
-                        isThreeLine: true,
-                        trailing: auth.canDelete
-                            ? IconButton(
-                                icon: const Icon(Icons.delete_rounded, color: AppColors.danger),
-                                tooltip: 'Delete expense',
-                                onPressed: () => _delete(e),
-                              )
-                            : null,
-                      ),
-                    )),
+      body: Column(
+        children: [
+          Material(
+            color: AppColors.cardOf(context),
+            child: TabBar(
+              controller: _tabController,
+              labelColor: AppColors.primaryBlue,
+              unselectedLabelColor: AppColors.textSecondaryOf(context),
+              tabs: const [
+                Tab(text: 'Expenses'),
+                Tab(text: 'Quick Income/Expense'),
+                Tab(text: 'Spare Parts'),
               ],
             ),
-      floatingActionButton: FloatingActionButton.extended(
-        onPressed: _addExpense,
-        icon: const Icon(Icons.add_rounded),
-        label: const Text('Add Expense'),
+          ),
+          Expanded(
+            child: TabBarView(
+              controller: _tabController,
+              children: [
+                _loading
+                    ? const Center(child: CircularProgressIndicator())
+                    : RefreshIndicator(
+                        onRefresh: _load,
+                        child: ListView(
+                          padding: const EdgeInsets.all(14),
+                          children: [
+                            Container(
+                              padding: const EdgeInsets.all(14),
+                              decoration: BoxDecoration(color: Colors.red.withOpacity(0.06), borderRadius: BorderRadius.circular(14)),
+                              child: Row(
+                                mainAxisAlignment: MainAxisAlignment.spaceBetween,
+                                children: [
+                                  const Text('Total Expenses (All Time)', style: TextStyle(fontWeight: FontWeight.w700)),
+                                  Text(formatCurrency(total), style: const TextStyle(fontWeight: FontWeight.w800, color: Colors.red)),
+                                ],
+                              ),
+                            ),
+                            const SizedBox(height: 10),
+                            if (manualExpenses.isEmpty) const EmptyState(icon: Icons.money_off_rounded, message: 'No expenses recorded'),
+                            ...manualExpenses.map((e) => Card(
+                                  child: ListTile(
+                                    title: Text('${e.category}  •  ${formatCurrency(e.amount)}'),
+                                    subtitle: Text('${e.description ?? ''}\n${formatDate(e.expenseDate)}  •  ${e.paymentMethod ?? '-'}  •  ${_allocationLabel(e.allocation)}'),
+                                    isThreeLine: true,
+                                    trailing: auth.canDelete
+                                        ? IconButton(
+                                            icon: const Icon(Icons.delete_rounded, color: AppColors.danger),
+                                            tooltip: 'Delete expense',
+                                            onPressed: () => _delete(e),
+                                          )
+                                        : null,
+                                  ),
+                                )),
+                          ],
+                        ),
+                      ),
+                const QuickHistoryBody(),
+                const SparePartsUsageBody(),
+              ],
+            ),
+          ),
+        ],
       ),
+      floatingActionButton: _tabController.index == 0
+          ? FloatingActionButton.extended(
+              onPressed: _addExpense,
+              icon: const Icon(Icons.add_rounded),
+              label: const Text('Add Expense'),
+            )
+          : null,
     );
   }
 

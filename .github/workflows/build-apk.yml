@@ -1055,6 +1055,40 @@ jobs:
                           val flag = intent?.getBooleanExtra("open_dashboard", false) ?: false
                           if (flag) intent?.removeExtra("open_dashboard")
                           result.success(flag)
+                      } else if (call.method == "restartApp") {
+                          // Auto-restart after Backup Restore (spec: "if any
+                          // time backup restore panna app automatically
+                          // restart aaganum each time restart manual ah
+                          // panna solluthu" - restoring the database swaps
+                          // out everything every screen/service already
+                          // loaded into memory, so the app must relaunch
+                          // itself fresh instead of asking the shop owner to
+                          // close and reopen it by hand). Called from
+                          // AppRestartService.restart() right after
+                          // BackupService.restoreFrom/
+                          // restoreFromGoogleDriveFile finishes successfully.
+                          // Relaunches this exact same task fresh (a plain
+                          // launcher intent, same as tapping the home-screen
+                          // icon) and then kills this process - the new
+                          // process starts main() from scratch and reads the
+                          // just-restored database, which a simple
+                          // Navigator/state reset from Dart could not do
+                          // (native singletons, sqflite's own cached
+                          // connection, etc. would all still be holding the
+                          // OLD database otherwise). result.success() is
+                          // sent first since nothing async ever gets to run
+                          // on the Dart side after Process.killProcess below.
+                          try {
+                              val restartIntent = packageManager.getLaunchIntentForPackage(packageName)
+                              restartIntent?.addFlags(Intent.FLAG_ACTIVITY_NEW_TASK or Intent.FLAG_ACTIVITY_CLEAR_TASK)
+                              result.success(true)
+                              if (restartIntent != null) {
+                                  startActivity(restartIntent)
+                              }
+                              Runtime.getRuntime().exit(0)
+                          } catch (e: Exception) {
+                              result.success(false)
+                          }
                       } else {
                           result.notImplemented()
                       }

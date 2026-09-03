@@ -316,11 +316,49 @@ class _AppShellState extends State<AppShell> {
           ),
         ),
       ),
-      body: IndexedStack(
-        index: safeIndex,
-        children: destinations.map((d) => d.screen).toList(),
+      // Swipe menu (spec item 9: "main menu mela 3 line erukku atha thottu
+      // thottu select panramathiri erukku athana right and left swipe panna
+      // menu department maranum athumathiri panni kudu" - swipe left/right
+      // to change screen, in ADDITION to the existing hamburger tap-drawer,
+      // not instead of it). onHorizontalDragEnd (not onPan/onUpdate) reads
+      // the fling's direction+speed only once the finger lifts, the same
+      // way a PageView's own swipe feels - so a screen's ordinary vertical
+      // scrolling (the overwhelmingly common gesture on every one of these
+      // screens) is never mistaken for a swipe. The velocity threshold
+      // below is a deliberately deliberate flick, not just a static drag.
+      body: GestureDetector(
+        onHorizontalDragEnd: (details) => _handleSwipe(details, destinations, safeIndex),
+        child: IndexedStack(
+          index: safeIndex,
+          children: destinations.map((d) => d.screen).toList(),
+        ),
       ),
     );
+  }
+
+  /// Swipe left (finger moving right-to-left, negative velocity) goes to
+  /// the NEXT menu item; swipe right goes to the PREVIOUS one - same
+  /// left/right convention as swiping between app pages/tabs elsewhere.
+  /// Does nothing past either end of the list (no wrap-around - clearer
+  /// than silently jumping from Dashboard to Settings or back). Mirrors the
+  /// drawer's own onTap: resets [_dashboardKey] on the way TO Dashboard so
+  /// swiping there refetches fresh data exactly like tapping it does.
+  static const double _swipeVelocityThreshold = 250;
+
+  void _handleSwipe(DragEndDetails details, List<_Destination> destinations, int currentIndex) {
+    final velocity = details.primaryVelocity ?? 0;
+    int? newIndex;
+    if (velocity <= -_swipeVelocityThreshold) {
+      newIndex = currentIndex + 1;
+    } else if (velocity >= _swipeVelocityThreshold) {
+      newIndex = currentIndex - 1;
+    }
+    if (newIndex == null || newIndex < 0 || newIndex >= destinations.length) return;
+    final target = destinations[newIndex];
+    setState(() {
+      if (target.id == 'dashboard') _dashboardKey = UniqueKey();
+      _index = newIndex!;
+    });
   }
 
   /// Quick same-device handoff: log the current person out and drop back to

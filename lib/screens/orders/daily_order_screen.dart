@@ -6,6 +6,11 @@ import 'package:flutter_contacts/flutter_contacts.dart';
 import 'package:path_provider/path_provider.dart';
 import 'package:printing/printing.dart';
 import 'package:url_launcher/url_launcher.dart';
+// Voice entry for Add/Edit Item (spec item 6 - see _DialogMicButton below).
+// Same two-library split as quick_transaction_screen.dart's mic feature:
+// SpeechRecognitionResult isn't re-exported by speech_to_text.dart itself.
+import 'package:speech_to_text/speech_to_text.dart' as stt;
+import 'package:speech_to_text/speech_recognition_result.dart' as stt;
 
 import '../../core/repositories/daily_order_repository.dart';
 import '../../core/repositories/settings_repository.dart';
@@ -845,7 +850,15 @@ class _DailyOrderScreenState extends State<DailyOrderScreen> with WidgetsBinding
               TextField(
                 controller: typeCtrl,
                 focusNode: typeFocus,
-                decoration: const InputDecoration(labelText: 'Type / Model'),
+                decoration: InputDecoration(
+                  labelText: 'Type / Model',
+                  // Mic 1 of 2 (spec item 6): speak the mobile brand/model
+                  // (e.g. "Samsung A14") and it fills THIS field only - see
+                  // _DialogMicButton's doc comment for why two independent
+                  // mic buttons instead of one that tries to split a
+                  // sentence across both fields.
+                  suffixIcon: _DialogMicButton(controller: typeCtrl),
+                ),
                 textInputAction: TextInputAction.next,
                 onSubmitted: (_) => FocusScope.of(dialogContext).requestFocus(partFocus),
               ),
@@ -853,7 +866,12 @@ class _DailyOrderScreenState extends State<DailyOrderScreen> with WidgetsBinding
               TextField(
                 controller: partCtrl,
                 focusNode: partFocus,
-                decoration: const InputDecoration(labelText: 'Part / Accessory Name *'),
+                decoration: InputDecoration(
+                  labelText: 'Part / Accessory Name *',
+                  // Mic 2 of 2: speak the part/accessory (e.g. "back cover",
+                  // "temper glass") and it fills THIS field only.
+                  suffixIcon: _DialogMicButton(controller: partCtrl),
+                ),
                 textInputAction: TextInputAction.next,
                 onSubmitted: (_) => FocusScope.of(dialogContext).requestFocus(qtyFocus),
               ),
@@ -940,7 +958,15 @@ class _DailyOrderScreenState extends State<DailyOrderScreen> with WidgetsBinding
               TextField(
                 controller: typeCtrl,
                 focusNode: typeFocus,
-                decoration: const InputDecoration(labelText: 'Type / Model'),
+                decoration: InputDecoration(
+                  labelText: 'Type / Model',
+                  // Mic 1 of 2 (spec item 6): speak the mobile brand/model
+                  // (e.g. "Samsung A14") and it fills THIS field only - see
+                  // _DialogMicButton's doc comment for why two independent
+                  // mic buttons instead of one that tries to split a
+                  // sentence across both fields.
+                  suffixIcon: _DialogMicButton(controller: typeCtrl),
+                ),
                 textInputAction: TextInputAction.next,
                 onSubmitted: (_) => FocusScope.of(dialogContext).requestFocus(partFocus),
               ),
@@ -948,7 +974,12 @@ class _DailyOrderScreenState extends State<DailyOrderScreen> with WidgetsBinding
               TextField(
                 controller: partCtrl,
                 focusNode: partFocus,
-                decoration: const InputDecoration(labelText: 'Part / Accessory Name *'),
+                decoration: InputDecoration(
+                  labelText: 'Part / Accessory Name *',
+                  // Mic 2 of 2: speak the part/accessory (e.g. "back cover",
+                  // "temper glass") and it fills THIS field only.
+                  suffixIcon: _DialogMicButton(controller: partCtrl),
+                ),
                 textInputAction: TextInputAction.next,
                 onSubmitted: (_) => FocusScope.of(dialogContext).requestFocus(qtyFocus),
               ),
@@ -1143,9 +1174,116 @@ class _DailyOrderScreenState extends State<DailyOrderScreen> with WidgetsBinding
     );
   }
 
-  void _markNotReceived(DailyOrderItem item) {
+  /// Not Received (spec: "yellow x round touch panna thirumba order note ku
+  /// antha particular order poganum" - tapping the yellow icon must actually
+  /// send that item back to the order note). Used to just show a toast and
+  /// leave the row exactly as-is; now it really resets the item back to
+  /// "not yet sent" (DailyOrderRepository.resetToPending), so it reappears
+  /// as a normal pending order-note row and gets swept into the next Send
+  /// Order batch automatically, instead of sitting there sent-but-unreceived
+  /// forever.
+  Future<void> _markNotReceived(DailyOrderItem item) async {
+    await _repo.resetToPending(item.id);
+    await _load();
+    if (!mounted) return;
     ScaffoldMessenger.of(context).showSnackBar(
-      SnackBar(content: Text('${item.partName} kept - not received yet')),
+      SnackBar(content: Text('${item.partName} sent back to order note')),
+    );
+  }
+}
+
+/// One mic button wired to exactly one text field (spec item 6: "daily
+/// order la mic add pannu atha thottu mobile brand name sonna type / model
+/// la enter aaganum parts ... sonna part / accessories name la enter
+/// aaganum ... etha optimization panni konjam theliva pannu" - add voice
+/// entry to the Add Item screen, and figure out the clearest way to split
+/// it across the Type/Model and Part/Accessories fields).
+///
+/// DESIGN CHOICE: two of these (one per field) instead of one mic button
+/// that tries to guess where a single spoken sentence splits between brand
+/// and part. Quick Income/Expense's mic (quick_transaction_screen.dart) can
+/// get away with one button because it only ever has to pull one number out
+/// of the sentence; here there is no reliable marker separating "Samsung
+/// A14" from "back cover" in free speech ("samsung a14 back cover" could
+/// just as easily be "samsung a14 back" + "cover"). A dedicated mic per
+/// field means whatever was heard becomes that field's value, in full - no
+/// guessing, so it's always right, at the small cost of one extra tap when
+/// both fields need to be spoken. Quantity (already pre-filled "1") and
+/// Phone (meant to stay blank) are deliberately left without a mic - spec
+/// explicitly says leave them at their defaults.
+///
+/// A real StatefulWidget (not just a plain IconButton built inline) so it
+/// gets its own mic-icon/listening state without having to thread a second
+/// setState through the AlertDialog's builder - showDialog's content is a
+/// normal mounted widget subtree, so this manages itself exactly like any
+/// other stateful widget would.
+class _DialogMicButton extends StatefulWidget {
+  final TextEditingController controller;
+  const _DialogMicButton({required this.controller});
+
+  @override
+  State<_DialogMicButton> createState() => _DialogMicButtonState();
+}
+
+class _DialogMicButtonState extends State<_DialogMicButton> {
+  final _speech = stt.SpeechToText();
+  bool _speechAvailable = false;
+  bool _listening = false;
+
+  @override
+  void dispose() {
+    _speech.stop();
+    super.dispose();
+  }
+
+  Future<void> _toggle() async {
+    if (_listening) {
+      await _speech.stop();
+      if (mounted) setState(() => _listening = false);
+      return;
+    }
+
+    if (!_speechAvailable) {
+      final ok = await _speech.initialize(
+        onError: (_) {
+          if (mounted) setState(() => _listening = false);
+        },
+        onStatus: (status) {
+          if (status == 'done' || status == 'notListening') {
+            if (mounted) setState(() => _listening = false);
+          }
+        },
+      );
+      if (!mounted) return;
+      setState(() => _speechAvailable = ok);
+      if (!ok) {
+        ScaffoldMessenger.of(context).showSnackBar(const SnackBar(
+          content: Text('Mic not available - check microphone permission in phone Settings'),
+        ));
+        return;
+      }
+    }
+
+    setState(() => _listening = true);
+    await _speech.listen(onResult: (result) {
+      final heard = result.recognizedWords.trim();
+      if (heard.isEmpty) return;
+      // Whatever's heard becomes this field's whole value - no parsing, see
+      // this class's doc comment for why.
+      widget.controller.text = heard;
+      if (result.finalResult && mounted) setState(() {});
+    });
+  }
+
+  @override
+  Widget build(BuildContext context) {
+    return IconButton(
+      icon: Icon(
+        _listening ? Icons.mic_rounded : Icons.mic_none_rounded,
+        color: _listening ? AppColors.primaryBlue : null,
+      ),
+      tooltip: _listening ? 'Listening... tap to stop' : 'Speak instead of typing',
+      onPressed: _toggle,
     );
   }
 }
