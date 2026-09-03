@@ -11,6 +11,15 @@ class StatCard extends StatelessWidget {
   final bool isCurrency;
   final String? suffixText;
 
+  /// Optional short explanation shown in a popup when the (i) icon next to
+  /// [label] is tapped (spec item 4: "dash board la gross profit and net
+  /// profit enakku konjam confusion ah erukku" - Gross vs Net Profit reads
+  /// as two similar numbers with no visible difference between them). Kept
+  /// as an on-demand dialog rather than a permanently-shown subtitle so
+  /// every other, already-self-explanatory StatCard on screen doesn't get
+  /// visually busier just to support these two.
+  final String? infoText;
+
   const StatCard({
     super.key,
     required this.label,
@@ -19,6 +28,7 @@ class StatCard extends StatelessWidget {
     this.icon,
     this.isCurrency = true,
     this.suffixText,
+    this.infoText,
   });
 
   @override
@@ -46,8 +56,25 @@ class StatCard extends StatelessWidget {
               ],
               Expanded(
                 child: Text(label,
+                    overflow: TextOverflow.ellipsis,
                     style: TextStyle(fontSize: 12.5, color: AppColors.textSecondaryOf(context), fontWeight: FontWeight.w600)),
               ),
+              if (infoText != null)
+                InkWell(
+                  borderRadius: BorderRadius.circular(10),
+                  onTap: () => showDialog<void>(
+                    context: context,
+                    builder: (context) => AlertDialog(
+                      title: Text(label),
+                      content: Text(infoText!),
+                      actions: [TextButton(onPressed: () => Navigator.pop(context), child: const Text('OK'))],
+                    ),
+                  ),
+                  child: Padding(
+                    padding: const EdgeInsets.all(2),
+                    child: Icon(Icons.info_outline_rounded, size: 14, color: AppColors.textSecondaryOf(context)),
+                  ),
+                ),
             ],
           ),
           const SizedBox(height: 8),

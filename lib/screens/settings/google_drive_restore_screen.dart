@@ -1,5 +1,6 @@
 import 'package:flutter/material.dart';
 
+import '../../core/services/app_restart_service.dart';
 import '../../core/services/backup_service.dart';
 import '../../core/theme/app_theme.dart';
 import '../../core/utils/formatters.dart';
@@ -242,7 +243,7 @@ class _GoogleDriveRestoreScreenState extends State<GoogleDriveRestoreScreen> {
           'This will download the backup from ${modified != null ? formatDateTime(modified) : backup.name} '
           '(${formatFileSize(backup.size)}) and replace your current data with it. '
           'Your current data is safety-backed-up first, and will be restored automatically if anything goes wrong. '
-          'The app must be restarted after restoring.',
+          'The app will restart automatically after restoring.',
         ),
         actions: [
           TextButton(onPressed: () => Navigator.pop(context, false), child: const Text('Cancel')),
@@ -263,12 +264,14 @@ class _GoogleDriveRestoreScreenState extends State<GoogleDriveRestoreScreen> {
           title: Text(result.hasWarnings ? 'Restored (with warnings)' : 'Restore Successful'),
           content: Text(
             result.hasWarnings
-                ? 'Data was restored, but some record counts didn\'t exactly match the backup:\n\n${result.mismatches.join('\n')}\n\nPlease close and reopen the app.'
-                : 'Your data has been restored from Google Drive. Please close and reopen the app.',
+                ? 'Data was restored, but some record counts didn\'t exactly match the backup:\n\n${result.mismatches.join('\n')}\n\nThe app will restart automatically.'
+                : 'Your data has been restored from Google Drive. The app will restart automatically.',
           ),
           actions: [TextButton(onPressed: () => Navigator.pop(context), child: const Text('OK'))],
         ),
       );
+      // Auto-restart (spec item 5) - see AppRestartService's doc comment.
+      await AppRestartService.restart();
     } catch (e) {
       if (!mounted) return;
       final message = e.toString().replaceFirst('Exception: ', '');
