@@ -88,22 +88,29 @@ jobs:
               content = f.read()
 
           needed = [
-              # NOTE: deliberately NOT declaring android.permission.CAMERA
-              # here (spec: "pro_app first time install pannumpothu ...
-              # camera ethula extra enna thevio" - the shop asked why a
-              # camera permission was being requested at all). The service/
-              # 2nd-hand-phone photo capture in service_detail_screen.dart
-              # uses image_picker's ImageSource.camera, which - per
-              # image_picker's own documentation - delegates to the phone's
-              # existing Camera app via an Intent and needs NO permission of
-              # its own UNLESS the app's manifest explicitly declares
-              # CAMERA, in which case image_picker then additionally
-              # requires that runtime permission be granted first. This app
-              # has no other camera use (no `camera` package, no native
-              # capture code), so declaring it only added an unnecessary
-              # extra runtime "Allow camera access?" prompt with zero
-              # benefit - removing it does not break the photo feature,
-              # only removes the redundant prompt in front of it.
+              # REVERSAL (2026-09, Barcode Scanning + Inventory feature):
+              # this used to deliberately NOT declare android.permission
+              # .CAMERA (the shop had asked why a camera permission was
+              # being requested at all, back when the only camera use was
+              # image_picker's ImageSource.camera - which delegates to the
+              # phone's own Camera app via an Intent and needs no
+              # permission of its own unless CAMERA is explicitly
+              # declared). That's no longer true: the new barcode scanner
+              # (mobile_scanner, see barcode_scanner_screen.dart) needs a
+              # LIVE in-app camera preview to read a barcode off the
+              # frame, which is only possible with a real, declared CAMERA
+              # permission - there is no Intent-to-the-Camera-app way to
+              # do that. mobile_scanner's own AAR already merges this
+              # permission in automatically, but it's declared here too,
+              # explicitly, in the same style as every other permission in
+              # this list, so it's not silently relying on manifest
+              # merging alone.
+              '    <uses-permission android:name="android.permission.CAMERA"/>',
+              # required=false: a shop phone without a camera should still
+              # be able to install and use the app (manual barcode entry
+              # still works everywhere - see barcode_scanner_screen.dart),
+              # it just can't use the camera scanner.
+              '    <uses-feature android:name="android.hardware.camera" android:required="false"/>',
               '    <uses-permission android:name="android.permission.INTERNET"/>',
               '    <uses-permission android:name="android.permission.POST_NOTIFICATIONS"/>',
               '    <uses-permission android:name="android.permission.REQUEST_IGNORE_BATTERY_OPTIMIZATIONS"/>',
@@ -264,6 +271,46 @@ jobs:
               print(f"Updated {path} for core library desugaring.")
           else:
               print("Core library desugaring already configured, nothing to do.")
+          PYEOF
+
+      # mobile_scanner (Barcode Scanning + Inventory feature) requires
+      # Android minSdkVersion 23; Flutter's own generated build.gradle(.kts)
+      # defaults to a lower flutter.minSdkVersion (21) via a variable this
+      # step overrides with a literal 23. Gradle's manifest merger would
+      # likely resolve this automatically anyway (it takes the highest
+      # minSdk across every module), but this makes the requirement
+      # explicit and buildable-by-inspection instead of relying on that
+      # implicit behaviour - same "don't guess, verify" spirit as every
+      # other android/ edit in this workflow. Same Kotlin DSL / Groovy
+      # detection as the desugaring step above; idempotent.
+      - name: Bump minSdkVersion to 23 (required by mobile_scanner)
+        run: |
+          python3 - <<'PYEOF'
+          import re, glob
+
+          candidates = glob.glob("android/app/build.gradle.kts") + glob.glob("android/app/build.gradle")
+          if not candidates:
+              raise SystemExit("Could not find android/app/build.gradle(.kts) - aborting so this doesn't silently skip a required fix.")
+          path = candidates[0]
+          is_kts = path.endswith(".kts")
+
+          with open(path, "r", encoding="utf-8") as f:
+              content = f.read()
+
+          if is_kts:
+              new_content, count = re.subn(r"minSdk\s*=\s*\S+", "minSdk = 23", content)
+          else:
+              new_content, count = re.subn(r"minSdkVersion\s+\S+", "minSdkVersion 23", content)
+
+          if count == 0:
+              raise SystemExit(f"Could not find a minSdk assignment in {path} - aborting so this doesn't silently skip a required fix.")
+
+          if new_content != content:
+              with open(path, "w", encoding="utf-8") as f:
+                  f.write(new_content)
+              print(f"Set minSdk to 23 in {path}.")
+          else:
+              print("minSdk already 23, nothing to do.")
           PYEOF
 
       # Daily Orders home-screen widget (Phase 2 - see

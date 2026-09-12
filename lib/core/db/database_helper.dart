@@ -13,7 +13,7 @@ class DatabaseHelper {
   static final DatabaseHelper instance = DatabaseHelper._internal();
 
   static Database? _db;
-  static const int dbVersion = 11;
+  static const int dbVersion = 12;
   static const String dbFileName = 'professional_mobiles.db';
 
   Future<Database> get database async {
@@ -150,6 +150,31 @@ class DatabaseHelper {
     if (oldVersion < 11) {
       await db.execute('ALTER TABLE expenses ADD COLUMN source TEXT');
     }
+    // Barcode Scanning + Inventory System (2026-09). `barcode` is the
+    // product's identity (spec item 18: "ONE PRODUCT -> ONE BARCODE ->
+    // MANY QUANTITY" - the barcode identifies the spare_parts/accessories
+    // ROW, current_stock already on that same row is the quantity; this is
+    // NOT a new per-piece table). Nullable - most existing rows won't have
+    // one until scanned/generated - and unique only among non-null values
+    // (a plain UNIQUE index in SQLite already treats every NULL as
+    // distinct from every other NULL, so any number of parts can stay
+    // barcode-less at once; see SparePartRepository/AccessoryRepository's
+    // findByBarcode/isBarcodeAvailable for the app-level duplicate check
+    // that gives a friendly error before ever hitting this constraint).
+    // batch_number/invoice_number are optional, purely informational
+    // fields on a Purchase Stock Entry (spec item 4) - carried on the
+    // existing purchase transaction row rather than a new table, same as
+    // `notes` already is.
+    if (oldVersion < 12) {
+      await db.execute('ALTER TABLE spare_parts ADD COLUMN barcode TEXT');
+      await db.execute('CREATE UNIQUE INDEX idx_spare_parts_barcode ON spare_parts(barcode)');
+      await db.execute('ALTER TABLE accessories ADD COLUMN barcode TEXT');
+      await db.execute('CREATE UNIQUE INDEX idx_accessories_barcode ON accessories(barcode)');
+      await db.execute('ALTER TABLE spare_part_transactions ADD COLUMN batch_number TEXT');
+      await db.execute('ALTER TABLE spare_part_transactions ADD COLUMN invoice_number TEXT');
+      await db.execute('ALTER TABLE accessory_transactions ADD COLUMN batch_number TEXT');
+      await db.execute('ALTER TABLE accessory_transactions ADD COLUMN invoice_number TEXT');
+    }
   }
 
   Future<void> _onCreate(Database db, int version) async {
@@ -255,9 +280,14 @@ class DatabaseHelper {
         avg_purchase_cost REAL NOT NULL DEFAULT 0,
         low_stock_threshold REAL NOT NULL DEFAULT 2,
         active INTEGER NOT NULL DEFAULT 1,
-        created_at TEXT NOT NULL
+        created_at TEXT NOT NULL,
+        barcode TEXT
       )
     ''');
+    // Barcode Scanning + Inventory System - see the oldVersion < 12
+    // migration's doc comment above for why this is a plain (not partial)
+    // UNIQUE index.
+    batch.execute('CREATE UNIQUE INDEX idx_spare_parts_barcode ON spare_parts(barcode)');
 
     batch.execute('''
       CREATE TABLE spare_part_transactions (
@@ -270,6 +300,8 @@ class DatabaseHelper {
         reference_id TEXT,
         txn_date TEXT NOT NULL,
         notes TEXT,
+        batch_number TEXT,
+        invoice_number TEXT,
         FOREIGN KEY (spare_part_id) REFERENCES spare_parts(id)
       )
     ''');
@@ -289,9 +321,11 @@ class DatabaseHelper {
         selling_price REAL NOT NULL DEFAULT 0,
         low_stock_threshold REAL NOT NULL DEFAULT 3,
         active INTEGER NOT NULL DEFAULT 1,
-        created_at TEXT NOT NULL
+        created_at TEXT NOT NULL,
+        barcode TEXT
       )
     ''');
+    batch.execute('CREATE UNIQUE INDEX idx_accessories_barcode ON accessories(barcode)');
 
     batch.execute('''
       CREATE TABLE accessory_transactions (
@@ -304,6 +338,8 @@ class DatabaseHelper {
         reference_id TEXT,
         txn_date TEXT NOT NULL,
         notes TEXT,
+        batch_number TEXT,
+        invoice_number TEXT,
         FOREIGN KEY (accessory_id) REFERENCES accessories(id)
       )
     ''');

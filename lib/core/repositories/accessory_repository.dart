@@ -16,6 +16,7 @@ class AccessoryRepository {
     double purchasePrice = 0,
     double sellingPrice = 0,
     double lowStockThreshold = 3,
+    String? barcode,
   }) async {
     final db = await _dbHelper.database;
     final acc = Accessory(
@@ -28,9 +29,63 @@ class AccessoryRepository {
       sellingPrice: sellingPrice,
       lowStockThreshold: lowStockThreshold,
       createdAt: DateTime.now(),
+      barcode: barcode,
     );
     await db.insert('accessories', acc.toMap());
     return acc;
+  }
+
+  /// Looks up an accessory by its exact barcode (manufacturer-scanned or
+  /// internally generated) - the core lookup for Purchase Stock Entry,
+  /// Sales Bill "Scan Barcode", and the Inventory search/scan screen (spec
+  /// items 4, 6, 10). Returns null when no accessory currently owns that
+  /// barcode ("Product not found" - spec item 20).
+  Future<Accessory?> findByBarcode(String barcode) async {
+    final db = await _dbHelper.database;
+    final rows = await db.query('accessories', where: 'barcode = ?', whereArgs: [barcode]);
+    if (rows.isEmpty) return null;
+    return Accessory.fromMap(rows.first);
+  }
+
+  /// Duplicate Barcode Protection (spec item 15): true only when no OTHER
+  /// accessory already owns this barcode. Pass [excludingId] when checking
+  /// during an edit so an accessory doesn't collide with its own existing
+  /// barcode. Note this only checks accessories - callers that also need to
+  /// guard against a spare part owning the same barcode (barcodes are one
+  /// shared identity space) should additionally check
+  /// SparePartRepository.isBarcodeAvailable.
+  Future<bool> isBarcodeAvailable(String barcode, {String? excludingId}) async {
+    final db = await _dbHelper.database;
+    final rows = await db.query(
+      'accessories',
+      where: excludingId != null ? 'barcode = ? AND id != ?' : 'barcode = ?',
+      whereArgs: excludingId != null ? [barcode, excludingId] : [barcode],
+      limit: 1,
+    );
+    return rows.isEmpty;
+  }
+
+  /// Assigns a scanned or freshly-generated barcode to an existing
+  /// accessory (Barcode Generation / "Scan existing manufacturer barcode" -
+  /// spec items 5 & 16). Caller is expected to have already checked
+  /// [isBarcodeAvailable] (and the spare-part-side equivalent).
+  Future<void> setBarcode(String id, String barcode) async {
+    final db = await _dbHelper.database;
+    await db.update('accessories', {'barcode': barcode}, where: 'id = ?', whereArgs: [id]);
+  }
+
+  /// Full movement history for one accessory - every purchase, sale,
+  /// adjustment ever recorded against it, oldest first (spec item 9's
+  /// "Stock History: Date | Type | Qty | Balance").
+  Future<List<AccessoryTransaction>> transactionsFor(String accessoryId) async {
+    final db = await _dbHelper.database;
+    final rows = await db.query(
+      'accessory_transactions',
+      where: 'accessory_id = ?',
+      whereArgs: [accessoryId],
+      orderBy: 'txn_date ASC',
+    );
+    return rows.map(AccessoryTransaction.fromMap).toList();
   }
 
   Future<List<Accessory>> all({bool activeOnly = true}) async {
@@ -43,6 +98,30 @@ class AccessoryRepository {
   Future<List<Accessory>> lowStock() async {
     final items = await all();
     return items.where((a) => a.isLowStock).toList();
+  }
+
+  /// Inventory Dashboard's "Today's Purchase" (spec item 14): total ₹ spent
+  /// on accessory stock-in transactions within [from, to].
+  Future<double> purchaseValueBetween(DateTime from, DateTime to) async {
+    final db = await _dbHelper.database;
+    final rows = await db.rawQuery(
+      "SELECT COALESCE(SUM(quantity * unit_price), 0) as total FROM accessory_transactions "
+      "WHERE txn_type = 'purchase' AND txn_date >= ? AND txn_date <= ?",
+      [from.toIso8601String(), to.toIso8601String()],
+    );
+    return (rows.first['total'] as num?)?.toDouble() ?? 0;
+  }
+
+  /// Inventory Dashboard's "Today's Sales" (spec item 14): total ₹ from
+  /// accessory sale lines within [from, to].
+  Future<double> saleValueBetween(DateTime from, DateTime to) async {
+    final db = await _dbHelper.database;
+    final rows = await db.rawQuery(
+      "SELECT COALESCE(SUM(-quantity * unit_price), 0) as total FROM accessory_transactions "
+      "WHERE txn_type = 'sale' AND txn_date >= ? AND txn_date <= ?",
+      [from.toIso8601String(), to.toIso8601String()],
+    );
+    return (rows.first['total'] as num?)?.toDouble() ?? 0;
   }
 
   Future<Accessory?> byId(String id) async {
@@ -62,6 +141,7 @@ class AccessoryRepository {
     String? unit,
     double? sellingPrice,
     double? lowStockThreshold,
+    String? barcode,
   }) async {
     final db = await _dbHelper.database;
     final rows = await db.query('accessories', where: 'id = ?', whereArgs: [id]);
@@ -79,6 +159,7 @@ class AccessoryRepository {
       lowStockThreshold: lowStockThreshold ?? acc.lowStockThreshold,
       active: acc.active,
       createdAt: acc.createdAt,
+      barcode: barcode ?? acc.barcode,
     );
     await db.update('accessories', updated.toMap(), where: 'id = ?', whereArgs: [id]);
   }
@@ -102,6 +183,10 @@ class AccessoryRepository {
     required double unitCost,
     required DateTime date,
     String? purchaseId,
+    // Purchase Stock Entry's optional Batch Number / Invoice Number (spec
+    // item 4).
+    String? batchNumber,
+    String? invoiceNumber,
   }) async {
     final db = await _dbHelper.database;
     await db.transaction((txn) async {
@@ -125,6 +210,8 @@ class AccessoryRepository {
         'reference_id': purchaseId,
         'txn_date': date.toIso8601String(),
         'notes': null,
+        'batch_number': batchNumber,
+        'invoice_number': invoiceNumber,
       });
     });
 

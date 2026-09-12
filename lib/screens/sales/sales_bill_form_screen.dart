@@ -6,6 +6,7 @@ import '../../core/repositories/sales_repository.dart';
 import '../../core/utils/formatters.dart';
 import '../../models/accessory.dart';
 import '../../widgets/section_card.dart';
+import '../inventory/barcode_scanner_screen.dart';
 
 class _CartLine {
   final Accessory accessory;
@@ -69,7 +70,18 @@ class _SalesBillFormScreenState extends State<SalesBillFormScreen> {
           SectionCard(
             title: 'Products',
             icon: Icons.shopping_bag_rounded,
-            trailing: TextButton.icon(onPressed: _addLine, icon: const Icon(Icons.add, size: 16), label: const Text('Add')),
+            trailing: Row(
+              mainAxisSize: MainAxisSize.min,
+              children: [
+                IconButton(
+                  onPressed: _scanAndAddLine,
+                  icon: const Icon(Icons.qr_code_scanner_rounded, size: 20),
+                  tooltip: 'Scan Barcode',
+                  visualDensity: VisualDensity.compact,
+                ),
+                TextButton.icon(onPressed: _addLine, icon: const Icon(Icons.add, size: 16), label: const Text('Add')),
+              ],
+            ),
             children: [
               if (_cart.isEmpty) const Text('No products added', style: TextStyle(color: Colors.grey)),
               ..._cart.map((line) => ListTile(
@@ -143,6 +155,42 @@ class _SalesBillFormScreenState extends State<SalesBillFormScreen> {
         ),
       );
 
+  /// Sales Bill "Scan Barcode" (spec item 6): scans an accessory's barcode
+  /// and auto-adds it to the cart, updating stock the same way a manual Add
+  /// does once the bill is saved. Re-scanning an item already in the cart
+  /// bumps its quantity by 1 instead of adding a second line for it.
+  Future<void> _scanAndAddLine() async {
+    final code = await Navigator.push<String>(context, MaterialPageRoute(builder: (_) => const BarcodeScannerScreen(title: 'Scan Product Barcode')));
+    if (code == null || code.isEmpty || !mounted) return;
+
+    final accessory = await _accessoryRepo.findByBarcode(code);
+    if (!mounted) return;
+    if (accessory == null) {
+      ScaffoldMessenger.of(context).showSnackBar(SnackBar(content: Text('No accessory found with barcode "$code".')));
+      return;
+    }
+    if (accessory.isOutOfStock) {
+      ScaffoldMessenger.of(context).showSnackBar(SnackBar(content: Text('${accessory.name} is out of stock.')));
+      return;
+    }
+
+    final existing = _cart.where((l) => l.accessory.id == accessory.id).toList();
+    if (existing.isNotEmpty) {
+      final line = existing.first;
+      if (line.quantity + 1 > accessory.currentStock) {
+        ScaffoldMessenger.of(context)
+            .showSnackBar(SnackBar(content: Text('Only ${accessory.currentStock.toStringAsFixed(0)} ${accessory.name} available.')));
+        return;
+      }
+      setState(() => line.quantity += 1);
+    } else {
+      setState(() => _cart.add(_CartLine(accessory, 1, accessory.sellingPrice)));
+    }
+    if (!_accessories.any((a) => a.id == accessory.id)) {
+      setState(() => _accessories = [..._accessories, accessory]);
+    }
+  }
+
   Future<void> _addLine() async {
     if (_accessories.isEmpty) {
       ScaffoldMessenger.of(context).showSnackBar(const SnackBar(content: Text('Add accessories to inventory first')));
@@ -184,8 +232,24 @@ class _SalesBillFormScreenState extends State<SalesBillFormScreen> {
     );
 
     if (ok == true) {
+      // Out of Stock Protection (spec item 13): never let a line push the
+      // total quantity of one accessory across the cart above what's
+      // actually in stock right now - clamp it and say so clearly instead
+      // of silently accepting (or worse, letting stock go negative).
+      final alreadyInCart = _cart.where((l) => l.accessory.id == selected.id).fold<double>(0, (s, l) => s + l.quantity);
+      final requested = double.tryParse(qtyCtrl.text.trim()) ?? 1;
+      final available = selected.currentStock - alreadyInCart;
+      if (selected.isOutOfStock || available <= 0) {
+        ScaffoldMessenger.of(context).showSnackBar(SnackBar(content: Text('${selected.name} is out of stock.')));
+        return;
+      }
+      final quantity = requested > available ? available : requested;
+      if (requested > available) {
+        ScaffoldMessenger.of(context)
+            .showSnackBar(SnackBar(content: Text('Only ${available.toStringAsFixed(0)} ${selected.name} available - added $quantity.')));
+      }
       setState(() {
-        _cart.add(_CartLine(selected, double.tryParse(qtyCtrl.text.trim()) ?? 1, double.tryParse(rateCtrl.text.trim()) ?? selected.sellingPrice));
+        _cart.add(_CartLine(selected, quantity, double.tryParse(rateCtrl.text.trim()) ?? selected.sellingPrice));
       });
     }
   }

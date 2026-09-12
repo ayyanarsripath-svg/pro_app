@@ -137,6 +137,19 @@ dependencies:
   # requesting the RECORD_AUDIO runtime permission itself via initialize().
   speech_to_text: ^7.0.0
 
+  # --- Barcode Scanning + Inventory System (2026-09) ---------------------
+  # Live phone-camera barcode/QR scanner (no external scanner hardware) -
+  # supports EAN-13/EAN-8/UPC-A/UPC-E/Code128/Code39/QR out of the box, see
+  # barcode_scanner_screen.dart. Needs Android minSdkVersion 23 (bumped in
+  # build-apk.yml) and the CAMERA permission (also added there).
+  mobile_scanner: ^7.4.1
+
+  # Renders a scannable Code128 barcode image for a product that doesn't
+  # have one yet (Barcode Generation - Display/Print/Share a label), see
+  # barcode_label_screen.dart. Pure-Dart, no native/camera dependency -
+  # pairs with the existing pdf/printing packages already used for bills.
+  barcode_widget: ^2.0.4
+
 dev_dependencies:
   flutter_test:
     sdk: flutter
@@ -161,4 +174,6 @@ flutter_launcher_icons:
   android: true
   ios: false
   image_path: "assets/images/logo_color.png"
-  min_sdk_android: 21
+  # Kept in sync with the real app minSdkVersion (bumped to 23 in
+  # build-apk.yml for mobile_scanner - see the pubspec dependency comment).
+  min_sdk_android: 23

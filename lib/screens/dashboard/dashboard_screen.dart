@@ -105,10 +105,23 @@ class _DashboardScreenState extends State<DashboardScreen> {
     final totals = await _pnl.totals(todayStart, todayEnd);
     final activeServices = await _services.all();
     final pending = activeServices.where((s) => s.status != ServiceStatus.delivered && s.status != ServiceStatus.cancelled).toList();
-    final lowSpareParts = await _spareParts.lowStock();
-    final lowAccessories = await _accessories.lowStock();
+    final allSpareParts = await _spareParts.all();
+    final allAccessories = await _accessories.all();
+    final lowSpareParts = allSpareParts.where((p) => p.isLowStock).toList();
+    final lowAccessories = allAccessories.where((a) => a.isLowStock).toList();
+    final outOfStockCount = allSpareParts.where((p) => p.isOutOfStock).length + allAccessories.where((a) => a.isOutOfStock).length;
     final shStock = await _secondHand.stockSummary();
     final recentServices = activeServices.take(5).toList();
+
+    // Inventory Dashboard (spec item 14): Total Products, Total Stock
+    // Quantity, Low/Out of Stock counts, Today's Purchase/Sales/Parts Used,
+    // Stock Value - all computed fresh from the barcode-inventory data so
+    // this stays accurate without any separate "recompute" step.
+    final totalStockQty = allSpareParts.fold<double>(0, (s, p) => s + p.currentStock) + allAccessories.fold<double>(0, (s, a) => s + a.currentStock);
+    final stockValue = allSpareParts.fold<double>(0, (s, p) => s + p.stockValue) + allAccessories.fold<double>(0, (s, a) => s + a.stockValue);
+    final todayPurchase = await _spareParts.purchaseValueBetween(todayStart, todayEnd) + await _accessories.purchaseValueBetween(todayStart, todayEnd);
+    final todaySales = await _accessories.saleValueBetween(todayStart, todayEnd);
+    final todayPartsUsed = await _spareParts.usedQuantityBetween(todayStart, todayEnd);
 
     return _DashboardData(
       totals: totals,
@@ -116,6 +129,13 @@ class _DashboardScreenState extends State<DashboardScreen> {
       lowStockCount: lowSpareParts.length + lowAccessories.length,
       secondHandStock: shStock,
       recentServices: recentServices,
+      totalProducts: allSpareParts.length + allAccessories.length,
+      totalStockQty: totalStockQty,
+      outOfStockCount: outOfStockCount,
+      todayPurchase: todayPurchase,
+      todaySales: todaySales,
+      todayPartsUsed: todayPartsUsed,
+      stockValue: stockValue,
     );
   }
 
@@ -302,6 +322,40 @@ class _DashboardScreenState extends State<DashboardScreen> {
                   ),
                 ],
               ),
+              const SizedBox(height: 12),
+              SectionCard(
+                title: 'Inventory (Spare Parts + Accessories)',
+                icon: Icons.qr_code_2_rounded,
+                children: [
+                  Row(
+                    children: [
+                      _miniStat('Total Products', data.totalProducts.toDouble(), isCurrency: false),
+                      _miniStat('Total Stock Qty', data.totalStockQty, isCurrency: false),
+                    ],
+                  ),
+                  const SizedBox(height: 8),
+                  Row(
+                    children: [
+                      _miniStat('Low Stock', data.lowStockCount.toDouble(), isCurrency: false),
+                      _miniStat('Out of Stock', data.outOfStockCount.toDouble(), isCurrency: false),
+                    ],
+                  ),
+                  const SizedBox(height: 8),
+                  Row(
+                    children: [
+                      _miniStat("Today's Purchase", data.todayPurchase),
+                      _miniStat("Today's Sales", data.todaySales),
+                    ],
+                  ),
+                  const SizedBox(height: 8),
+                  Row(
+                    children: [
+                      _miniStat("Today's Parts Used", data.todayPartsUsed, isCurrency: false),
+                      _miniStat('Stock Value', data.stockValue),
+                    ],
+                  ),
+                ],
+              ),
               const SizedBox(height: 6),
               Row(
                 mainAxisAlignment: MainAxisAlignment.spaceBetween,
@@ -398,11 +452,27 @@ class _DashboardData {
   final Map<String, double> secondHandStock;
   final List<ServiceJob> recentServices;
 
+  // Inventory Dashboard (spec item 14).
+  final int totalProducts;
+  final double totalStockQty;
+  final int outOfStockCount;
+  final double todayPurchase;
+  final double todaySales;
+  final double todayPartsUsed;
+  final double stockValue;
+
   _DashboardData({
     required this.totals,
     required this.pendingServiceCount,
     required this.lowStockCount,
     required this.secondHandStock,
     required this.recentServices,
+    this.totalProducts = 0,
+    this.totalStockQty = 0,
+    this.outOfStockCount = 0,
+    this.todayPurchase = 0,
+    this.todaySales = 0,
+    this.todayPartsUsed = 0,
+    this.stockValue = 0,
   });
 }
