@@ -97,6 +97,12 @@ class _AccessoriesScreenState extends State<AccessoriesScreen> {
                       ),
                     ],
                   ),
+                  const SizedBox(height: 8),
+                  OutlinedButton.icon(
+                    onPressed: _quickRestockScan,
+                    icon: const Icon(Icons.qr_code_scanner_rounded, size: 18),
+                    label: const Text('Quick Restock (Continuous Scan)'),
+                  ),
                   const SizedBox(height: 10),
                   Container(
                     padding: const EdgeInsets.all(14),
@@ -182,6 +188,50 @@ class _AccessoriesScreenState extends State<AccessoriesScreen> {
       ),
     );
     if (create == true) await _addAccessory(presetBarcode: code);
+  }
+
+  /// Fast Continuous Scanning restock (spec item 12) - see
+  /// SparePartsScreen._quickRestockScan for the same flow on the spare-parts
+  /// side; this is the accessory mirror of it.
+  Future<void> _quickRestockScan() async {
+    final counts = <String, int>{};
+    await Navigator.push(
+      context,
+      MaterialPageRoute(
+        builder: (_) => BarcodeScannerScreen(
+          continuous: true,
+          title: 'Quick Restock - Scan Each Item',
+          onScan: (code) => counts[code] = (counts[code] ?? 0) + 1,
+          describeCode: (code) async {
+            final acc = await _repo.findByBarcode(code);
+            return acc == null ? null : '${acc.name} (stock: ${acc.currentStock.toStringAsFixed(0)})';
+          },
+        ),
+      ),
+    );
+    if (counts.isEmpty || !mounted) return;
+
+    int applied = 0;
+    final notFound = <String>[];
+    for (final entry in counts.entries) {
+      final acc = await _repo.findByBarcode(entry.key);
+      if (acc == null) {
+        notFound.add(entry.key);
+        continue;
+      }
+      await _repo.recordPurchase(
+        accessoryId: acc.id,
+        quantity: entry.value.toDouble(),
+        unitCost: acc.purchasePrice,
+        date: DateTime.now(),
+      );
+      applied++;
+    }
+    _load();
+    if (!mounted) return;
+    final message = StringBuffer('Restocked $applied item(s).');
+    if (notFound.isNotEmpty) message.write(' ${notFound.length} barcode(s) not found in inventory: ${notFound.join(', ')}');
+    ScaffoldMessenger.of(context).showSnackBar(SnackBar(content: Text(message.toString())));
   }
 
   Future<bool> _barcodeAvailable(String barcode, {String? excludingId}) async {

@@ -97,6 +97,12 @@ class _SparePartsScreenState extends State<SparePartsScreen> {
                       ),
                     ],
                   ),
+                  const SizedBox(height: 8),
+                  OutlinedButton.icon(
+                    onPressed: _quickRestockScan,
+                    icon: const Icon(Icons.qr_code_scanner_rounded, size: 18),
+                    label: const Text('Quick Restock (Continuous Scan)'),
+                  ),
                   const SizedBox(height: 10),
                   Container(
                     padding: const EdgeInsets.all(14),
@@ -187,6 +193,53 @@ class _SparePartsScreenState extends State<SparePartsScreen> {
       ),
     );
     if (create == true) await _addPart(presetBarcode: code);
+  }
+
+  /// Fast Continuous Scanning restock (spec item 12): scan the same box of
+  /// parts one after another - each repeated scan of the same barcode bumps
+  /// its running count by 1 - then apply everything as Purchase (Stock In)
+  /// transactions at each part's existing average cost once Done is
+  /// tapped. A barcode that doesn't match any known spare part is skipped
+  /// with a warning rather than silently dropped.
+  Future<void> _quickRestockScan() async {
+    final counts = <String, int>{};
+    await Navigator.push(
+      context,
+      MaterialPageRoute(
+        builder: (_) => BarcodeScannerScreen(
+          continuous: true,
+          title: 'Quick Restock - Scan Each Part',
+          onScan: (code) => counts[code] = (counts[code] ?? 0) + 1,
+          describeCode: (code) async {
+            final part = await _repo.findByBarcode(code);
+            return part == null ? null : '${part.name} (stock: ${part.currentStock.toStringAsFixed(0)})';
+          },
+        ),
+      ),
+    );
+    if (counts.isEmpty || !mounted) return;
+
+    int applied = 0;
+    final notFound = <String>[];
+    for (final entry in counts.entries) {
+      final part = await _repo.findByBarcode(entry.key);
+      if (part == null) {
+        notFound.add(entry.key);
+        continue;
+      }
+      await _repo.recordPurchase(
+        sparePartId: part.id,
+        quantity: entry.value.toDouble(),
+        unitCost: part.avgPurchaseCost,
+        date: DateTime.now(),
+      );
+      applied++;
+    }
+    _load();
+    if (!mounted) return;
+    final message = StringBuffer('Restocked $applied part(s).');
+    if (notFound.isNotEmpty) message.write(' ${notFound.length} barcode(s) not found in inventory: ${notFound.join(', ')}');
+    ScaffoldMessenger.of(context).showSnackBar(SnackBar(content: Text(message.toString())));
   }
 
   Future<bool> _barcodeAvailable(String barcode, {String? excludingId}) async {
