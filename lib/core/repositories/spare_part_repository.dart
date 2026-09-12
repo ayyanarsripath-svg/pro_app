@@ -16,6 +16,7 @@ class SparePartRepository {
     String? compatibleModel,
     String unit = 'pcs',
     double lowStockThreshold = 2,
+    String? barcode,
   }) async {
     final db = await _dbHelper.database;
     final part = SparePart(
@@ -26,9 +27,65 @@ class SparePartRepository {
       unit: unit,
       lowStockThreshold: lowStockThreshold,
       createdAt: DateTime.now(),
+      barcode: barcode,
     );
     await db.insert('spare_parts', part.toMap());
     return part;
+  }
+
+  /// Looks up a spare part by its exact barcode (manufacturer-scanned or
+  /// internally generated) - the core lookup for Purchase Stock Entry,
+  /// Service Bill "Add Spare Part -> Scan Barcode", and the Inventory
+  /// search/scan screen (spec items 4, 8, 10). Returns null when no spare
+  /// part currently owns that barcode ("Product not found" - spec item 20).
+  Future<SparePart?> findByBarcode(String barcode) async {
+    final db = await _dbHelper.database;
+    final rows = await db.query('spare_parts', where: 'barcode = ?', whereArgs: [barcode]);
+    if (rows.isEmpty) return null;
+    return SparePart.fromMap(rows.first);
+  }
+
+  /// Duplicate Barcode Protection (spec item 15): true only when no OTHER
+  /// spare part already owns this barcode. Pass [excludingId] when checking
+  /// during an edit so a part doesn't collide with its own existing
+  /// barcode. Note this only checks spare_parts - callers that also need to
+  /// guard against an accessory owning the same barcode (barcodes are one
+  /// shared identity space) should additionally check
+  /// AccessoryRepository.isBarcodeAvailable.
+  Future<bool> isBarcodeAvailable(String barcode, {String? excludingId}) async {
+    final db = await _dbHelper.database;
+    final rows = await db.query(
+      'spare_parts',
+      where: excludingId != null ? 'barcode = ? AND id != ?' : 'barcode = ?',
+      whereArgs: excludingId != null ? [barcode, excludingId] : [barcode],
+      limit: 1,
+    );
+    return rows.isEmpty;
+  }
+
+  /// Assigns a scanned or freshly-generated barcode to an existing spare
+  /// part (Barcode Generation / "Scan existing manufacturer barcode" - spec
+  /// items 5 & 16). Caller is expected to have already checked
+  /// [isBarcodeAvailable] (and the accessory-side equivalent).
+  Future<void> setBarcode(String id, String barcode) async {
+    final db = await _dbHelper.database;
+    await db.update('spare_parts', {'barcode': barcode}, where: 'id = ?', whereArgs: [id]);
+  }
+
+  /// Full movement history for one spare part - every purchase, service
+  /// usage, adjustment and supplier return ever recorded against it, newest
+  /// first (spec item 9's "Stock History: Date | Type | Qty | Balance"). The
+  /// running balance is computed here (oldest-to-newest) then the list is
+  /// reversed back to newest-first for display.
+  Future<List<SparePartTransaction>> transactionsFor(String sparePartId) async {
+    final db = await _dbHelper.database;
+    final rows = await db.query(
+      'spare_part_transactions',
+      where: 'spare_part_id = ?',
+      whereArgs: [sparePartId],
+      orderBy: 'txn_date ASC',
+    );
+    return rows.map(SparePartTransaction.fromMap).toList();
   }
 
   Future<List<SparePart>> all({bool activeOnly = true}) async {
@@ -46,6 +103,31 @@ class SparePartRepository {
     return parts.where((p) => p.isLowStock).toList();
   }
 
+  /// Inventory Dashboard's "Today's Purchase" (spec item 14): total ₹ spent
+  /// on spare-part stock-in transactions within [from, to].
+  Future<double> purchaseValueBetween(DateTime from, DateTime to) async {
+    final db = await _dbHelper.database;
+    final rows = await db.rawQuery(
+      "SELECT COALESCE(SUM(quantity * unit_cost), 0) as total FROM spare_part_transactions "
+      "WHERE txn_type = 'purchase' AND txn_date >= ? AND txn_date <= ?",
+      [from.toIso8601String(), to.toIso8601String()],
+    );
+    return (rows.first['total'] as num?)?.toDouble() ?? 0;
+  }
+
+  /// Inventory Dashboard's "Today's Parts Used" (spec item 14): total
+  /// quantity consumed via a Service Bill or a 2nd-hand phone repair within
+  /// [from, to].
+  Future<double> usedQuantityBetween(DateTime from, DateTime to) async {
+    final db = await _dbHelper.database;
+    final rows = await db.rawQuery(
+      "SELECT COALESCE(SUM(-quantity), 0) as total FROM spare_part_transactions "
+      "WHERE txn_type IN ('service_usage', 'second_hand_usage') AND txn_date >= ? AND txn_date <= ?",
+      [from.toIso8601String(), to.toIso8601String()],
+    );
+    return (rows.first['total'] as num?)?.toDouble() ?? 0;
+  }
+
   Future<SparePart?> byId(String id) async {
     final db = await _dbHelper.database;
     final rows = await db.query('spare_parts', where: 'id = ?', whereArgs: [id]);
@@ -61,6 +143,7 @@ class SparePartRepository {
     String? compatibleModel,
     String? unit,
     double? lowStockThreshold,
+    String? barcode,
   }) async {
     final db = await _dbHelper.database;
     final rows = await db.query('spare_parts', where: 'id = ?', whereArgs: [id]);
@@ -77,6 +160,7 @@ class SparePartRepository {
       lowStockThreshold: lowStockThreshold ?? part.lowStockThreshold,
       active: part.active,
       createdAt: part.createdAt,
+      barcode: barcode ?? part.barcode,
     );
     await db.update('spare_parts', updated.toMap(), where: 'id = ?', whereArgs: [id]);
   }
@@ -97,6 +181,10 @@ class SparePartRepository {
     required DateTime date,
     String? purchaseId,
     String? notes,
+    // Purchase Stock Entry's optional Batch Number / Invoice Number (spec
+    // item 4).
+    String? batchNumber,
+    String? invoiceNumber,
   }) async {
     final db = await _dbHelper.database;
     await db.transaction((txn) async {
@@ -124,6 +212,8 @@ class SparePartRepository {
         'reference_id': purchaseId,
         'txn_date': date.toIso8601String(),
         'notes': notes,
+        'batch_number': batchNumber,
+        'invoice_number': invoiceNumber,
       });
     });
   }

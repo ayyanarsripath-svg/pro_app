@@ -25,6 +25,7 @@ import '../../models/service.dart';
 import '../../models/spare_part.dart';
 import '../../widgets/section_card.dart';
 import '../../widgets/status_badge.dart';
+import '../inventory/barcode_scanner_screen.dart';
 
 /// The premium "mobile repair job card" screen (spec sections 19-25):
 /// status header, quick-action row, big payment summary, delivery block,
@@ -168,10 +169,21 @@ class _ServiceDetailScreenState extends State<ServiceDetailScreen> {
             SectionCard(
               title: 'Repair',
               icon: Icons.handyman_rounded,
-              trailing: TextButton.icon(
-                onPressed: _addSparePart,
-                icon: const Icon(Icons.add, size: 16),
-                label: const Text('Add Part'),
+              trailing: Row(
+                mainAxisSize: MainAxisSize.min,
+                children: [
+                  IconButton(
+                    onPressed: _scanAndAddSparePart,
+                    icon: const Icon(Icons.qr_code_scanner_rounded, size: 20),
+                    tooltip: 'Scan Barcode',
+                    visualDensity: VisualDensity.compact,
+                  ),
+                  TextButton.icon(
+                    onPressed: _addSparePart,
+                    icon: const Icon(Icons.add, size: 16),
+                    label: const Text('Add Part'),
+                  ),
+                ],
               ),
               children: [
                 _row('Technician', s.technician),
@@ -779,16 +791,90 @@ class _ServiceDetailScreenState extends State<ServiceDetailScreen> {
           date: DateTime.now(),
         );
       } else if (!manual && selected != null) {
+        // Out of Stock Protection (spec item 13): never use more than what
+        // is actually on the shelf, and say so clearly instead of letting
+        // this part's stock go negative.
+        final requested = double.tryParse(qtyCtrl.text.trim()) ?? 1;
+        if (selected!.isOutOfStock) {
+          if (mounted) {
+            ScaffoldMessenger.of(context).showSnackBar(SnackBar(content: Text('${selected!.name} is out of stock.')));
+          }
+          return;
+        }
+        final quantity = requested > selected!.currentStock ? selected!.currentStock : requested;
+        if (requested > selected!.currentStock && mounted) {
+          ScaffoldMessenger.of(context).showSnackBar(
+              SnackBar(content: Text('Only ${selected!.currentStock.toStringAsFixed(0)} ${selected!.name} available - used $quantity.')));
+        }
         await _serviceRepo.addSparePartUsage(
           serviceId: widget.serviceId,
           sparePartId: selected!.id,
           itemName: selected!.name,
-          quantity: double.tryParse(qtyCtrl.text.trim()) ?? 1,
+          quantity: quantity,
           date: DateTime.now(),
         );
       }
       _load();
     }
+  }
+
+  /// Service Bill "Add Spare Part -> Scan Barcode" (spec item 8): scans a
+  /// spare part's barcode, shows its name/model/selling price/available
+  /// stock, then asks for the used quantity - with the same Out of Stock
+  /// Protection as the manual Add Part flow above.
+  Future<void> _scanAndAddSparePart() async {
+    final code = await Navigator.push<String>(context, MaterialPageRoute(builder: (_) => const BarcodeScannerScreen(title: 'Scan Spare Part Barcode')));
+    if (code == null || code.isEmpty || !mounted) return;
+
+    final part = await _sparePartRepo.findByBarcode(code);
+    if (!mounted) return;
+    if (part == null) {
+      ScaffoldMessenger.of(context).showSnackBar(SnackBar(content: Text('No spare part found with barcode "$code".')));
+      return;
+    }
+    if (part.isOutOfStock) {
+      ScaffoldMessenger.of(context).showSnackBar(SnackBar(content: Text('${part.name} is out of stock.')));
+      return;
+    }
+
+    final qtyCtrl = TextEditingController(text: '1');
+    final ok = await showDialog<bool>(
+      context: context,
+      builder: (context) => AlertDialog(
+        title: Text(part.name),
+        content: Column(
+          mainAxisSize: MainAxisSize.min,
+          crossAxisAlignment: CrossAxisAlignment.start,
+          children: [
+            if (part.compatibleModel != null && part.compatibleModel!.isNotEmpty) Text('Model: ${part.compatibleModel}'),
+            Text('Cost: ${formatCurrency(part.avgPurchaseCost)}'),
+            Text('Available Stock: ${part.currentStock.toStringAsFixed(0)} ${part.unit}'),
+            const SizedBox(height: 10),
+            TextField(controller: qtyCtrl, keyboardType: TextInputType.number, decoration: const InputDecoration(labelText: 'Used Quantity')),
+          ],
+        ),
+        actions: [
+          TextButton(onPressed: () => Navigator.pop(context, false), child: const Text('Cancel')),
+          ElevatedButton(onPressed: () => Navigator.pop(context, true), child: const Text('Add')),
+        ],
+      ),
+    );
+    if (ok != true || !mounted) return;
+
+    final requested = double.tryParse(qtyCtrl.text.trim()) ?? 1;
+    final quantity = requested > part.currentStock ? part.currentStock : requested;
+    if (requested > part.currentStock) {
+      ScaffoldMessenger.of(context)
+          .showSnackBar(SnackBar(content: Text('Only ${part.currentStock.toStringAsFixed(0)} ${part.name} available - used $quantity.')));
+    }
+    await _serviceRepo.addSparePartUsage(
+      serviceId: widget.serviceId,
+      sparePartId: part.id,
+      itemName: part.name,
+      quantity: quantity,
+      date: DateTime.now(),
+    );
+    _load();
   }
 
   // NOTE: the standalone "Add Payment" quick action used to live here as
