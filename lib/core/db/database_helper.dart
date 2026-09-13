@@ -13,7 +13,7 @@ class DatabaseHelper {
   static final DatabaseHelper instance = DatabaseHelper._internal();
 
   static Database? _db;
-  static const int dbVersion = 12;
+  static const int dbVersion = 13;
   static const String dbFileName = 'professional_mobiles.db';
 
   Future<Database> get database async {
@@ -174,6 +174,51 @@ class DatabaseHelper {
       await db.execute('ALTER TABLE spare_part_transactions ADD COLUMN invoice_number TEXT');
       await db.execute('ALTER TABLE accessory_transactions ADD COLUMN batch_number TEXT');
       await db.execute('ALTER TABLE accessory_transactions ADD COLUMN invoice_number TEXT');
+    }
+    // Multi-Barcode Add Product + resumable draft (2026-09). The oldVersion
+    // < 12 block above deliberately made ONE PRODUCT -> ONE barcode column
+    // (spec item 18 at the time) - correct for that spec, but it means a
+    // box of 30 physically identical units, each carrying its OWN distinct
+    // manufacturer barcode/QR sticker, could only ever have ONE of those 30
+    // codes remembered; scanning any of the other 29 later (at sale time, a
+    // return, Service Bill "Add Part -> Scan Barcode", etc) would never
+    // resolve back to the product at all (spec: "oru product name and
+    // details add pannumpothu barcode or qr code scan panna antha oru
+    // product mattumthan save aaguthu ... multiple barcode or qr code la
+    // scann panramathiri options need" - the shop explicitly wants every
+    // individual sticker remembered, "ella barcode um scann pannikkanum
+    // ... save pannikkanum"). `product_barcodes` adds a proper
+    // one-product-to-many-barcodes table without touching the existing
+    // single `barcode` column on spare_parts/accessories, which stays
+    // exactly as-is for every product created the old way (see
+    // ProductBarcodeRepository.resolve for the fallback chain that makes
+    // both styles of product resolve correctly from any scan).
+    if (oldVersion < 13) {
+      await db.execute('''
+        CREATE TABLE product_barcodes (
+          id TEXT PRIMARY KEY,
+          product_type TEXT NOT NULL,
+          product_id TEXT NOT NULL,
+          barcode TEXT NOT NULL,
+          created_at TEXT NOT NULL
+        )
+      ''');
+      await db.execute('CREATE UNIQUE INDEX idx_product_barcodes_barcode ON product_barcodes(barcode)');
+      await db.execute('CREATE INDEX idx_product_barcodes_product ON product_barcodes(product_type, product_id)');
+      // Resumable "Add Product" draft (spec: "naduvula back vantha entire
+      // process cancel aagakudathu resume aaganum" - an accidental Back
+      // press, or the app being closed entirely mid-scan, must never force
+      // starting the whole entry over). One row per product type - a
+      // second "Add Part" tap while one is already mid-scan resumes that
+      // same in-progress entry rather than stacking a separate draft.
+      await db.execute('''
+        CREATE TABLE product_add_drafts (
+          product_type TEXT PRIMARY KEY,
+          details_json TEXT NOT NULL,
+          barcodes_json TEXT NOT NULL,
+          updated_at TEXT NOT NULL
+        )
+      ''');
     }
   }
 
@@ -675,6 +720,31 @@ class DatabaseHelper {
     ''');
     batch.execute('CREATE INDEX idx_daily_order_items_date ON daily_order_items(order_date)');
     batch.execute('CREATE INDEX idx_daily_order_items_sent ON daily_order_items(sent)');
+
+    // ---------------------------------------------------------------
+    // Multi-Barcode Add Product + resumable draft - see the oldVersion < 13
+    // migration's doc comment above for why this exists alongside
+    // spare_parts.barcode/accessories.barcode.
+    // ---------------------------------------------------------------
+    batch.execute('''
+      CREATE TABLE product_barcodes (
+        id TEXT PRIMARY KEY,
+        product_type TEXT NOT NULL,
+        product_id TEXT NOT NULL,
+        barcode TEXT NOT NULL,
+        created_at TEXT NOT NULL
+      )
+    ''');
+    batch.execute('CREATE UNIQUE INDEX idx_product_barcodes_barcode ON product_barcodes(barcode)');
+    batch.execute('CREATE INDEX idx_product_barcodes_product ON product_barcodes(product_type, product_id)');
+    batch.execute('''
+      CREATE TABLE product_add_drafts (
+        product_type TEXT PRIMARY KEY,
+        details_json TEXT NOT NULL,
+        barcodes_json TEXT NOT NULL,
+        updated_at TEXT NOT NULL
+      )
+    ''');
 
     await batch.commit(noResult: true);
   }
