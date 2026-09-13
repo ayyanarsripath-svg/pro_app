@@ -268,23 +268,29 @@ const _preBackupReminderAlarmId = 930200;
 /// has to differ from the other alarm ids on this page.
 const _quickNotificationAlarmId = 930300;
 
-/// Keeps the Quick Income/Expense persistent notification (and its
-/// foreground-service anchor - see QuickNotificationService's class doc
-/// comment) alive across device reboots - Android stops every foreground
-/// service and clears every notification, for every app, the moment the
-/// phone reboots, and there is no notification-only way to survive that.
-/// `rescheduleOnReboot: true` below makes
-/// android_alarm_manager_plus's own bundled boot receiver silently
-/// re-register this same periodic alarm the moment the phone finishes
-/// booting - no manifest work needed here, the plugin already ships that
-/// receiver (see build-apk.yml's RECEIVE_BOOT_COMPLETED permission, already
-/// required for this app's other exact alarms). Safe to call on every app
-/// startup: [AndroidAlarmManager.periodic] with the same id simply leaves
-/// an already-registered periodic alarm alone if `startAt` isn't rewritten
-/// each time... in practice this just keeps re-arming the same cycle, which
-/// is harmless (it only ever calls [quickNotificationRefreshCallback],
-/// itself a no-op no matter how often it fires - see that callback's doc
-/// comment).
+/// Best-effort content refresh for the Quick Income/Expense persistent
+/// notification, kept for whatever small chance it has to opportunistically
+/// nudge the notification while the app is backgrounded.
+///
+/// BUG FIX NOTE (spec: "income and expenses notification thalli vitta
+/// poiduthu atha constant ah erukkamathiri ready panni kudu" - the
+/// notification keeps getting dismissed, make it genuinely persistent):
+/// this alarm was ORIGINALLY meant to be what brings the notification (and
+/// its foreground-service anchor) back after an OEM process-kill or a
+/// device reboot, but it never actually could - [quickNotificationRefreshCallback]
+/// runs in android_alarm_manager_plus's own separate headless
+/// FlutterEngine/isolate, which has no MainActivity and therefore no
+/// handler at all for the app's custom "pro_app/whatsapp_share"
+/// MethodChannel that [QuickNotificationService.show] needs to actually
+/// start the foreground service - so every single revival attempt through
+/// this path was silently failing every time it fired, not just after a
+/// kill. The REAL fix is a fully native watchdog,
+/// `QuickNotificationAlarmReceiver` (see build-apk.yml), which never
+/// depends on the Flutter engine at all and is armed/disarmed directly by
+/// MainActivity's startQuickNotificationService/stopQuickNotificationService
+/// handlers - that's what now actually survives a kill or reboot. This Dart
+/// alarm is left in place (harmless, cheap) only for the rare case the
+/// app's Dart VM happens to still be alive in the background when it fires.
 Future<void> scheduleQuickNotificationRefresh() async {
   if (!Platform.isAndroid) return;
   try {
@@ -319,23 +325,19 @@ Future<void> cancelQuickNotificationRefresh() async {
 /// [scheduleQuickNotificationRefresh]'s periodic alarm - runs in its own
 /// fresh background isolate, same as [backupAlarmCallback] above, so it
 /// re-initializes AndroidAlarmManager itself before doing anything else.
-/// Just re-shows (or, if the shop has since turned the Settings toggle off,
-/// clears) the persistent notification with fresh totals -
-/// QuickNotificationService.show() already no-ops safely either way, so
-/// this callback never needs its own enabled/disabled branching. Must stay
-/// a top-level function annotated with @pragma('vm:entry-point') so the
-/// Android side can still find it after the app process is killed.
+/// QuickNotificationService.show() already no-ops safely if the shop has
+/// since turned the Settings toggle off, so this callback never needs its
+/// own enabled/disabled branching. Must stay a top-level function annotated
+/// with @pragma('vm:entry-point') so the Android side can still find it
+/// after the app process is killed.
 ///
-/// NOTE: the foreground-service-start call inside QuickNotificationService
-/// .show() goes over a MethodChannel that only exists on a live
-/// MainActivity - this background isolate has none, so that specific call
-/// silently no-ops here (caught, like everywhere else this channel is
-/// called) while the notification content itself still posts fine (that
-/// part talks to Android directly via flutter_local_notifications, no
-/// MainActivity needed). In practice this only matters in the narrow
-/// window right after a reboot before the shop next opens the app - the
-/// very next app open re-attaches the foreground service normally (see
-/// main.dart calling QuickNotificationService.show() on startup).
+/// See [scheduleQuickNotificationRefresh]'s doc comment: this call's own
+/// foreground-service-start step always silently no-ops in this headless
+/// isolate (no MainActivity here for its MethodChannel to reach), so this
+/// alarm is no longer what keeps the notification alive after a kill or
+/// reboot - `QuickNotificationAlarmReceiver` (a fully native watchdog, see
+/// build-apk.yml) is. This callback is kept only as a harmless, cheap
+/// best-effort extra.
 @pragma('vm:entry-point')
 void quickNotificationRefreshCallback() async {
   try {

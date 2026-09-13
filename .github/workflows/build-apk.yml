@@ -1065,6 +1065,14 @@ jobs:
                               } else {
                                   startService(serviceIntent)
                               }
+                              // Arms (or simply keeps armed) the native
+                              // watchdog that brings this same service back
+                              // on its own if an OEM kills the app process or
+                              // the phone reboots - see
+                              // QuickNotificationAlarmReceiver's doc comment
+                              // for why the old Dart-side periodic callback
+                              // alone could never actually do this.
+                              QuickNotificationAlarmReceiver.schedule(this)
                               result.success(true)
                           } catch (e: Exception) {
                               // Never let this block the rest of the app -
@@ -1079,6 +1087,10 @@ jobs:
                           // does the actual notification removal.
                           try {
                               stopService(Intent(this, QuickNotificationForegroundService::class.java))
+                              // Disarms the watchdog too, so it doesn't
+                              // resurrect a notification the shop just
+                              // deliberately turned off.
+                              QuickNotificationAlarmReceiver.cancel(this)
                               result.success(true)
                           } catch (e: Exception) {
                               result.success(false)
@@ -1458,7 +1470,162 @@ jobs:
                   super.onDestroy()
               }
 
+              // BUG FIX (spec: "income and expenses notification thalli
+              // vitta poiduthu atha constant ah erukkamathiri ready panni
+              // kudu" - it keeps getting swiped/dismissed, make it genuinely
+              // persistent): setOngoing(true)/startForeground already stop a
+              // plain swipe-in-the-shade from dismissing this notification,
+              // but neither one is called again if the OS tears down this
+              // Service (and the whole app process with it) after the app is
+              // swiped away from Recents on the many OEMs (Xiaomi/Vivo/Oppo/
+              // etc, already called out elsewhere in this file as aggressive
+              // background-killers) that do this even with battery-
+              // optimization exemption granted - that exemption is a
+              // different setting from each OEM's own separate "Autostart"/
+              // background-activity allowlist, which this app has no way to
+              // request. Overriding onTaskRemoved() to immediately restart
+              // this exact service is the standard, documented Android
+              // pattern for a foreground service that must survive a task
+              // swipe - without it, only the next app open (or the periodic/
+              // reboot watchdog below) would ever bring the notification
+              // back.
+              override fun onTaskRemoved(rootIntent: Intent?) {
+                  try {
+                      val restartIntent = Intent(applicationContext, QuickNotificationForegroundService::class.java)
+                      if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.O) {
+                          applicationContext.startForegroundService(restartIntent)
+                      } else {
+                          applicationContext.startService(restartIntent)
+                      }
+                  } catch (e: Exception) {
+                      // Best-effort - the periodic watchdog alarm
+                      // (QuickNotificationAlarmReceiver) still catches this
+                      // within its own interval even if this immediate
+                      // restart can't run for some reason.
+                  }
+                  super.onTaskRemoved(rootIntent)
+              }
+
               override fun onBind(intent: Intent?): IBinder? = null
+          }
+          '''
+
+          # Native watchdog for the Quick Income/Expense notification (see
+          # QuickNotificationForegroundService above). Before this, the ONLY
+          # thing meant to revive that service after an OEM process-kill or
+          # a device reboot was android_alarm_manager_plus's periodic Dart
+          # callback (background_tasks.dart's quickNotificationRefreshCallback)
+          # calling QuickNotificationService.show() - but that call's own
+          # foreground-service-start step goes over the app's custom
+          # "pro_app/whatsapp_share" MethodChannel, which only has a native
+          # handler registered on MainActivity's own FlutterEngine
+          # (configureFlutterEngine below). android_alarm_manager_plus runs
+          # its periodic callback in a completely separate headless
+          # FlutterEngine/isolate with no MainActivity and therefore no
+          # handler for that channel at all, so every single one of those
+          # revival attempts was silently failing (caught and swallowed, like
+          # every call on that channel) - the exact "thalli vitta poiduthu
+          # ... athu pogavey kudathu" (it gets dismissed, it must never go
+          # away) symptom the shop reported, since nothing was actually able
+          # to bring the notification back once it was gone.
+          #
+          # This receiver fixes that by never depending on the Flutter engine
+          # at all to restart the service, the same proven approach
+          # DailyOrderAlarmReceiver above already uses to fire reliably even
+          # with the app process fully dead: a plain native AlarmManager +
+          # BroadcastReceiver. It's armed/disarmed directly from
+          # MainActivity's startQuickNotificationService/
+          # stopQuickNotificationService handlers below (so it always tracks
+          # whether the shop currently has the notification turned on) and
+          # re-arms itself on boot/app-update, same pattern as
+          # DailyOrderAlarmReceiver's own BOOT_COMPLETED handling. It doesn't
+          # need to pass fresh title/body - onStartCommand above already has
+          # sensible defaults, and the very next app open or Quick Income/
+          # Expense save refreshes the real totals as before.
+          quick_notification_alarm_receiver_kt = '''package com.example.pro_app
+
+          import android.app.AlarmManager
+          import android.app.PendingIntent
+          import android.content.BroadcastReceiver
+          import android.content.Context
+          import android.content.Intent
+          import android.os.Build
+          import android.os.SystemClock
+          import androidx.core.content.ContextCompat
+
+          class QuickNotificationAlarmReceiver : BroadcastReceiver() {
+              companion object {
+                  private const val PREFS_NAME = "quick_notification_alarm_prefs"
+                  private const val KEY_ENABLED = "enabled"
+                  private const val REQUEST_CODE = 5002
+                  private const val ACTION_FIRE = "com.example.pro_app.QUICK_NOTIFICATION_ALARM"
+
+                  // Frequent enough that even a full OEM process-kill leaves
+                  // the notification missing for a few minutes at most, not
+                  // hours - inexact repeating alarms are also exempt from
+                  // the "Alarms & reminders" special permission needed for
+                  // exact alarms, so this needs no extra permission prompt.
+                  private const val INTERVAL_MS = 20L * 60L * 1000L
+
+                  fun schedule(context: Context) {
+                      context.getSharedPreferences(PREFS_NAME, Context.MODE_PRIVATE).edit()
+                          .putBoolean(KEY_ENABLED, true)
+                          .apply()
+                      arm(context)
+                  }
+
+                  fun cancel(context: Context) {
+                      context.getSharedPreferences(PREFS_NAME, Context.MODE_PRIVATE).edit()
+                          .putBoolean(KEY_ENABLED, false)
+                          .apply()
+                      val am = context.getSystemService(Context.ALARM_SERVICE) as AlarmManager
+                      am.cancel(pendingIntent(context))
+                  }
+
+                  private fun arm(context: Context) {
+                      val am = context.getSystemService(Context.ALARM_SERVICE) as AlarmManager
+                      am.setInexactRepeating(
+                          AlarmManager.ELAPSED_REALTIME_WAKEUP,
+                          SystemClock.elapsedRealtime() + INTERVAL_MS,
+                          INTERVAL_MS,
+                          pendingIntent(context)
+                      )
+                  }
+
+                  private fun pendingIntent(context: Context): PendingIntent {
+                      val intent = Intent(context, QuickNotificationAlarmReceiver::class.java).apply { action = ACTION_FIRE }
+                      return PendingIntent.getBroadcast(
+                          context, REQUEST_CODE, intent,
+                          PendingIntent.FLAG_UPDATE_CURRENT or PendingIntent.FLAG_IMMUTABLE
+                      )
+                  }
+              }
+
+              override fun onReceive(context: Context, intent: Intent) {
+                  val prefs = context.getSharedPreferences(PREFS_NAME, Context.MODE_PRIVATE)
+                  val enabled = prefs.getBoolean(KEY_ENABLED, false)
+
+                  if (intent.action == Intent.ACTION_BOOT_COMPLETED || intent.action == Intent.ACTION_MY_PACKAGE_REPLACED) {
+                      // Android clears every AlarmManager alarm at both of
+                      // these - silently re-arm only if the shop hadn't
+                      // turned this off already.
+                      if (enabled) arm(context)
+                      return
+                  }
+
+                  if (!enabled) return
+
+                  try {
+                      val serviceIntent = Intent(context, QuickNotificationForegroundService::class.java)
+                      if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.O) {
+                          ContextCompat.startForegroundService(context, serviceIntent)
+                      } else {
+                          context.startService(serviceIntent)
+                      }
+                  } catch (e: Exception) {
+                      // Best-effort - tries again on its own next interval.
+                  }
+              }
           }
           '''
 
@@ -1479,6 +1646,10 @@ jobs:
           with open(os.path.join(kotlin_dir, "QuickNotificationForegroundService.kt"), "w", encoding="utf-8") as f:
               f.write(quick_notification_foreground_service_kt)
           print("Wrote QuickNotificationForegroundService.kt")
+
+          with open(os.path.join(kotlin_dir, "QuickNotificationAlarmReceiver.kt"), "w", encoding="utf-8") as f:
+              f.write(quick_notification_alarm_receiver_kt)
+          print("Wrote QuickNotificationAlarmReceiver.kt")
 
           with open(os.path.join(xml_dir, "file_paths.xml"), "w", encoding="utf-8") as f:
               f.write(file_paths_xml)
@@ -1589,6 +1760,33 @@ jobs:
               with open(manifest_path, "w", encoding="utf-8") as f:
                   f.write(manifest)
               print("Registered QuickNotificationForegroundService.")
+
+          # QuickNotificationAlarmReceiver (see
+          # quick_notification_alarm_receiver_kt above) - the watchdog that
+          # brings QuickNotificationForegroundService back after an OEM
+          # process-kill or a device reboot. exported=false since it's only
+          # ever triggered by this app's own AlarmManager PendingIntent or by
+          # the system boot/package-replaced broadcasts below, never by
+          # another app - same shape as DailyOrderAlarmReceiver's own
+          # registration above.
+          if "QuickNotificationAlarmReceiver" in manifest:
+              print("Quick Notification alarm receiver already registered, nothing to do.")
+          else:
+              qn_receiver_block = (
+                  '    <receiver android:name=".QuickNotificationAlarmReceiver" android:exported="false">\n'
+                  '        <intent-filter>\n'
+                  '            <action android:name="android.intent.action.BOOT_COMPLETED" />\n'
+                  '            <action android:name="android.intent.action.MY_PACKAGE_REPLACED" />\n'
+                  '        </intent-filter>\n'
+                  '    </receiver>\n'
+              )
+              idx = manifest.rfind("</application>")
+              if idx == -1:
+                  raise SystemExit(f"Could not find </application> in {manifest_path} - aborting so this doesn't silently produce a broken manifest.")
+              manifest = manifest[:idx] + qn_receiver_block + manifest[idx:]
+              with open(manifest_path, "w", encoding="utf-8") as f:
+                  f.write(manifest)
+              print("Registered QuickNotificationAlarmReceiver.")
           PYEOF
 
       # Proper small notification icon (Task: "pro_app notification icon set
