@@ -138,6 +138,35 @@ class PnlService {
       revenue += (row['amount'] as num).toDouble(); // stored negative
     }
 
+    // BUG FIX (P&L calculation): Quick Income's "Second Hand Sale" category
+    // (QuickTransactionRepository.recordIncome) writes a plain
+    // category=secondHand/txn_type=revenue ledger row with NO matching
+    // second_hand_sales row (there's no specific phone behind a quick
+    // entry). This method used to only total revenue from the
+    // second_hand_sales table above plus returns/expenses, so that ledger
+    // row was silently never counted anywhere - Dashboard "Today's
+    // Revenue" and every Daily/Weekly/Monthly P&L view understated Mobile
+    // Sales by exactly the amount of every such Quick Income entry
+    // (matches "profit and loss calculation sariya varala"). Restricted to
+    // reference_type = 'quick_income' specifically so a normal sale's own
+    // revenue row (referenceType 'second_hand_sale', written by
+    // recordSale()) is never double-counted - that one is already
+    // captured via the second_hand_sales query above.
+    final quickIncomeRows = await db.query(
+      'ledger_transactions',
+      where: "category = ? AND txn_type = ? AND reference_type = ? AND txn_date >= ? AND txn_date <= ?",
+      whereArgs: [
+        LedgerCategory.secondHand,
+        LedgerTxnType.revenue,
+        'quick_income',
+        from.toIso8601String(),
+        to.toIso8601String(),
+      ],
+    );
+    for (final row in quickIncomeRows) {
+      revenue += (row['amount'] as num).toDouble();
+    }
+
     final expenseRows = await db.query(
       'ledger_transactions',
       where: "category = ? AND txn_type = ? AND txn_date >= ? AND txn_date <= ?",

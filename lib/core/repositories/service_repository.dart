@@ -454,6 +454,17 @@ class ServiceRepository {
 
   /// Admin-only internal costing view (spec section 2) - NEVER surface this
   /// on a customer-facing bill screen/print.
+  ///
+  /// BUG FIX (P&L mismatch): this used to use the raw, pre-discount
+  /// [ServiceJob.finalAmount] as serviceRevenue, while [_syncCoreLedger] -
+  /// which is what the Dashboard/monthly P&L actually total - has always
+  /// netted the discount out (`finalAmount - discount`). For any service
+  /// bill with a discount, this admin "Internal Costing" card therefore
+  /// showed a HIGHER Gross/Net Profit here than what the overall P&L
+  /// reported for the same job (matches "profit and loss account
+  /// calculation sariya varala" - the two screens disagreeing is exactly
+  /// this symptom). Now uses the identical net-of-discount formula as the
+  /// ledger so a single job's profit reads the same everywhere.
   Future<ServiceProfitBreakdown> profitBreakdown(String serviceId) async {
     final service = await byId(serviceId);
     if (service == null) {
@@ -465,7 +476,7 @@ class ServiceRepository {
     final sparePartCost = usages.fold<double>(0, (s, u) => s + u.totalCost);
     final otherDirectCost = others.fold<double>(0, (s, o) => s + o.amount);
     return ServiceProfitBreakdown(
-      serviceRevenue: service.finalAmount,
+      serviceRevenue: service.finalAmount - service.discount,
       sparePartCost: sparePartCost,
       otherDirectCost: otherDirectCost,
       labourCost: service.labourCost,
