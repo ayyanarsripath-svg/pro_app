@@ -848,7 +848,13 @@ class _ServiceFormScreenState extends State<ServiceFormScreen> {
                 customerName: customer.name,
                 customerPhone: customer.phone!,
                 billNo: service.billNo,
-                mobileModel: _modelCtrl.text.trim().isNotEmpty ? _modelCtrl.text.trim() : _mobileNameCtrl.text.trim(),
+                // Passed separately (not merged) so {mobileName} and {model}
+                // can each be placed independently in the WhatsApp template
+                // (spec: "mobile name and model rendum customise panramathiri
+                // vendum") - the built-in wording still combines both when no
+                // custom template has been saved.
+                mobileName: _mobileNameCtrl.text.trim(),
+                mobileModel: _modelCtrl.text.trim(),
                 imei: _imeiCtrl.text.trim(),
                 complaint: _complaintCtrl.text.trim(),
                 technician: _technicianCtrl.text.trim(),

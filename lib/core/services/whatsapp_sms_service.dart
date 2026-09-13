@@ -25,6 +25,36 @@ class WhatsAppSmsService {
     return digits;
   }
 
+  /// Combines mobile name (brand, e.g. "VIVO") + model (e.g. "Y12") into one
+  /// display string, same convention as [ServiceJob.deviceLabel] - used only
+  /// for the three methods' built-in (non-customized) wording, so a shop
+  /// that has never opened WhatsApp Message Templates keeps seeing the full
+  /// device identity exactly as before. Returns '' when both are blank so
+  /// each caller can pick its own final fallback text ('-' or a Tamil word).
+  ///
+  /// BUG FIX (spec: "enakku mobile name and model rendum customise
+  /// panramathiri vendum" - the shop wants BOTH the mobile's name/brand AND
+  /// its model independently insertable in the WhatsApp templates): before
+  /// this fix, every one of the three message stages only ever had ONE
+  /// device-identifying value to work with - either a single merged
+  /// name-or-model string built by the caller (Received), or just the brand
+  /// with the model dropped entirely (Delivery), or the model preferred
+  /// over the brand with the brand dropped entirely (Ready) - so the
+  /// {mobileName} token could never represent "name" and "model" at the
+  /// same time, and there was no way to place them separately in a custom
+  /// template. Now [ServiceJob.mobileName] and [ServiceJob.model] are always
+  /// passed through separately, {mobileName} always means the brand/name and
+  /// the new {model} token always means the model, and this helper only
+  /// recombines them for the plain built-in wording used before any
+  /// customization is saved.
+  String _deviceLabel(String? name, String? model) {
+    final n = (name ?? '').trim();
+    final m = (model ?? '').trim();
+    if (n.isEmpty) return m;
+    if (m.isEmpty) return n;
+    return '$n $m';
+  }
+
   Future<bool> sendWhatsApp({required String phone, required String message}) async {
     final number = _sanitizePhone(phone);
     final url = 'https://wa.me/$number?text=${Uri.encodeComponent(message)}';
@@ -132,14 +162,17 @@ class WhatsAppSmsService {
   /// expectedDelivery) are kept so every call site stays unchanged.
   /// Uses the shop's own saved "Received" template (see
   /// WhatsAppTemplateScreen / SettingsRepository) when one has been
-  /// customized, substituting {customerName}/{mobileName}/{complaint}/
-  /// {amount}/{shopName}/{billNo}/{imei}/{technician}/{status}/
+  /// customized, substituting {customerName}/{mobileName}/{model}/
+  /// {complaint}/{amount}/{shopName}/{billNo}/{imei}/{technician}/{status}/
   /// {receivedDate}/{expectedDelivery} tokens - falls back to the original
-  /// built-in wording when no custom template is saved yet.
+  /// built-in wording when no custom template is saved yet. [mobileName]
+  /// and [mobileModel] are independent (see [ServiceJob.mobileName] /
+  /// [ServiceJob.model]) - the shop can use either or both tokens.
   Future<String> serviceIntimationMessage({
     required String customerName,
     required String customerPhone,
     String? billNo,
+    String? mobileName,
     String? mobileModel,
     String? imei,
     String? complaint,
@@ -159,7 +192,8 @@ class WhatsAppSmsService {
     if (custom != null && custom.trim().isNotEmpty) {
       var text = custom;
       text = text.replaceAll('{customerName}', customerName);
-      text = text.replaceAll('{mobileName}', v(mobileModel));
+      text = text.replaceAll('{mobileName}', v(mobileName));
+      text = text.replaceAll('{model}', v(mobileModel));
       text = text.replaceAll('{complaint}', v(complaint));
       text = text.replaceAll('{amount}', formatCurrency(total));
       text = text.replaceAll('{shopName}', resolvedShopName);
@@ -173,7 +207,7 @@ class WhatsAppSmsService {
     }
     return '📱 Mobile Service Received\n'
         'Dear Customer, உங்கள் mobile service-க்கு கொடுக்கப்பட்டுள்ளது.\n'
-        '🔧 Model: ${v(mobileModel)}\n'
+        '🔧 Model: ${v(_deviceLabel(mobileName, mobileModel))}\n'
         '📝 Problem: ${v(complaint)}\n'
         '💰 spare + service charge Amount: ${formatCurrency(total)}\n'
         '📞 Service முடிந்ததும் உங்களுக்கு WhatsApp மூலம் தகவல் தெரிவிக்கப்படும். நன்றி! 🙏\n'
@@ -187,14 +221,16 @@ class WhatsAppSmsService {
   /// simplify the WhatsApp text) - bill no / status stay in the app itself.
   /// Uses the shop's own saved "Delivery" template (see
   /// WhatsAppTemplateScreen / SettingsRepository) when one has been
-  /// customized, substituting {customerName}/{mobileName}/{amount}/
+  /// customized, substituting {customerName}/{mobileName}/{model}/{amount}/
   /// {paidAmount}/{billNo}/{shopName}/{complaint}/{imei}/{technician}/
   /// {deliveryPerson}/{balance} tokens - falls back to the original built-in
-  /// wording when no custom template is saved yet.
+  /// wording when no custom template is saved yet. [mobileName] and [model]
+  /// are independent - previously this method dropped the model entirely.
   Future<String> deliveryMessage({
     required String customerName,
     required String billNo,
     String? mobileName,
+    String? model,
     required double totalAmount,
     required double paidAmount,
     String? complaint,
@@ -210,7 +246,8 @@ class WhatsAppSmsService {
     if (custom != null && custom.trim().isNotEmpty) {
       var text = custom;
       text = text.replaceAll('{customerName}', customerName);
-      text = text.replaceAll('{mobileName}', mobileName ?? '-');
+      text = text.replaceAll('{mobileName}', v(mobileName));
+      text = text.replaceAll('{model}', v(model));
       text = text.replaceAll('{amount}', formatCurrency(totalAmount));
       text = text.replaceAll('{paidAmount}', formatCurrency(paidAmount));
       text = text.replaceAll('{billNo}', billNo);
@@ -224,7 +261,7 @@ class WhatsAppSmsService {
     }
     return '📱 Mobile Service Delivered\n'
         'Dear Customer, உங்கள் mobile service முடிந்து ஒப்படைக்கப்பட்டுள்ளது.\n'
-        '🔧 Model: ${mobileName ?? '-'}\n'
+        '🔧 Model: ${v(_deviceLabel(mobileName, model))}\n'
         '💰 Total Amount: ${formatCurrency(totalAmount)}\n'
         '✅ Paid: ${formatCurrency(paidAmount)}\n'
         '🙏 நன்றி! Thank you for choosing Professional Mobiles.\n'
@@ -237,13 +274,16 @@ class WhatsAppSmsService {
   /// _changeStatus), distinct from [deliveryMessage] which fires later,
   /// once the phone is actually handed back. Uses the shop's own saved
   /// template (see WhatsAppTemplateScreen / SettingsRepository) when one has
-  /// been customized, substituting {customerName}/{mobileName}/{amount}/
-  /// {billNo}/{shopName}/{complaint}/{imei}/{technician}/{balance} tokens -
-  /// falls back to the original built-in wording when no custom template is
-  /// saved yet.
+  /// been customized, substituting {customerName}/{mobileName}/{model}/
+  /// {amount}/{billNo}/{shopName}/{complaint}/{imei}/{technician}/{balance}
+  /// tokens - falls back to the original built-in wording when no custom
+  /// template is saved yet. [mobileName] and [model] are independent -
+  /// previously this method only accepted one merged value (the caller
+  /// preferred model over name, dropping the name entirely).
   Future<String> readyForDeliveryMessage({
     required String customerName,
     String? mobileName,
+    String? model,
     required double amount,
     required String billNo,
     String? complaint,
@@ -251,7 +291,7 @@ class WhatsAppSmsService {
     String? technician,
     double? balance,
   }) async {
-    final modelLabel = (mobileName ?? '').trim();
+    final combinedLabel = _deviceLabel(mobileName, model);
     String v(String? s) => (s == null || s.trim().isEmpty) ? '-' : s.trim();
     final shopName = (await _settingsRepo.get(SettingsRepository.shopName))?.trim();
     final resolvedShopName = (shopName == null || shopName.isEmpty) ? 'PROFESSIONAL MOBILES' : shopName;
@@ -259,7 +299,8 @@ class WhatsAppSmsService {
     if (custom != null && custom.trim().isNotEmpty) {
       var text = custom;
       text = text.replaceAll('{customerName}', customerName);
-      text = text.replaceAll('{mobileName}', modelLabel.isEmpty ? 'மொபைல்' : modelLabel);
+      text = text.replaceAll('{mobileName}', v(mobileName));
+      text = text.replaceAll('{model}', v(model));
       text = text.replaceAll('{amount}', formatCurrency(amount));
       text = text.replaceAll('{billNo}', billNo);
       text = text.replaceAll('{shopName}', resolvedShopName);
@@ -271,7 +312,7 @@ class WhatsAppSmsService {
     }
     return '📱 PROFESSIONAL MOBILES\n'
         'வணக்கம் $customerName அவர்களே! 👋\n'
-        'உங்களுடைய ${modelLabel.isEmpty ? 'மொபைல்' : modelLabel} மொபைல் service செய்து முடிக்கப்பட்டுவிட்டது. ✅\n'
+        'உங்களுடைய ${combinedLabel.isEmpty ? 'மொபைல்' : combinedLabel} மொபைல் service செய்து முடிக்கப்பட்டுவிட்டது. ✅\n'
         '📦 Mobile Delivery-ku Ready!\n'
         '💰 Service Amount: ${formatCurrency(amount)}\n'
         '🧾 Bill No: $billNo\n'

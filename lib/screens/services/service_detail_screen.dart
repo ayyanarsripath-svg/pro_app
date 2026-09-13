@@ -598,6 +598,7 @@ class _ServiceDetailScreenState extends State<ServiceDetailScreen> {
             customerName: _customer!.name,
             billNo: s.billNo,
             mobileName: s.mobileName,
+            model: s.model,
             totalAmount: freshTotal,
             paidAmount: freshPaid,
             complaint: s.complaint,
@@ -930,7 +931,12 @@ class _ServiceDetailScreenState extends State<ServiceDetailScreen> {
           final s = _service!;
           final msg = await _waService.readyForDeliveryMessage(
             customerName: _customer!.name,
-            mobileName: s.model?.trim().isNotEmpty == true ? s.model : s.mobileName,
+            // Passed separately (not merged) so {mobileName} and {model} can
+            // each be placed independently in the WhatsApp template - the
+            // built-in wording still combines both when no custom template
+            // has been saved.
+            mobileName: s.mobileName,
+            model: s.model,
             amount: s.billTotal,
             billNo: s.billNo,
             complaint: s.complaint,

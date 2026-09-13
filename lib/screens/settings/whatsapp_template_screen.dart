@@ -46,14 +46,15 @@ final List<_TemplateSpec> _specs = [
     subtitle: 'Sent automatically via WhatsApp the moment a new service job card is created.',
     defaultTemplate: '📱 Mobile Service Received\n'
         'Dear Customer, உங்கள் mobile service-க்கு கொடுக்கப்பட்டுள்ளது.\n'
-        '🔧 Model: {mobileName}\n'
+        '🔧 Model: {mobileName} {model}\n'
         '📝 Problem: {complaint}\n'
         '💰 spare + service charge Amount: {amount}\n'
         '📞 Service முடிந்ததும் உங்களுக்கு WhatsApp மூலம் தகவல் தெரிவிக்கப்படும். நன்றி! 🙏\n'
         '{shopName}',
     tokens: const [
       ('{customerName}', 'Customer name'),
-      ('{mobileName}', 'Mobile/model name'),
+      ('{mobileName}', 'Mobile name/brand'),
+      ('{model}', 'Mobile model'),
       ('{complaint}', 'Problem/complaint'),
       ('{amount}', 'Service + spare charge'),
       ('{shopName}', 'Shop name'),
@@ -66,7 +67,8 @@ final List<_TemplateSpec> _specs = [
     ],
     previewSample: const {
       '{customerName}': 'Ramesh',
-      '{mobileName}': 'Samsung A15',
+      '{mobileName}': 'Samsung',
+      '{model}': 'A15',
       '{complaint}': 'Display damage',
       '{amount}': '₹1,200',
       '{shopName}': 'PROFESSIONAL MOBILES',
@@ -85,7 +87,7 @@ final List<_TemplateSpec> _specs = [
     subtitle: 'Sent automatically via WhatsApp when a service job\'s status is changed to Ready for Delivery.',
     defaultTemplate: '📱 PROFESSIONAL MOBILES\n'
         'வணக்கம் {customerName} அவர்களே! 👋\n'
-        'உங்களுடைய {mobileName} மொபைல் service செய்து முடிக்கப்பட்டுவிட்டது. ✅\n'
+        'உங்களுடைய {mobileName} {model} மொபைல் service செய்து முடிக்கப்பட்டுவிட்டது. ✅\n'
         '📦 Mobile Delivery-ku Ready!\n'
         '💰 Service Amount: {amount}\n'
         '🧾 Bill No: {billNo}\n'
@@ -94,7 +96,8 @@ final List<_TemplateSpec> _specs = [
         '{shopName}',
     tokens: const [
       ('{customerName}', 'Customer name'),
-      ('{mobileName}', 'Mobile/model name'),
+      ('{mobileName}', 'Mobile name/brand'),
+      ('{model}', 'Mobile model'),
       ('{amount}', 'Service amount'),
       ('{billNo}', 'Bill number'),
       ('{shopName}', 'Shop name'),
@@ -105,7 +108,8 @@ final List<_TemplateSpec> _specs = [
     ],
     previewSample: const {
       '{customerName}': 'Ramesh',
-      '{mobileName}': 'Samsung A15',
+      '{mobileName}': 'Samsung',
+      '{model}': 'A15',
       '{amount}': '₹1,200',
       '{billNo}': 'A045',
       '{shopName}': 'PROFESSIONAL MOBILES',
@@ -122,14 +126,15 @@ final List<_TemplateSpec> _specs = [
     subtitle: 'Sent automatically via WhatsApp the moment a job is marked Delivered.',
     defaultTemplate: '📱 Mobile Service Delivered\n'
         'Dear Customer, உங்கள் mobile service முடிந்து ஒப்படைக்கப்பட்டுள்ளது.\n'
-        '🔧 Model: {mobileName}\n'
+        '🔧 Model: {mobileName} {model}\n'
         '💰 Total Amount: {amount}\n'
         '✅ Paid: {paidAmount}\n'
         '🙏 நன்றி! Thank you for choosing {shopName}.\n'
         '{shopName}',
     tokens: const [
       ('{customerName}', 'Customer name'),
-      ('{mobileName}', 'Mobile/model name'),
+      ('{mobileName}', 'Mobile name/brand'),
+      ('{model}', 'Mobile model'),
       ('{amount}', 'Total amount'),
       ('{paidAmount}', 'Amount paid'),
       ('{billNo}', 'Bill number'),
@@ -142,7 +147,8 @@ final List<_TemplateSpec> _specs = [
     ],
     previewSample: const {
       '{customerName}': 'Ramesh',
-      '{mobileName}': 'Samsung A15',
+      '{mobileName}': 'Samsung',
+      '{model}': 'A15',
       '{amount}': '₹1,200',
       '{paidAmount}': '₹1,200',
       '{billNo}': 'A045',
