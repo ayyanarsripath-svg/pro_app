@@ -9,6 +9,7 @@ import 'package:provider/provider.dart';
 import 'package:url_launcher/url_launcher.dart';
 
 import '../../core/repositories/customer_repository.dart';
+import '../../core/repositories/product_barcode_repository.dart';
 import '../../core/repositories/service_repository.dart';
 import '../../core/repositories/settings_repository.dart';
 import 'package:pdf/pdf.dart';
@@ -43,6 +44,7 @@ class _ServiceDetailScreenState extends State<ServiceDetailScreen> {
   final _serviceRepo = ServiceRepository();
   final _customerRepo = CustomerRepository();
   final _sparePartRepo = SparePartRepository();
+  final _barcodeRepo = ProductBarcodeRepository();
   final _settingsRepo = SettingsRepository();
   final _pdfService = PdfService();
   final _waService = WhatsAppSmsService();
@@ -827,12 +829,16 @@ class _ServiceDetailScreenState extends State<ServiceDetailScreen> {
     final code = await Navigator.push<String>(context, MaterialPageRoute(builder: (_) => const BarcodeScannerScreen(title: 'Scan Spare Part Barcode')));
     if (code == null || code.isEmpty || !mounted) return;
 
-    final part = await _sparePartRepo.findByBarcode(code);
+    // Resolves via product_barcodes FIRST so any of a spare part's
+    // individually-scanned unit barcodes (multi-scan Add Product flow)
+    // works here too, not just its legacy single barcode column.
+    final resolved = await _barcodeRepo.resolve(code);
     if (!mounted) return;
-    if (part == null) {
+    if (resolved == null || resolved.type != ProductTypes.sparePart) {
       ScaffoldMessenger.of(context).showSnackBar(SnackBar(content: Text('No spare part found with barcode "$code".')));
       return;
     }
+    final part = resolved.sparePart!;
     if (part.isOutOfStock) {
       ScaffoldMessenger.of(context).showSnackBar(SnackBar(content: Text('${part.name} is out of stock.')));
       return;

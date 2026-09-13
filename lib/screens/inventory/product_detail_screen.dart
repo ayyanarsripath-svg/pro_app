@@ -2,6 +2,7 @@ import 'package:flutter/material.dart';
 
 import '../../core/repositories/accessory_repository.dart';
 import '../../core/repositories/spare_part_repository.dart';
+import '../../core/repositories/product_barcode_repository.dart';
 import '../../core/services/barcode_generator.dart';
 import '../../core/theme/app_theme.dart';
 import '../../core/utils/formatters.dart';
@@ -40,6 +41,7 @@ class _StockRow {
 class _ProductDetailScreenState extends State<ProductDetailScreen> {
   final _sparePartRepo = SparePartRepository();
   final _accessoryRepo = AccessoryRepository();
+  final _barcodeRepo = ProductBarcodeRepository();
 
   bool _loading = true;
   SparePart? _part;
@@ -48,6 +50,7 @@ class _ProductDetailScreenState extends State<ProductDetailScreen> {
   double _totalPurchased = 0;
   double _totalSold = 0; // accessories: 'sale'; spare parts: service+2nd-hand usage
   double _totalOther = 0; // adjustments / returns, net
+  int _unitBarcodeCount = 0; // how many individually-scanned unit barcodes this product has (0 = old single-barcode/no-barcode product)
 
   bool get _isSparePart => widget.kind == ProductKind.sparePart;
   String? get _barcode => _isSparePart ? _part?.barcode : _accessory?.barcode;
@@ -62,6 +65,10 @@ class _ProductDetailScreenState extends State<ProductDetailScreen> {
 
   Future<void> _load() async {
     setState(() => _loading = true);
+    _unitBarcodeCount = await _barcodeRepo.countFor(
+      productType: _isSparePart ? ProductTypes.sparePart : ProductTypes.accessory,
+      productId: widget.id,
+    );
     if (_isSparePart) {
       final part = await _sparePartRepo.byId(widget.id);
       final txns = await _sparePartRepo.transactionsFor(widget.id);
@@ -173,6 +180,11 @@ class _ProductDetailScreenState extends State<ProductDetailScreen> {
             icon: Icons.qr_code_rounded,
             trailing: TextButton(onPressed: _assignBarcode, child: Text(_barcode == null ? 'Assign' : 'Change')),
             children: [
+              if (_unitBarcodeCount > 0)
+                Padding(
+                  padding: const EdgeInsets.only(bottom: 6),
+                  child: Text('Scanned Unit Barcodes: $_unitBarcodeCount', style: const TextStyle(fontWeight: FontWeight.w700, color: AppColors.primaryBlue)),
+                ),
               if (_barcode != null)
                 OutlinedButton.icon(
                   onPressed: () => Navigator.push(
@@ -256,9 +268,15 @@ class _ProductDetailScreenState extends State<ProductDetailScreen> {
     if (code == null || code.isEmpty) return;
     if (!mounted) return;
 
-    final available = _isSparePart
+    final legacyAvailable = _isSparePart
         ? await _sparePartRepo.isBarcodeAvailable(code, excludingId: widget.id) && await _accessoryRepo.isBarcodeAvailable(code)
         : await _accessoryRepo.isBarcodeAvailable(code, excludingId: widget.id) && await _sparePartRepo.isBarcodeAvailable(code);
+    final available = legacyAvailable &&
+        await _barcodeRepo.isAvailable(
+          code,
+          excludingProductType: _isSparePart ? ProductTypes.sparePart : ProductTypes.accessory,
+          excludingProductId: widget.id,
+        );
     if (!available) {
       if (mounted) {
         ScaffoldMessenger.of(context).showSnackBar(SnackBar(content: Text('Barcode "$code" is already used by another product.')));

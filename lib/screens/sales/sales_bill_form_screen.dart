@@ -2,6 +2,7 @@ import 'package:flutter/material.dart';
 
 import '../../core/repositories/accessory_repository.dart';
 import '../../core/repositories/customer_repository.dart';
+import '../../core/repositories/product_barcode_repository.dart';
 import '../../core/repositories/sales_repository.dart';
 import '../../core/utils/formatters.dart';
 import '../../models/accessory.dart';
@@ -25,6 +26,7 @@ class SalesBillFormScreen extends StatefulWidget {
 
 class _SalesBillFormScreenState extends State<SalesBillFormScreen> {
   final _accessoryRepo = AccessoryRepository();
+  final _barcodeRepo = ProductBarcodeRepository();
   final _customerRepo = CustomerRepository();
   final _salesRepo = SalesRepository();
 
@@ -163,12 +165,16 @@ class _SalesBillFormScreenState extends State<SalesBillFormScreen> {
     final code = await Navigator.push<String>(context, MaterialPageRoute(builder: (_) => const BarcodeScannerScreen(title: 'Scan Product Barcode')));
     if (code == null || code.isEmpty || !mounted) return;
 
-    final accessory = await _accessoryRepo.findByBarcode(code);
+    // Resolves via product_barcodes FIRST so any of an accessory's
+    // individually-scanned unit barcodes (multi-scan Add Product flow)
+    // works here too, not just its legacy single barcode column.
+    final resolved = await _barcodeRepo.resolve(code);
     if (!mounted) return;
-    if (accessory == null) {
+    if (resolved == null || resolved.type != ProductTypes.accessory) {
       ScaffoldMessenger.of(context).showSnackBar(SnackBar(content: Text('No accessory found with barcode "$code".')));
       return;
     }
+    final accessory = resolved.accessory!;
     if (accessory.isOutOfStock) {
       ScaffoldMessenger.of(context).showSnackBar(SnackBar(content: Text('${accessory.name} is out of stock.')));
       return;

@@ -2,13 +2,18 @@ import 'package:flutter/material.dart';
 import 'package:provider/provider.dart';
 
 import '../../core/repositories/accessory_repository.dart';
+import '../../core/repositories/product_barcode_repository.dart';
+import '../../core/repositories/product_draft_repository.dart';
 import '../../core/repositories/spare_part_repository.dart';
 import '../../core/services/auth_service.dart';
 import '../../core/services/barcode_generator.dart';
 import '../../core/theme/app_theme.dart';
+import '../../core/utils/voice_product_parser.dart';
 import '../../models/accessory.dart';
+import '../../widgets/multi_field_voice_button.dart';
 import '../../widgets/section_card.dart';
 import 'barcode_scanner_screen.dart';
+import 'multi_unit_scan_screen.dart';
 import 'product_detail_screen.dart';
 
 class AccessoriesScreen extends StatefulWidget {
@@ -21,6 +26,8 @@ class AccessoriesScreen extends StatefulWidget {
 class _AccessoriesScreenState extends State<AccessoriesScreen> {
   final _repo = AccessoryRepository();
   final _sparePartRepo = SparePartRepository();
+  final _barcodeRepo = ProductBarcodeRepository();
+  final _draftRepo = ProductDraftRepository();
   final _searchCtrl = TextEditingController();
   List<Accessory> _items = [];
   bool _loading = true;
@@ -161,17 +168,23 @@ class _AccessoriesScreenState extends State<AccessoriesScreen> {
     final code = await Navigator.push<String>(context, MaterialPageRoute(builder: (_) => const BarcodeScannerScreen(title: 'Scan to Find Product')));
     if (code == null || code.isEmpty || !mounted) return;
 
-    final accessory = await _repo.findByBarcode(code);
-    if (accessory != null) {
+    // Resolves via product_barcodes FIRST (any individually-scanned unit
+    // barcode from the multi-scan Add Product flow) before falling back to
+    // each product's own legacy single barcode column - see
+    // ProductBarcodeRepository.resolve's doc comment.
+    final resolved = await _barcodeRepo.resolve(code);
+    if (resolved != null) {
       if (!mounted) return;
-      await Navigator.push(context, MaterialPageRoute(builder: (_) => ProductDetailScreen(kind: ProductKind.accessory, id: accessory.id)));
+      await Navigator.push(
+        context,
+        MaterialPageRoute(
+          builder: (_) => ProductDetailScreen(
+            kind: resolved.type == ProductTypes.sparePart ? ProductKind.sparePart : ProductKind.accessory,
+            id: resolved.id,
+          ),
+        ),
+      );
       _load();
-      return;
-    }
-    final part = await _sparePartRepo.findByBarcode(code);
-    if (part != null) {
-      if (!mounted) return;
-      await Navigator.push(context, MaterialPageRoute(builder: (_) => ProductDetailScreen(kind: ProductKind.sparePart, id: part.id)));
       return;
     }
 
@@ -203,8 +216,10 @@ class _AccessoriesScreenState extends State<AccessoriesScreen> {
           title: 'Quick Restock - Scan Each Item',
           onScan: (code) => counts[code] = (counts[code] ?? 0) + 1,
           describeCode: (code) async {
-            final acc = await _repo.findByBarcode(code);
-            return acc == null ? null : '${acc.name} (stock: ${acc.currentStock.toStringAsFixed(0)})';
+            final resolved = await _barcodeRepo.resolve(code);
+            if (resolved == null || resolved.type != ProductTypes.accessory) return null;
+            final acc = resolved.accessory!;
+            return '${acc.name} (stock: ${acc.currentStock.toStringAsFixed(0)})';
           },
         ),
       ),
@@ -214,11 +229,12 @@ class _AccessoriesScreenState extends State<AccessoriesScreen> {
     int applied = 0;
     final notFound = <String>[];
     for (final entry in counts.entries) {
-      final acc = await _repo.findByBarcode(entry.key);
-      if (acc == null) {
+      final resolved = await _barcodeRepo.resolve(entry.key);
+      if (resolved == null || resolved.type != ProductTypes.accessory) {
         notFound.add(entry.key);
         continue;
       }
+      final acc = resolved.accessory!;
       await _repo.recordPurchase(
         accessoryId: acc.id,
         quantity: entry.value.toDouble(),
@@ -237,7 +253,14 @@ class _AccessoriesScreenState extends State<AccessoriesScreen> {
   Future<bool> _barcodeAvailable(String barcode, {String? excludingId}) async {
     final okHere = await _repo.isBarcodeAvailable(barcode, excludingId: excludingId);
     if (!okHere) return false;
-    return _sparePartRepo.isBarcodeAvailable(barcode);
+    final okThere = await _sparePartRepo.isBarcodeAvailable(barcode);
+    if (!okThere) return false;
+    // Also checks every individually-scanned unit barcode from the
+    // multi-scan Add Product flow (product_barcodes), not just the two
+    // legacy single-barcode columns above. excludingId (when editing) may
+    // legitimately already own this exact barcode as one of its own
+    // multi-scanned unit codes.
+    return _barcodeRepo.isAvailable(barcode, excludingProductType: ProductTypes.accessory, excludingProductId: excludingId);
   }
 
   void _showBarcodeTaken(String barcode) {
@@ -273,19 +296,126 @@ class _AccessoriesScreenState extends State<AccessoriesScreen> {
     );
   }
 
+  /// Applies whatever VoiceProductParser recognized straight onto the
+  /// dialog's own TextEditingControllers - see SparePartsScreen's identical
+  /// helper for why no setState is needed here.
+  void _fillFromVoice(
+    String heard, {
+    required TextEditingController nameCtrl,
+    TextEditingController? quantityCtrl,
+    TextEditingController? purchaseCtrl,
+    TextEditingController? sellCtrl,
+    TextEditingController? thresholdCtrl,
+  }) {
+    final f = VoiceProductParser.parse(heard);
+    if (f.name != null) nameCtrl.text = f.name!;
+    if (f.quantity != null) quantityCtrl?.text = f.quantity!.toStringAsFixed(f.quantity! % 1 == 0 ? 0 : 2);
+    if (f.purchasePrice != null) purchaseCtrl?.text = f.purchasePrice!.toStringAsFixed(0);
+    if (f.sellingPrice != null) sellCtrl?.text = f.sellingPrice!.toStringAsFixed(0);
+    if (f.threshold != null) thresholdCtrl?.text = f.threshold!.toStringAsFixed(0);
+    if (mounted) {
+      ScaffoldMessenger.of(context)
+          .showSnackBar(SnackBar(content: Text('Heard: "$heard" - please check the fields below before saving.')));
+    }
+  }
+
+  Future<bool?> _askResumeDraft(dynamic draft) async {
+    final name = (draft.details['name'] as String?)?.trim();
+    return showDialog<bool>(
+      context: context,
+      barrierDismissible: false,
+      builder: (context) => AlertDialog(
+        title: const Text('Resume Unfinished Entry?'),
+        content: Text(
+          'You have an unfinished Accessory entry "${(name == null || name.isEmpty) ? '(unnamed)' : name}" '
+          'with ${(draft.barcodes as List).length} barcode(s) already scanned. Resume it, or start a new one instead?',
+        ),
+        actions: [
+          TextButton(onPressed: () => Navigator.pop(context, false), child: const Text('Start New')),
+          ElevatedButton(onPressed: () => Navigator.pop(context, true), child: const Text('Resume')),
+        ],
+      ),
+    );
+  }
+
+  /// Step 2 of the multi-scan Add Product flow - see
+  /// MultiUnitScanScreen/SparePartsScreen._openMultiScan for the full
+  /// resumable-draft design; this is the accessory-side mirror.
+  Future<void> _openMultiScan({required Map<String, String> details, required List<String> initialBarcodes}) async {
+    await _draftRepo.save(productType: ProductTypes.accessory, details: details, barcodes: initialBarcodes);
+    if (!mounted) return;
+    final saved = await Navigator.push<bool>(
+      context,
+      MaterialPageRoute(
+        builder: (_) => MultiUnitScanScreen(
+          productType: ProductTypes.accessory,
+          details: details,
+          initialBarcodes: initialBarcodes,
+          title: 'Scan Units - ${details['name'] ?? ''}',
+          onFinalize: (barcodes) async {
+            final acc = await _repo.create(
+              name: details['name'] ?? '',
+              category: details['category'],
+              brand: details['brand'],
+              sellingPrice: double.tryParse(details['sellingPrice'] ?? '') ?? 0,
+              lowStockThreshold: double.tryParse(details['threshold'] ?? '') ?? 3,
+              barcode: barcodes.isNotEmpty ? barcodes.first : null,
+            );
+            await _repo.recordPurchase(
+              accessoryId: acc.id,
+              quantity: barcodes.length.toDouble(),
+              unitCost: double.tryParse(details['purchaseCost'] ?? '') ?? 0,
+              date: DateTime.now(),
+            );
+            await _barcodeRepo.attachMany(productType: ProductTypes.accessory, productId: acc.id, barcodes: barcodes);
+          },
+        ),
+      ),
+    );
+    if (saved == true) _load();
+  }
+
   Future<void> _addAccessory({String? presetBarcode}) async {
+    if (presetBarcode == null) {
+      final existingDraft = await _draftRepo.load(ProductTypes.accessory);
+      if (existingDraft != null) {
+        final resume = await _askResumeDraft(existingDraft);
+        if (!mounted) return;
+        if (resume == true) {
+          await _openMultiScan(details: existingDraft.details, initialBarcodes: existingDraft.barcodes);
+          return;
+        }
+        await _draftRepo.clear(ProductTypes.accessory);
+      }
+    }
+
     final nameCtrl = TextEditingController();
     final categoryCtrl = TextEditingController();
     final brandCtrl = TextEditingController();
+    final quantityCtrl = TextEditingController(text: '0');
     final purchaseCtrl = TextEditingController();
     final sellCtrl = TextEditingController();
     final thresholdCtrl = TextEditingController(text: '3');
     final barcodeCtrl = TextEditingController(text: presetBarcode ?? '');
 
-    final ok = await showDialog<bool>(
+    final result = await showDialog<String>(
       context: context,
       builder: (context) => AlertDialog(
-        title: const Text('Add Accessory'),
+        title: Row(
+          children: [
+            const Expanded(child: Text('Add Accessory')),
+            MultiFieldVoiceButton(
+              onHeard: (heard) => _fillFromVoice(
+                heard,
+                nameCtrl: nameCtrl,
+                quantityCtrl: quantityCtrl,
+                purchaseCtrl: purchaseCtrl,
+                sellCtrl: sellCtrl,
+                thresholdCtrl: thresholdCtrl,
+              ),
+            ),
+          ],
+        ),
         content: SingleChildScrollView(
           child: Column(
             mainAxisSize: MainAxisSize.min,
@@ -296,6 +426,8 @@ class _AccessoriesScreenState extends State<AccessoriesScreen> {
               const SizedBox(height: 10),
               TextField(controller: brandCtrl, decoration: const InputDecoration(labelText: 'Brand')),
               const SizedBox(height: 10),
+              TextField(controller: quantityCtrl, keyboardType: TextInputType.number, decoration: const InputDecoration(labelText: 'Quantity')),
+              const SizedBox(height: 10),
               TextField(controller: purchaseCtrl, keyboardType: TextInputType.number, decoration: const InputDecoration(labelText: 'Purchase Price (₹)')),
               const SizedBox(height: 10),
               TextField(controller: sellCtrl, keyboardType: TextInputType.number, decoration: const InputDecoration(labelText: 'Selling Price (₹)')),
@@ -303,23 +435,51 @@ class _AccessoriesScreenState extends State<AccessoriesScreen> {
               TextField(controller: thresholdCtrl, keyboardType: TextInputType.number, decoration: const InputDecoration(labelText: 'Low Stock Threshold')),
               const SizedBox(height: 10),
               _barcodeField(barcodeCtrl, nameCtrl),
+              const SizedBox(height: 6),
+              Align(
+                alignment: Alignment.centerLeft,
+                child: TextButton.icon(
+                  onPressed: () {
+                    if (nameCtrl.text.trim().isEmpty) {
+                      ScaffoldMessenger.of(context).showSnackBar(const SnackBar(content: Text('Enter a Name first.')));
+                      return;
+                    }
+                    Navigator.pop(context, 'scan_multi');
+                  },
+                  icon: const Icon(Icons.qr_code_2_rounded, size: 18),
+                  label: const Text('Scan Barcode for Each Unit (many pcs, many codes)'),
+                ),
+              ),
             ],
           ),
         ),
         actions: [
-          TextButton(onPressed: () => Navigator.pop(context, false), child: const Text('Cancel')),
-          ElevatedButton(onPressed: () => Navigator.pop(context, true), child: const Text('Save')),
+          TextButton(onPressed: () => Navigator.pop(context, null), child: const Text('Cancel')),
+          ElevatedButton(onPressed: () => Navigator.pop(context, 'save'), child: const Text('Save')),
         ],
       ),
     );
 
-    if (ok == true && nameCtrl.text.trim().isNotEmpty) {
+    if (result == 'scan_multi') {
+      final details = <String, String>{
+        'name': nameCtrl.text.trim(),
+        'category': categoryCtrl.text.trim(),
+        'brand': brandCtrl.text.trim(),
+        'threshold': thresholdCtrl.text.trim(),
+        'purchaseCost': purchaseCtrl.text.trim(),
+        'sellingPrice': sellCtrl.text.trim(),
+      };
+      await _openMultiScan(details: details, initialBarcodes: const []);
+      return;
+    }
+
+    if (result == 'save' && nameCtrl.text.trim().isNotEmpty) {
       final barcode = barcodeCtrl.text.trim();
       if (barcode.isNotEmpty && !await _barcodeAvailable(barcode)) {
         if (mounted) _showBarcodeTaken(barcode);
         return;
       }
-      await _repo.create(
+      final acc = await _repo.create(
         name: nameCtrl.text.trim(),
         category: categoryCtrl.text.trim(),
         brand: brandCtrl.text.trim(),
@@ -328,6 +488,15 @@ class _AccessoriesScreenState extends State<AccessoriesScreen> {
         lowStockThreshold: double.tryParse(thresholdCtrl.text.trim()) ?? 3,
         barcode: barcode.isEmpty ? null : barcode,
       );
+      final qty = double.tryParse(quantityCtrl.text.trim()) ?? 0;
+      if (qty > 0) {
+        await _repo.recordPurchase(
+          accessoryId: acc.id,
+          quantity: qty,
+          unitCost: double.tryParse(purchaseCtrl.text.trim()) ?? 0,
+          date: DateTime.now(),
+        );
+      }
       _load();
     }
   }
